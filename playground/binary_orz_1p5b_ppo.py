@@ -78,8 +78,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/math500.json",
-            "data/eval_data/gpqa_diamond.json",
-            # "data/eval_data/strategyqa_test.json",
+            # "data/eval_data/gpqa_diamond.json",
+            "data/eval_data/strategyqa_test.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Optional
@@ -212,20 +213,62 @@ class BasePPOExp(BaseExp):
         _validate_args(self.cfg)
 
         # initialize the ray cluster
+        _temp_dir = os.environ.get("RAY_TEMP_DIR", None)
+        print(f"Using ray _temp_dir: {_temp_dir}")
+
+        use_ib0 = os.environ.get("USE_IB0", "").lower() == "true"
+        env_vars = {
+            "NCCL_DEBUG": "WARN",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+        }
+        if use_ib0:
+            env_vars.update({
+                "NCCL_NET_GDR_LEVEL": "2",
+                "NCCL_SOCKET_IFNAME": "ib0",
+                "NCCL_IB_DISABLE": "0",
+                # "NCCL_IB_HCA": "mlx5_3",
+            })
+            print(f"Using ib0 for ray")
+
+        ray_port = os.environ.get("RAY_PORT")
+        if ray_port:
+            address = f"localhost:{ray_port}"
+            print(f"Connecting to Ray using custom port: {address}")
+        else:
+            address = "auto"
+
         ray.init(
             runtime_env=RuntimeEnv(
-                env_vars={
-                    "NCCL_DEBUG": "WARN",
-                    "NCCL_PXN_DISABLE": "1",
-                    # "NCCL_ALGO": "^Ring",
-                    "NCCL_NET_OVERHEAD": "1000000",
-                    "CUDA_LAUNCH_BLOCKING": "1",
-                }
-            )
+                address=address,
+                env_vars=env_vars,
+            ),
+            _temp_dir=_temp_dir,
         )
 
-        # build the models
         await self.trainer.build_models(self.PolicyRayActor, self.CriticRayActor, self.RefRayActor, self.RewardRayActor)
 
         # initialize the trainer and enter the training loop
         await self.trainer.train()
+
+    # async def run(self):
+    #     # validate the arguments
+    #     _validate_args(self.cfg)
+    #
+    #     # initialize the ray cluster
+    #     ray.init(
+    #         runtime_env=RuntimeEnv(
+    #             env_vars={
+    #                 "NCCL_DEBUG": "WARN",
+    #                 "NCCL_PXN_DISABLE": "1",
+    #                 # "NCCL_ALGO": "^Ring",
+    #                 "NCCL_NET_OVERHEAD": "1000000",
+    #                 "CUDA_LAUNCH_BLOCKING": "1",
+    #             }
+    #         )
+    #     )
+    #
+    #     # build the models
+    #     await self.trainer.build_models(self.PolicyRayActor, self.CriticRayActor, self.RefRayActor, self.RewardRayActor)
+    #
+    #     # initialize the trainer and enter the training loop
+    #     await self.trainer.train()

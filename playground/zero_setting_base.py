@@ -4,6 +4,9 @@ from jinja2 import Template
 
 from orz.ppo import PromptDataset
 
+# ToDo: maybe to add later to the prompt to get better performance on binary datasets
+BINARY_SYSTEM_PROMPT = "If the question can be answered with 'Yes' or 'No', be concise and reply 'Yes' or 'No' " \
+                "followed by a brief justification.\n\n"
 
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
