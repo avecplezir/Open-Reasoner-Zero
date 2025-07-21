@@ -24,6 +24,7 @@ RUN pip install loguru tqdm ninja tensorboard \
         omegaconf black==22.8.0 mypy-extensions pathspec tensorboardX nvitop antlr4-python3-runtime==4.11.0 \
         ray==2.40.0 deepspeed==0.16.0 vllm==0.6.5 peft
 
+
 RUN apt update && apt install --fix-broken && apt install -y default-jre-headless openjdk-8-jdk
 RUN pip install git+https://github.com/facebookresearch/hydra.git
 

@@ -67,19 +67,19 @@ class PPOExpConfig(BasePPOExpConfig):
     ckpt_path: str = f"orz_ckpt/{file_name}"
     save_path: str = f"orz_ckpt/{file_name}"
     tensorboard_log_dir: str = f"orz_logs/{file_name}"
-    e_name = "4gpu-v2"
+    e_name = "binary-4gpu"
     exp_name: str = f"{file_name}_{e_name}"
 
     # MathTrain dataset and Math500 eval dataset
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/orz_math_57k_collected.json",
+        "data/strategyqa.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/math500.json",
-            "data/eval_data/aime2024.json",
             "data/eval_data/gpqa_diamond.json",
+            # "data/eval_data/strategyqa_test.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])

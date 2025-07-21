@@ -217,7 +217,7 @@ class BasePPOExp(BaseExp):
                 env_vars={
                     "NCCL_DEBUG": "WARN",
                     "NCCL_PXN_DISABLE": "1",
-                    "NCCL_ALGO": "^Ring",
+                    # "NCCL_ALGO": "^Ring",
                     "NCCL_NET_OVERHEAD": "1000000",
                     "CUDA_LAUNCH_BLOCKING": "1",
                 }

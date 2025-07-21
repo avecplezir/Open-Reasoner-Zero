@@ -71,6 +71,7 @@ def get_eval_ds_config(
 ):
     zero_opt_dict = {
         "stage": stage,
+        # "log_trace_cache_warnings": False,
         "stage3_param_persistence_threshold": "auto",
         "offload_param": {
             "device": "cpu" if offload else "none",

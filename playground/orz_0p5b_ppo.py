@@ -11,6 +11,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
+import wandb, omegaconf
+from dataclasses import asdict
 
 from loguru import logger
 from omegaconf.listconfig import ListConfig
@@ -29,7 +31,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_orm_score: bool = False
 
     # Conditional settings with production values first
-    total_num_nodes: int = 8
+    total_num_nodes: int = 4
 
     # resource related settings
     ref_num_nodes: int = total_num_nodes
@@ -47,12 +49,14 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = "Qwen/Qwen2.5-0.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-0.5B-Instruct" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     ckpt_path: str = f"orz_ckpt/{file_name}"
     save_path: str = f"orz_ckpt/{file_name}"
     tensorboard_log_dir: str = f"orz_logs/{file_name}"
+    e_name = "4gpu-instruct"
+    exp_name: str = f"{file_name}_{e_name}"
 
     # MathTrain dataset and Math500 eval dataset
     # data related settings
@@ -108,11 +112,12 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = False
 
-    gpu_memory_utilization: float = 0.75
+    gpu_memory_utilization: float = 0.4
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
     lambd: float = 1.0
+
 
 
 if __name__ == "__main__":
@@ -124,4 +129,15 @@ if __name__ == "__main__":
         os.makedirs(exp.cfg.tensorboard_log_dir, exist_ok=True)
     if not os.path.exists(exp.cfg.ckpt_path):
         os.makedirs(exp.cfg.ckpt_path, exist_ok=True)
+
+    run = wandb.init(
+        project="open-reasoner-zero",
+        name=exp.cfg.exp_name,
+        sync_tensorboard=True,
+        dir=exp.cfg.tensorboard_log_dir,
+        config=asdict(exp.cfg),
+    )
+
     asyncio.run(exp.run())
+
+    run.finish()

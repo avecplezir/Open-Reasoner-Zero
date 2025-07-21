@@ -47,7 +47,7 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = "Qwen/Qwen2.5-0.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-0.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     ckpt_path: str = f"orz_ckpt/{file_name}"
@@ -78,9 +78,9 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = True
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128
+    rollout_batch_size: int = 64
     n_samples_per_prompt: int = 64
-    micro_rollout_batch_size: int = 128
+    micro_rollout_batch_size: int = 64
 
     policy_update_steps: int = 1
     critic_update_steps: int = 12
@@ -108,7 +108,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = False
 
-    gpu_memory_utilization: float = 0.75
+    gpu_memory_utilization: float = 0.75 #0.75
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
