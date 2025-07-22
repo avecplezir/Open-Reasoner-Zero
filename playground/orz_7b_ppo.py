@@ -27,6 +27,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Tuple
 import numpy as np
 import ray
 import torch
+import wandb
 from loguru import logger
 from omegaconf.listconfig import ListConfig
 from typing_extensions import override
@@ -228,6 +229,29 @@ class CustomRewardTrainer(RayPPOTrainer):
             f"prompts: {prompts[0]}\n\noutputs: {outputs[0]['response']}\n\nfinal_answer: {outputs[0]['final_answer']}\n\nis_correct: {outputs[0]['iscorrect']}\n\nstop_reason: {outputs[0]['stop_reason']}\n\nresponse_token: {len(output_tokens[0])}",
             self.global_step,
         )
+
+        # Log reasoning chains, generated answers, and true answers to wandb
+        if wandb.run is not None:
+            # Log sample reasoning chains and answers
+            reasoning_examples = []
+            for i in range(min(5, len(outputs))):  # Log up to 5 examples
+                true_answer = extras[i].get("answer", "N/A") if i < len(extras) else "N/A"
+                reasoning_examples.append({
+                    "prompt": prompts[i],
+                    "reasoning_chain": outputs[i]['response'],
+                    "generated_answer": outputs[i]['final_answer'], 
+                    "true_answer": true_answer,
+                    "is_correct": outputs[i]['iscorrect'],
+                    "stop_reason": outputs[i]['stop_reason']
+                })
+            
+            wandb.log({
+                "step": self.global_step,
+                "reasoning_examples": wandb.Table(
+                    columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct", "stop_reason"],
+                    data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"], ex["stop_reason"]] for ex in reasoning_examples]
+                )
+            })
         for idx in range(len(outputs)):
             prompt, output, out_token = prompts[idx], outputs[idx], output_tokens[idx]
             rep_score, reflection_pattern_score = repeat_scores[idx], reflection_pattern_scores[idx]
@@ -497,6 +521,27 @@ class CustomRewardTrainer(RayPPOTrainer):
         logger.info(logging_str)
         for k, v in log_dict.items():
             self.writer.add_scalar(f"evals/{k}", v, self.global_step)
+
+        # Log evaluation results to wandb
+        if wandb.run is not None:
+            # Log evaluation examples
+            eval_examples = []
+            for i, item in enumerate(output_for_save[:5]):  # Log up to 5 examples
+                eval_examples.append({
+                    "prompt": item["prompt"],
+                    "reasoning_chain": item["output"],
+                    "generated_answer": item["final_answer"],
+                    "true_answer": item["answer"], 
+                    "is_correct": item["iscorrect"]
+                })
+            
+            wandb.log({
+                "step": self.global_step,
+                "eval_reasoning_examples": wandb.Table(
+                    columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct"],
+                    data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"]] for ex in eval_examples]
+                )
+            })
 
 
 class PPOExp(BasePPOExp):

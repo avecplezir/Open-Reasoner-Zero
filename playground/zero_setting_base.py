@@ -5,8 +5,13 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 # ToDo: maybe to add later to the prompt to get better performance on binary datasets
-BINARY_SYSTEM_PROMPT = "If the question can be answered with 'Yes' or 'No', be concise and reply 'Yes' or 'No' " \
-                "followed by a brief justification.\n\n"
+# BINARY_SYSTEM_PROMPT = "If the question can be answered with 'Yes' or 'No', be concise and reply 'Yes' or 'No' followed by a justification."
+
+PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'Yes' or 'No', your final answer must be \\boxed{Yes} or \\boxed{No}.
+This is the problem:
+{{prompt}}
+"""
 
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
@@ -18,11 +23,13 @@ class CustomDataset(PromptDataset):
 The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
 Assistant: <think>\
 """
-        prompt_instruction_template_jinja = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
-This is the problem:
-{{prompt}}
-"""
+#         prompt_instruction_template_jinja = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
+# This is the problem:
+# {{prompt}}
+# """
+
+        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
         assert len(dialogue) == 2, "dialogue must contain 2 items"
 
@@ -50,10 +57,15 @@ class EvalCustomDataset(PromptDataset):
 The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
 Assistant: <think>\
 """
+#         prompt_instruction_template_jinja = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
+# This is the problem:
+# {{prompt}}
         prompt_instruction_template_jinja = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'Yes' or 'No', your final answer must be \\boxed{Yes} or \\boxed{No}. 
 This is the problem:
 {{prompt}}
+
 """
         assert isinstance(dialogue, dict), "dialogue must be a dict"
         assert "prompt" in dialogue, "dialogue must contain prompt"

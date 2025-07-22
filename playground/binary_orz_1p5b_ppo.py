@@ -64,11 +64,11 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    ckpt_path: str = f"orz_ckpt/{file_name}"
-    save_path: str = f"orz_ckpt/{file_name}"
-    tensorboard_log_dir: str = f"orz_logs/{file_name}"
-    e_name = "binary-4gpu"
+    e_name = "binary-4gpu-v5"
     exp_name: str = f"{file_name}_{e_name}"
+    ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
+    save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
+    tensorboard_log_dir: str = f"/home/a/anokhin/links/scratch/orz_logs/{exp_name}"
 
     # MathTrain dataset and Math500 eval dataset
     # data related settings
@@ -77,7 +77,7 @@ class PPOExpConfig(BasePPOExpConfig):
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/math500.json",
+            # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
         ]
