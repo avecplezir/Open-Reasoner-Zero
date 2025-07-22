@@ -6,9 +6,10 @@ from orz.ppo import PromptDataset
 
 # ToDo: maybe to add later to the prompt to get better performance on binary datasets
 # BINARY_SYSTEM_PROMPT = "If the question can be answered with 'Yes' or 'No', be concise and reply 'Yes' or 'No' followed by a justification."
+# And your final answer will be extracted automatically by the \\boxed{} tag.
 
 PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'Yes' or 'No', your final answer must be \\boxed{Yes} or \\boxed{No}.
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
 This is the problem:
 {{prompt}}
 """

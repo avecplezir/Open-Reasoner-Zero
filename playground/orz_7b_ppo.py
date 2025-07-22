@@ -244,7 +244,7 @@ class CustomRewardTrainer(RayPPOTrainer):
                     "is_correct": outputs[i]['iscorrect'],
                     "stop_reason": outputs[i]['stop_reason']
                 })
-            
+
             wandb.log({
                 "step": self.global_step,
                 "reasoning_examples": wandb.Table(
@@ -376,7 +376,8 @@ class CustomRewardTrainer(RayPPOTrainer):
         @ray.remote(num_cpus=1)
         def extract_final_answers_batch(responses: List[str]) -> List[str]:
             # pattern = re.compile(r"(\\boxed{.*})")
-            pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            # pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             results = []
             for response in responses:
                 matches = re.findall(pattern, response)
@@ -400,6 +401,10 @@ class CustomRewardTrainer(RayPPOTrainer):
         global executor
         equal_tasks = []
         for extra, final_answer in zip(extras, final_answers):
+            # logger.info('extra["answer"]' + str(extra["answer"]))
+            # logger.info('final_answer' + str(final_answer))
+            # logger.info('solution2answer(extra["answer"])' + str(solution2answer(extra["answer"])))
+            # logger.info('solution2answer(final_answer)' + str(solution2answer(final_answer)))
             equal_tasks.append(is_equal(solution2answer(extra["answer"]), solution2answer(final_answer), executor))
         equal_results = await asyncio.gather(*equal_tasks)
 
@@ -455,7 +460,8 @@ class CustomRewardTrainer(RayPPOTrainer):
             outputs = sum(outputs, [])
 
             final_answers = []
-            pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            # pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             for output in outputs:
                 matches = re.findall(pattern, output.outputs[0].text)
                 if len(matches) > 0:
@@ -468,6 +474,12 @@ class CustomRewardTrainer(RayPPOTrainer):
             ):
                 label = solution2answer(answer)
                 prefix_response = solution2answer(final_answer)
+
+                # logger.info('answer' + str(answer))
+                # logger.info('final_answer' + str(final_answer))
+                # logger.info('label' + str(label))
+                # logger.info('prefix_response' + str(prefix_response))
+
                 iscorrect = await is_equal(label, prefix_response, executor)
                 output_for_save.append(
                     dict(

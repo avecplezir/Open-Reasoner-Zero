@@ -419,6 +419,7 @@ async def is_equal(str1, str2, executor, math_mode="legacy"):
 
 
 def solution2answer(solution: str, math_mode="eval_peeking") -> str:
+    solution = solution.lower()
     answer = solution
     if math_mode == "eval_peeking":
         answer = get_answer_str(solution)
