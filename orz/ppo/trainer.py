@@ -312,9 +312,28 @@ class RayPPOTrainer:
 
         self.writer.flush()
         
-        # 2.1.1 log teacher to wandb
+        # 2.1.1 log teacher to wandb using Table
         if wandb.run is not None:
-            wandb.log({"teacher_prompt": teacher_vis}, step=self.global_step)
+            # Extract teacher prompt and reasoning parts
+            if "Assistant: <think>" in teacher_vis:
+                teacher_prompt_part = teacher_vis.split("Assistant: <think>")[0]
+                teacher_reasoning_part = teacher_vis.split("Assistant: <think>")[1]
+            else:
+                teacher_prompt_part = teacher_vis
+                teacher_reasoning_part = ""
+            
+            # # Create wandb table for teacher data
+            # teacher_table = wandb.Table(columns=["step", "teacher_prompt", "teacher_reasoning"])
+            # teacher_table.add_data(self.global_step, teacher_prompt_part, teacher_reasoning_part)
+            #
+            # wandb.log({"teacher_data": teacher_table}, step=self.global_step)
+
+            wandb.log({
+                "step": self.global_step,
+                "teacher_examples": wandb.Table(
+                    columns=["teacher_prompt", "teacher_reasoning"],
+                    data=[[teacher_prompt_part, teacher_reasoning_part]])
+            })
 
         # 3. calculate advantages and returns / along with tensorboard logging
         avg_rewards = 0
