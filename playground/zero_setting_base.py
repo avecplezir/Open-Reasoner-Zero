@@ -43,9 +43,44 @@ Assistant: <think>\
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
         prompt = prompt_template.render(bos_token=bos_token, prompt=prompt_instruction)
 
-        extra = {"answer": dialogue[1]["ground_truth"]["value"]}
+        # Create teacher prompt with ground truth answer
+        teacher_prompt = self.create_teacher_prompt(dialogue)
+        
+        extra = {
+            "answer": dialogue[1]["ground_truth"]["value"],
+            "teacher_prompt": teacher_prompt,
+            "dialogue": dialogue
+        }
 
         return prompt, extra
+
+    def create_teacher_prompt(self, dialogue: List):
+        """Create teacher prompt with ground truth answer included."""
+        teacher_prompt_template_jinja = """\
+{{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
+The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. The final answer is {{answer}}. User: {{prompt}}
+Assistant: <think>\
+"""
+        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
+
+        assert len(dialogue) == 2, "dialogue must contain 2 items"
+
+        prompt_instruction_template = Template(prompt_instruction_template_jinja)
+        prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
+        teacher_prompt_template = Template(teacher_prompt_template_jinja)
+        if self.tokenizer.bos_token_id is None:
+            bos_token = ""
+        else:
+            bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+        
+        answer = dialogue[1]["ground_truth"]["value"]
+        teacher_prompt = teacher_prompt_template.render(
+            bos_token=bos_token, 
+            prompt=prompt_instruction,
+            answer=answer
+        )
+
+        return teacher_prompt
 
 
 class EvalCustomDataset(PromptDataset):

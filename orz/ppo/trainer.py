@@ -198,13 +198,15 @@ class RayPPOTrainer:
     @torch.no_grad()
     async def make_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]], **generate_kwargs):
         experiences = []
-        all_prompts = sum([[prompt[0]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
+        all_student_prompts = sum([[prompt[0]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
+        all_teacher_prompts = sum([[prompt[1]["teacher_prompt"]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
         all_extras = sum([[prompt[1]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
-        # shuffle all_prompts and all_extras together
-        indices = list(range(len(all_prompts)))
+        # shuffle all prompts and extras together
+        indices = list(range(len(all_student_prompts)))
         rng = random.Random(42)
         rng.shuffle(indices)
-        all_prompts = [all_prompts[i] for i in indices]
+        all_student_prompts = [all_student_prompts[i] for i in indices]
+        all_teacher_prompts = [all_teacher_prompts[i] for i in indices]
         all_extras = [all_extras[i] for i in indices]
 
         # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
@@ -213,18 +215,19 @@ class RayPPOTrainer:
         num_vllm_dp_gruops = len(self.vllm_engines)
 
         async with Timer("Generate sequences via vllm engines"):
-            dp_prompt_size = (len(all_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+            dp_prompt_size = (len(all_teacher_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
             dp_tasks = []
             for dp_rank in range(num_vllm_dp_gruops):
-                dp_inputs = all_prompts[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
+                # Use teacher prompts for generation (they have the ground truth answer)
+                dp_teacher_inputs = all_teacher_prompts[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
                 dp_extras = all_extras[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
                 # handle last batch has no enough data
-                if len(dp_inputs) <= 0:
+                if len(dp_teacher_inputs) <= 0:
                     continue
                 gen_func = self._get_generate_function(dp_rank)
-                dp_tasks.append(self.generate_vllm(gen_func, dp_inputs, extras=dp_extras, **generate_kwargs))
+                dp_tasks.append(self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, **generate_kwargs))
 
-            logger.info("start generation")
+            logger.info("start generation from teacher prompts")
             local_responses = await asyncio.gather(*dp_tasks)
             outputs.extend(sum(local_responses, []))
             logger.info("generate local rollout batch done")
@@ -238,26 +241,28 @@ class RayPPOTrainer:
         if len(outputs) <= 0:
             return
 
-        assert len(all_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
+        assert len(all_teacher_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
 
         # 1.2 calculate custom rewards if has custom reward function
         if self.cfg.use_compute_reward_fn:
             async with Timer("Calculate custom rewards"):
                 dp_tasks = []
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
-                all_prompts, outputs, custom_rewards = await reward_fn(all_prompts, outputs, all_extras)
-                assert len(all_prompts) == len(
+                # Use student prompts for reward calculation since that's what the model will be trained on
+                all_student_prompts, outputs, custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
+                assert len(all_student_prompts) == len(
                     outputs
                 ), "generate objects number after custom reward function must be equal to all inputs number"
         else:
-            all_prompts, outputs, custom_rewards = all_prompts, outputs, None
+            all_student_prompts, outputs, custom_rewards = all_student_prompts, outputs, None
 
         # empty data
-        if len(all_prompts) == 0:
+        if len(all_student_prompts) == 0:
             return
 
         # 1.3 packing samples
         async with Timer("Packing samples"):
+            # Pack student sequences (for training)
             (
                 ret_sequences,
                 ret_attention_masks,
@@ -265,7 +270,18 @@ class RayPPOTrainer:
                 ret_packed_seq_lens,
                 ret_custom_rewards,
             ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                all_prompts, outputs, custom_rewards, self.cfg.packing_max_len
+                all_student_prompts, outputs, custom_rewards, self.cfg.packing_max_len
+            )
+            
+            # Pack teacher sequences (teacher prompts + responses) - different lengths!
+            (
+                ret_teacher_sequences,
+                ret_teacher_attention_masks,
+                ret_teacher_num_actions,
+                ret_teacher_packed_seq_lens,
+                _,  # custom_rewards same as student
+            ) = self._convert_prompts_outputs_to_batch_tensors_packing(
+                all_teacher_prompts, outputs, custom_rewards, self.cfg.packing_max_len
             )
             action_masks = None
 
@@ -278,6 +294,10 @@ class RayPPOTrainer:
                 ret_num_actions,
                 ret_packed_seq_lens,
                 ret_custom_rewards,
+                ret_teacher_sequences,
+                ret_teacher_attention_masks,
+                ret_teacher_num_actions,
+                ret_teacher_packed_seq_lens,
             )
             logger.info(f"experiences size: {len(experiences)}")
 
@@ -336,6 +356,10 @@ class RayPPOTrainer:
         num_actions_all: Optional[List[int]],
         packed_seq_lens_all: Optional[List[int]],
         custom_rewards_all: Optional[List[torch.Tensor]],
+        teacher_sequences_all: List[torch.Tensor],
+        teacher_attention_mask_all: List[torch.Tensor],
+        teacher_num_actions_all: Optional[List[int]],
+        teacher_packed_seq_lens_all: Optional[List[int]],
     ):
         num_policy_dp_groups = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
         num_critic_dp_groups = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
@@ -530,6 +554,8 @@ class RayPPOTrainer:
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
                     info,
                     kl,
+                    teacher_sequences_all[i],
+                    teacher_attention_mask_all[i],
                 )
             )
         return experiences
