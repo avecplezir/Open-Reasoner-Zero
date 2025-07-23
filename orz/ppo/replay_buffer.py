@@ -42,19 +42,19 @@ class Experience:
     """
 
     sequences: torch.Tensor
+    teacher_sequences: torch.Tensor
     action_log_probs: torch.Tensor
     base_action_log_probs: torch.Tensor
     values: Optional[torch.Tensor]
     returns: Optional[torch.Tensor]
     advantages: Optional[torch.Tensor]
     attention_mask: Optional[torch.LongTensor]
+    teacher_attention_mask: torch.LongTensor
     action_mask: Optional[torch.BoolTensor]
     num_actions: Optional[torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
     info: Optional[dict]
     kl: Optional[torch.Tensor] = None
-    teacher_sequences: torch.Tensor
-    teacher_attention_mask: torch.LongTensor
 
     @torch.no_grad()
     def to_device(self, device: torch.device) -> None:

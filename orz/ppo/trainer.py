@@ -6,6 +6,7 @@ import random
 from functools import partial
 from heapq import heapify, heappop, heappush
 from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
+import wandb
 
 import ray
 import torch
@@ -304,7 +305,16 @@ class RayPPOTrainer:
         # 2. visualization generated results example
         vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
         self.writer.add_text("generated_sequences", vis, self.global_step)
+        
+        # 2.1 visualization teacher sequence example
+        teacher_vis = self._detokenize(experiences[0].teacher_sequences[0])
+        self.writer.add_text("teacher_sequences", teacher_vis, self.global_step)
+
         self.writer.flush()
+        
+        # 2.1.1 log teacher to wandb
+        if wandb.run is not None:
+            wandb.log({"teacher_prompt": teacher_vis}, step=self.global_step)
 
         # 3. calculate advantages and returns / along with tensorboard logging
         avg_rewards = 0
@@ -543,19 +553,19 @@ class RayPPOTrainer:
             experiences.append(
                 Experience(
                     sequences_all[i],
+                    teacher_sequences_all[i],
                     action_log_probs[i],
                     base_log_probs[i],
                     values[i] if self.critic_model is not None else None,
                     None,
                     None,
                     attention_mask_all[i],
+                    teacher_attention_mask_all[i],
                     None,
                     response_length,
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
                     info,
                     kl,
-                    teacher_sequences_all[i],
-                    teacher_attention_mask_all[i],
                 )
             )
         return experiences
