@@ -57,8 +57,8 @@ Assistant: <think>\
     def create_teacher_prompt(self, dialogue: List):
         """Create teacher prompt with ground truth answer included."""
         teacher_prompt_template_jinja = """\
-{{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
-The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. The final answer is {{answer}}. User: {{prompt}}
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs the reasoning process in the mind that leads to this asnwer, and then recstate the User's final answer. \
+The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}} The final answer is {{answer}}. 
 Assistant: <think>\
 """
         prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA

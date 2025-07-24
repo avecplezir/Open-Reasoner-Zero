@@ -305,35 +305,64 @@ class RayPPOTrainer:
         # 2. visualization generated results example
         vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
         self.writer.add_text("generated_sequences", vis, self.global_step)
-        
+
         # 2.1 visualization teacher sequence example
-        teacher_vis = self._detokenize(experiences[0].teacher_sequences[0])
+        teacher_vis = self._detokenize(experiences[0].teacher_sequences[0][ : int(experiences[0].info["teacher_total_length"].flatten()[0])])
         self.writer.add_text("teacher_sequences", teacher_vis, self.global_step)
 
         self.writer.flush()
         
-        # 2.1.1 log teacher to wandb using Table
+        # 2.1.1 log teacher to wandb using Table (5 examples)
         if wandb.run is not None:
-            # Extract teacher prompt and reasoning parts
-            if "Assistant: <think>" in teacher_vis:
-                teacher_prompt_part = teacher_vis.split("Assistant: <think>")[0]
-                teacher_reasoning_part = teacher_vis.split("Assistant: <think>")[1]
-            else:
-                teacher_prompt_part = teacher_vis
-                teacher_reasoning_part = ""
-            
-            # # Create wandb table for teacher data
-            # teacher_table = wandb.Table(columns=["step", "teacher_prompt", "teacher_reasoning"])
-            # teacher_table.add_data(self.global_step, teacher_prompt_part, teacher_reasoning_part)
-            #
-            # wandb.log({"teacher_data": teacher_table}, step=self.global_step)
+            teacher_data = []
+            # Log up to 5 teacher examples from different experiences
+            for i in range(min(5, len(experiences))):
+                if len(experiences[i].teacher_sequences) > 0:
+                    # Use teacher sequence length for proper truncation (same logic as student)
+                    teacher_vis_example = self._detokenize(experiences[i].teacher_sequences[0][: int(experiences[i].info["teacher_total_length"].flatten()[0])])
+                    
+                    # Extract teacher prompt and reasoning parts
+                    if "Assistant: <think>" in teacher_vis_example:
+                        teacher_prompt_part = teacher_vis_example.split("Assistant: <think>")[0]
+                        teacher_reasoning_part = teacher_vis_example.split("Assistant: <think>")[1]
+                    else:
+                        teacher_prompt_part = teacher_vis_example
+                        teacher_reasoning_part = ""
+                    
+                    teacher_data.append([teacher_prompt_part, teacher_reasoning_part])
 
-            wandb.log({
-                "step": self.global_step,
-                "teacher_examples": wandb.Table(
-                    columns=["teacher_prompt", "teacher_reasoning"],
-                    data=[[teacher_prompt_part, teacher_reasoning_part]])
-            })
+            if teacher_data:
+                wandb.log({
+                    "step": self.global_step,
+                    "teacher_examples": wandb.Table(
+                        columns=["teacher_prompt", "teacher_reasoning"],
+                        data=teacher_data)
+                })
+
+            # 2.1.2 log student reasoning chains to wandb using Table (5 examples)
+            student_data = []
+            # Log up to 5 student examples from different experiences
+            for i in range(min(5, len(experiences))):
+                if len(experiences[i].sequences) > 0:
+                    student_vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
+
+                    # Extract student prompt and reasoning parts
+                    if "Assistant: <think>" in student_vis_example:
+                        student_prompt_part = student_vis_example.split("Assistant: <think>")[0]
+                        student_reasoning_part = student_vis_example.split("Assistant: <think>")[1]
+                    else:
+                        student_prompt_part = student_vis_example
+                        student_reasoning_part = ""
+                    
+                    student_data.append([student_prompt_part, student_reasoning_part])
+
+            if student_data:
+                wandb.log({
+                    "step": self.global_step,
+                    "student_examples": wandb.Table(
+                        columns=["student_prompt", "student_reasoning"],
+                        data=student_data)
+                })
 
         # 3. calculate advantages and returns / along with tensorboard logging
         avg_rewards = 0
@@ -477,7 +506,7 @@ class RayPPOTrainer:
                     sequences_all,
                     num_actions_all,
                     attention_mask_all,
-                    packed_seq_lens_all,
+                    3,
                 )
             )
 
@@ -547,6 +576,7 @@ class RayPPOTrainer:
         for i in range(len(action_log_probs)):
             response_length = torch.Tensor(num_actions_all[i]).unsqueeze(0)
             total_length = torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0)
+            teacher_total_length = torch.Tensor(teacher_packed_seq_lens_all[i]).unsqueeze(0)
             kl = compute_approx_kl(
                 action_log_probs[i],
                 base_log_probs[i],
@@ -560,6 +590,7 @@ class RayPPOTrainer:
                 local_reward = r[i]
             else:
                 local_reward = None
+
             info = {
                 "kl": kl_mean,
                 "kl_max": kl_max,
@@ -567,6 +598,7 @@ class RayPPOTrainer:
                 "custom_rewards": custom_rewards_all[i] if custom_rewards_all is not None else None,
                 "response_length": response_length,
                 "total_length": total_length,
+                "teacher_total_length": teacher_total_length,
                 "num_actions": num_actions_all[i],
             }
             experiences.append(
@@ -874,6 +906,7 @@ class RayPPOTrainer:
         return_sums /= num_packed_samples
         experience.info["response_length"] = torch.Tensor(experience.info["response_length"]).mean().unsqueeze(0)
         experience.info["total_length"] = torch.Tensor(experience.info["total_length"]).mean().unsqueeze(0)
+        experience.info["teacher_total_length"] = torch.Tensor(experience.info["teacher_total_length"]).mean().unsqueeze(0)
 
         metrics = {
             "avg_rewards": avg_rewards,
