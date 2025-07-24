@@ -199,17 +199,31 @@ class RayPPOTrainer:
     @torch.no_grad()
     async def make_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]], **generate_kwargs):
         experiences = []
-        all_teacher_prompts = sum([[prompt[1]["teacher_prompt_yes"], prompt[1]["teacher_prompt_no"]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
-        self.cfg.n_samples_per_prompt = 2 * self.cfg.n_samples_per_prompt
-        all_student_prompts = sum([[prompt[0]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
-        all_extras = sum([[prompt[1]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
-        # shuffle all prompts and extras together
-        indices = list(range(len(all_student_prompts)))
+        # Create paired data (positive/negative for each prompt)
+        paired_data = []
+        for prompt in all_inputs:
+            for _ in range(self.cfg.n_samples_per_prompt):
+                # Create a pair: (student, teacher_yes, teacher_no, extra)
+                paired_data.append((
+                    prompt[0],                          # student prompt
+                    prompt[1]["teacher_prompt_yes"],    # teacher with "yes" 
+                    prompt[1]["teacher_prompt_no"],     # teacher with "no"
+                    prompt[1]                           # extra info
+                ))
+        
+        # Shuffle the pairs to randomize order, but keep pairs together
         rng = random.Random(42)
-        rng.shuffle(indices)
-        all_student_prompts = [all_student_prompts[i] for i in indices]
-        all_teacher_prompts = [all_teacher_prompts[i] for i in indices]
-        all_extras = [all_extras[i] for i in indices]
+        rng.shuffle(paired_data)
+        
+        # Flatten into separate lists, ensuring each pair stays together
+        all_student_prompts = []
+        all_teacher_prompts = []
+        all_extras = []
+        for student, teacher_yes, teacher_no, extra in paired_data:
+            # Add both positive and negative examples
+            all_student_prompts.extend([student, student])
+            all_teacher_prompts.extend([teacher_yes, teacher_no])
+            all_extras.extend([extra, extra])
 
         # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
         # 1.1 generate sequences via vllm engines
