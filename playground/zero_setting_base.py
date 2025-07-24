@@ -48,7 +48,8 @@ Assistant: <think>\
         
         extra = {
             "answer": dialogue[1]["ground_truth"]["value"],
-            "teacher_prompt": teacher_prompt,
+            "teacher_prompt_yes": teacher_prompt[0],
+            "teacher_prompt_no": teacher_prompt[1],
             "dialogue": dialogue
         }
 
@@ -74,13 +75,19 @@ Assistant: <think>\
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
         
         answer = dialogue[1]["ground_truth"]["value"]
-        teacher_prompt = teacher_prompt_template.render(
+        teacher_prompt_yes = teacher_prompt_template.render(
             bos_token=bos_token, 
             prompt=prompt_instruction,
-            answer=answer
+            answer='yes'
         )
 
-        return teacher_prompt
+        teacher_prompt_no = teacher_prompt_template.render(
+            bos_token=bos_token,
+            prompt=prompt_instruction,
+            answer='no'
+        )
+
+        return teacher_prompt_yes, teacher_prompt_no
 
 
 class EvalCustomDataset(PromptDataset):
