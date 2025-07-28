@@ -579,7 +579,13 @@ class RayPPOTrainer:
                 empty_cache_tasks.extend([rm.async_run_method("empty_cache") for rm in self.reward_model])
             await asyncio.gather(*empty_cache_tasks)
 
-        # 6. calculate kl divergence
+        # 6. calculate teacher rewards
+        teacher_rewards = await self._compute_teacher_rewards(
+            sequences_all, teacher_sequences_all, 
+            action_log_probs, num_actions_all, packed_seq_lens_all, teacher_packed_seq_lens_all
+        )
+
+        # 7. calculate kl divergence
 
         experiences = []
         if self.critic_model is not None:
@@ -611,6 +617,7 @@ class RayPPOTrainer:
                 "kl_max": kl_max,
                 "reward": local_reward,
                 "custom_rewards": custom_rewards_all[i] if custom_rewards_all is not None else None,
+                "teacher_rewards": teacher_rewards[i] if teacher_rewards else None,
                 "response_length": response_length,
                 "total_length": total_length,
                 "teacher_total_length": teacher_total_length,
