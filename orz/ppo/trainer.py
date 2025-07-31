@@ -1152,8 +1152,8 @@ class RayPPOTrainer:
                     teacher_num_action,
                     teacher_total_len,
                 )
-            elif seq_offset + total_len == packing_max_len:
-                seq_offset, seq_index = _accumulate(
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) == packing_max_len:
+                seq_offset, seq_index, teacher_seq_offset = _accumulate(
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
@@ -1167,12 +1167,27 @@ class RayPPOTrainer:
                     total_len,
                     custom_rewards,
                     i,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_seq_offset,
+                    teacher_sequence,
+                    teacher_attention_mask,
+                    teacher_num_action,
+                    teacher_total_len,
                 )
                 valid_size = out_attention_mask.nonzero().size(0)
                 ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
                 ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
                 ret_num_actions.append(out_num_actions)
                 ret_packed_seq_lens.append(out_packed_seq_lens)
+                # teacher
+                # valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+                # ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+                # ret_teacher_attention_masks = []
+                # ret_teacher_num_actions = []
+                # ret_teacher_packed_seq_lens = []
                 if custom_rewards:
                     ret_custom_rewards.append(rewards)
                 (
@@ -1184,7 +1199,7 @@ class RayPPOTrainer:
                     seq_offset,
                     seq_index,
                 ) = _new_instance()
-            elif seq_offset + total_len > packing_max_len:
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) > packing_max_len:
                 if seq_offset > 0:
                     valid_size = out_attention_mask.nonzero().size(0)
                     ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
