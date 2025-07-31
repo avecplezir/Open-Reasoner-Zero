@@ -199,8 +199,9 @@ class RayPPOTrainer:
     @torch.no_grad()
     async def make_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]], **generate_kwargs):
         experiences = []
+        all_teacher_prompts = sum([[prompt[1]["teacher_prompt_yes"], prompt[1]["teacher_prompt_no"]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
+        self.cfg.n_samples_per_prompt = 2 * self.cfg.n_samples_per_prompt
         all_student_prompts = sum([[prompt[0]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
-        all_teacher_prompts = sum([[prompt[1]["teacher_prompt"]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
         all_extras = sum([[prompt[1]] * self.cfg.n_samples_per_prompt for prompt in all_inputs], [])
         # shuffle all prompts and extras together
         indices = list(range(len(all_student_prompts)))
