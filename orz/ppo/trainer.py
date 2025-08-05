@@ -129,6 +129,7 @@ class RayPPOTrainer:
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
                 for replay_buffer, prefix in zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher']):
+                    logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     # serialize replay buffer to jsonl
                     async with Timer("Dumping replay buffer"):
                         all_replay_buffer_save_path = os.path.join(self.cfg.save_path, "dumped_replay_buffer")
@@ -320,7 +321,7 @@ class RayPPOTrainer:
                 ret_packed_seq_lens,
                 ret_custom_rewards,
             )
-            logger.info(f"student experiences size: {len(student_experiences)}")
+            logger.info(f"student experiences size: {len(student_experiences)} {len(ret_num_actions)}")
 
         # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
         async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
@@ -332,7 +333,7 @@ class RayPPOTrainer:
                 ret_teacher_packed_seq_lens,
                 ret_teacher_custom_rewards,
             )
-            logger.info(f"teacher experiences size: {len(teacher_experiences)}")
+            logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
 
         # 2 vis student and teacher to wandb and writer
         for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
@@ -410,37 +411,6 @@ class RayPPOTrainer:
                 self.writer.add_scalar(f"{prefix}_avg_raw_advantages", avg_advantages / len(experiences), self.global_step)
                 self.writer.add_scalar(f"{prefix}_avg_raw_advantages_abs", avg_advantages_abs / len(experiences), self.global_step)
         
-        self.writer.flush()
-
-        async with Timer("Calculate advantages and returns"):
-            adv_tasks = []
-            for experience in experiences:
-                adv_tasks.append(self._calc_advantages_and_returns(experience))
-
-            for tsk in asyncio.as_completed(adv_tasks):
-                experience, metrics = await tsk
-                avg_rewards += metrics["avg_rewards"]
-                avg_kl += metrics["avg_kl"]
-                avg_kl_max += metrics["avg_kl_max"]
-                avg_response_length += metrics["avg_response_length"]
-                avg_orm_score += metrics["avg_orm_score"]
-                avg_custom_rewards += metrics["avg_custom_rewards"]
-                avg_advantages += metrics["avg_advantages"]
-                avg_advantages_abs += metrics["avg_advantages_abs"]
-                self.replay_buffer.append(experience)
-
-        # 4. tensorboard logging
-        logger.info(
-            f"avg_raw_rewards: {avg_rewards / len(experiences)}, avg_kl: {avg_kl / len(experiences)}, avg_response_length: {avg_response_length / len(experiences)}, avg_orm_score: {avg_orm_score / len(experiences)}, avg_custom_rewards: {avg_custom_rewards / len(experiences)}"
-        )
-        self.writer.add_scalar("avg_raw_rewards", avg_rewards / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_kl", avg_kl / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_kl_max", avg_kl_max / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_response_length", avg_response_length / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_orm_score", avg_orm_score / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_custom_rewards", avg_custom_rewards / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_raw_advantages", avg_advantages / len(experiences), self.global_step)
-        self.writer.add_scalar("avg_raw_advantages_abs", avg_advantages_abs / len(experiences), self.global_step)
         self.writer.flush()
 
     @torch.no_grad()
@@ -853,11 +823,12 @@ class RayPPOTrainer:
             self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
             await self.policy_model.async_run_method("empty_cache")
-        if self.cfg.colocate_all:
-            async with Timer("Backload vllm engines to gpu"):
-                await self._backload_vllm_engines()
-        async with Timer("Broadcast actor weights to vllm engines"):
-            await self._sync_policy_weights_to_vllm()
+        if prefix == "teacher":
+            if self.cfg.colocate_all:
+                async with Timer("Backload vllm engines to gpu"):
+                    await self._backload_vllm_engines()
+            async with Timer("Broadcast actor weights to vllm engines"):
+                await self._sync_policy_weights_to_vllm()
 
         if global_steps > self.cfg.freezing_actor_steps:
             return status[0]
@@ -939,7 +910,6 @@ class RayPPOTrainer:
         return_sums /= num_packed_samples
         experience.info["response_length"] = torch.Tensor(experience.info["response_length"]).mean().unsqueeze(0)
         experience.info["total_length"] = torch.Tensor(experience.info["total_length"]).mean().unsqueeze(0)
-        experience.info["teacher_total_length"] = torch.Tensor(experience.info["teacher_total_length"]).mean().unsqueeze(0)
 
         metrics = {
             "avg_rewards": avg_rewards,
@@ -1301,11 +1271,13 @@ class RayPPOTrainer:
                         out_teacher_attention_mask,
                         out_teacher_num_actions,
                         out_teacher_packed_seq_lens,
+                        teacher_rewards,
                         teacher_seq_offset,
                         teacher_sequence,
                         teacher_attention_mask,
                         teacher_num_action,
                         teacher_total_len,
+                        teacher_custom_rewards
                     )
 
         if seq_offset > 0:
@@ -1324,6 +1296,10 @@ class RayPPOTrainer:
             ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
             ret_teacher_num_actions.append(out_teacher_num_actions)
             ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+            if teacher_custom_rewards:
+                ret_teacher_custom_rewards.append(teacher_rewards)
+
+            assert (len(ret_custom_rewards) == len(ret_teacher_custom_rewards)), "Number of packed student and teacher rewards must be the same"
 
         return (ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards, 
                 ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens, ret_teacher_custom_rewards)

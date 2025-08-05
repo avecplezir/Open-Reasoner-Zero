@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    e_name = "teacherv3-grpo-4gpu-v1"
+    e_name = "teacherv4-grpo-4gpu-v0"
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -95,7 +95,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 64 if not DEBUG_MODE else 64
+    n_samples_per_prompt: int = 64 if not DEBUG_MODE else 1
     micro_rollout_batch_size: int = 128 if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
@@ -109,7 +109,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
     # generate related settings
