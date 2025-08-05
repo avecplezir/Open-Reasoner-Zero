@@ -303,6 +303,7 @@ class RayPPOTrainer:
                 ret_teacher_attention_masks,
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
+                ret_teacher_custom_rewards,
             ) = self._convert_prompts_outputs_to_batch_tensors_packing(
                 all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, self.cfg.packing_max_len,
             )
@@ -329,7 +330,7 @@ class RayPPOTrainer:
                 teacher_action_masks,
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
-                None, 
+                ret_teacher_custom_rewards,
             )
             logger.info(f"teacher experiences size: {len(teacher_experiences)}")
 
