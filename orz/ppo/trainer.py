@@ -51,7 +51,13 @@ class RayPPOTrainer:
         self.colocate_pg = colocate_pg
 
         self.writer = SummaryWriter(log_dir=self.cfg.tensorboard_log_dir)
-        self.replay_buffer = NaiveReplayBuffer(
+        self.student_replay_buffer = NaiveReplayBuffer(
+            sample_batch_size=self.cfg.micro_train_batch_size,
+            limit=0,
+            cpu_offload=True,
+            packing_samples=True,
+        )
+        self.teacher_replay_buffer = NaiveReplayBuffer(
             sample_batch_size=self.cfg.micro_train_batch_size,
             limit=0,
             cpu_offload=True,
@@ -109,7 +115,7 @@ class RayPPOTrainer:
                 await self.make_experience(rand_prompts)
 
                 # check if has enough data
-                if len(self.replay_buffer) <= 0:
+                if len(self.student_replay_buffer) <= 0 or len(self.teacher_replay_buffer) <= 0:
                     if self.cfg.colocate_all:
                         # skip, but transfer weight
                         await self.policy_model.backload_to_gpu()
@@ -119,59 +125,63 @@ class RayPPOTrainer:
                     continue
 
                 if self.cfg.advantage_normalize:
-                    self.replay_buffer = normalize_advantages(self.replay_buffer)
+                    self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
+                    self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                # serialize replay buffer to jsonl
-                async with Timer("Dumping replay buffer"):
-                    all_replay_buffer_save_path = os.path.join(self.cfg.save_path, "dumped_replay_buffer")
-                    os.makedirs(all_replay_buffer_save_path, exist_ok=True)
-                    dump_path = os.path.join(all_replay_buffer_save_path, f"iter{self.global_step}_replay_buffer.jsonl")
-                    with open(dump_path, "a") as f:
-                        logger.info(f"dumping replay buffer to {dump_path}")
-                        for item in self.replay_buffer:
-                            f.write(json.dumps(item.to_json()) + "\n")
+                for replay_buffer, prefix in zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher']):
+                    # serialize replay buffer to jsonl
+                    async with Timer("Dumping replay buffer"):
+                        all_replay_buffer_save_path = os.path.join(self.cfg.save_path, "dumped_replay_buffer")
+                        os.makedirs(all_replay_buffer_save_path, exist_ok=True)
+                        dump_path = os.path.join(all_replay_buffer_save_path,
+                                                 f"iter{self.global_step}_{prefix}_replay_buffer.jsonl")
+                        with open(dump_path, "a") as f:
+                            logger.info(f"dumping replay buffer to {dump_path}")
+                            for item in replay_buffer:
+                                f.write(json.dumps(item.to_json()) + "\n")
 
-                num_policy_dp_nodes = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
-                num_critic_dp_nodes = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
-                policy_buffers = self.replay_buffer.split_to_n_batches(num_policy_dp_nodes)
-                if num_policy_dp_nodes != num_critic_dp_nodes:
-                    critic_buffers = self.replay_buffer.split_to_n_batches(num_critic_dp_nodes)
-                else:
-                    critic_buffers = policy_buffers
-
-                # 4. train policy/critic model
-                if self.cfg.colocate_all:
-                    if self.critic_model is not None:
-                        async with Timer("Critic model training"):
-                            await self.critic_model.backload_to_gpu()
-                            await self.ppo_local_train_critic(critic_buffers, self.global_step)
-                            await self.critic_model.offload_to_cpu()
-                    async with Timer("Actor model training"):
-                        await self.policy_model.backload_to_gpu()
-                        status = await self.ppo_local_train_policy(policy_buffers, self.global_step)
-                        await self.policy_model.offload_to_cpu()
-
-                else:
-                    if self.critic_model is not None:
-                        async with Timer("Actor and Critic model training"):
-                            status = await asyncio.gather(
-                                self.ppo_local_train_policy(policy_buffers, self.global_step),
-                                self.ppo_local_train_critic(critic_buffers, self.global_step),
-                            )
-                            await asyncio.gather(
-                                self.policy_model.async_run_method("empty_cache"),
-                                self.critic_model.async_run_method("empty_cache"),
-                            )
-                            status = status[0]
+                    num_policy_dp_nodes = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
+                    num_critic_dp_nodes = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
+                    policy_buffers = replay_buffer.split_to_n_batches(num_policy_dp_nodes)
+                    if num_policy_dp_nodes != num_critic_dp_nodes:
+                        critic_buffers = replay_buffer.split_to_n_batches(num_critic_dp_nodes)
                     else:
+                        critic_buffers = policy_buffers
+
+                    # 4. train policy/critic model
+                    if self.cfg.colocate_all:
+                        if self.critic_model is not None:
+                            async with Timer("Critic model training"):
+                                await self.critic_model.backload_to_gpu()
+                                await self.ppo_local_train_critic(critic_buffers, self.global_step, prefix)
+                                await self.critic_model.offload_to_cpu()
                         async with Timer("Actor model training"):
-                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step)
-                            await self.policy_model.async_run_method("empty_cache")
+                            await self.policy_model.backload_to_gpu()
+                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                            await self.policy_model.offload_to_cpu()
 
-                self.replay_buffer.clear()
+                    else:
+                        if self.critic_model is not None:
+                            async with Timer("Actor and Critic model training"):
+                                status = await asyncio.gather(
+                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix),
+                                    self.ppo_local_train_critic(critic_buffers, self.global_step, prefix),
+                                )
+                                await asyncio.gather(
+                                    self.policy_model.async_run_method("empty_cache"),
+                                    self.critic_model.async_run_method("empty_cache"),
+                                )
+                                status = status[0]
+                        else:
+                            async with Timer("Actor model training"):
+                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                                await self.policy_model.async_run_method("empty_cache")
 
-                # 5. set logs
-                logger.info(status)
+                    replay_buffer.clear()
+
+                    # 5. set logs
+                    logger.info(f'{prefix} {status}')
+
                 pbar.update()
                 # log epoch info
                 self.writer.add_scalar("episode_idx", episode, self.global_step)
@@ -221,9 +231,13 @@ class RayPPOTrainer:
         all_extras = []
         for student, teacher_yes, teacher_no, extra in paired_data:
             # Add both positive and negative examples
+            extra_yes = extra.copy()
+            extra_no = extra.copy()
+            extra_yes["teacher_answer"] = 'yes'
+            extra_no["teacher_answer"] = 'no'
             all_student_prompts.extend([student, student])
             all_teacher_prompts.extend([teacher_yes, teacher_no])
-            all_extras.extend([extra, extra])
+            all_extras.extend([extra_yes, extra_no])
 
         # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
         # 1.1 generate sequences via vllm engines
@@ -265,12 +279,12 @@ class RayPPOTrainer:
                 dp_tasks = []
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                 # Use student prompts for reward calculation since that's what the model will be trained on
-                all_student_prompts, outputs, custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
                 assert len(all_student_prompts) == len(
                     outputs
                 ), "generate objects number after custom reward function must be equal to all inputs number"
         else:
-            all_student_prompts, outputs, custom_rewards = all_student_prompts, outputs, None
+            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = all_student_prompts, outputs, None, None
 
         # empty data
         if len(all_student_prompts) == 0:
@@ -285,109 +299,117 @@ class RayPPOTrainer:
                 ret_num_actions,
                 ret_packed_seq_lens,
                 ret_custom_rewards,
-            ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                all_student_prompts, outputs, custom_rewards, self.cfg.packing_max_len
-            )
-            
-            # Pack teacher sequences (teacher prompts + responses) - different lengths!
-            (
                 ret_teacher_sequences,
                 ret_teacher_attention_masks,
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
-                _,  # custom_rewards same as student
             ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                all_teacher_prompts, outputs, custom_rewards, self.cfg.packing_max_len
+                all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, self.cfg.packing_max_len,
             )
             action_masks = None
+            teacher_action_masks = None
 
-        # 1.4 inference and calculate values, log probs, rewards, kl divergence
-        async with Timer("Inference and calculate values, log probs, rewards, kl divergence"):
-            experiences = await self.inference_and_calculates(
+        # 1.4 inference and calculate values, log probs, rewards, kl divergence for student sequences
+        async with Timer("Inference and calculate values, log probs, rewards, kl divergence for student"):
+            student_experiences = await self.inference_and_calculates(
                 ret_sequences,
                 ret_attention_masks,
                 action_masks,
                 ret_num_actions,
                 ret_packed_seq_lens,
                 ret_custom_rewards,
+            )
+            logger.info(f"student experiences size: {len(student_experiences)}")
+
+        # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
+        async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
+            teacher_experiences = await self.inference_and_calculates(
                 ret_teacher_sequences,
                 ret_teacher_attention_masks,
+                teacher_action_masks,
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
+                None, 
             )
-            logger.info(f"experiences size: {len(experiences)}")
+            logger.info(f"teacher experiences size: {len(teacher_experiences)}")
 
-        # 2. visualization generated results example
-        vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
-        self.writer.add_text("generated_sequences", vis, self.global_step)
+        # 2 vis student and teacher to wandb and writer
+        for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
+            vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
+            self.writer.add_text(f"{prefix}_sequences", vis, self.global_step)
 
-        # 2.1 visualization teacher sequence example
-        teacher_vis = self._detokenize(experiences[0].teacher_sequences[0][ : int(experiences[0].info["teacher_total_length"].flatten()[0])])
-        self.writer.add_text("teacher_sequences", teacher_vis, self.global_step)
+            if wandb.run is not None:
+                data = []
+                # Log up to 5 examples from different experiences
+                for i in range(min(5, len(experiences))):
+                    if len(experiences[i].sequences) > 0:
+                        vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
+
+                        # Extract student prompt and reasoning parts
+                        if "Assistant: <think>" in vis_example:
+                            prompt_part = vis_example.split("Assistant: <think>")[0]
+                            reasoning_part = vis_example.split("Assistant: <think>")[1]
+                        else:
+                            prompt_part = vis_example
+                            reasoning_part = ""
+
+                        data.append([prompt_part, reasoning_part])
+
+                if data:
+                    wandb.log({
+                        "step": self.global_step,
+                        f"{prefix}_examples": wandb.Table(
+                            columns=["student_prompt", "student_reasoning"],
+                            data=data)
+                    })
 
         self.writer.flush()
-        
-        # 2.1.1 log teacher to wandb using Table (5 examples)
-        if wandb.run is not None:
-            teacher_data = []
-            # Log up to 5 teacher examples from different experiences
-            for i in range(min(5, len(experiences))):
-                if len(experiences[i].teacher_sequences) > 0:
-                    # Use teacher sequence length for proper truncation (same logic as student)
-                    teacher_vis_example = self._detokenize(experiences[i].teacher_sequences[0][: int(experiences[i].info["teacher_total_length"].flatten()[0])])
-                    
-                    # Extract teacher prompt and reasoning parts
-                    if "Assistant: <think>" in teacher_vis_example:
-                        teacher_prompt_part = teacher_vis_example.split("Assistant: <think>")[0]
-                        teacher_reasoning_part = teacher_vis_example.split("Assistant: <think>")[1]
-                    else:
-                        teacher_prompt_part = teacher_vis_example
-                        teacher_reasoning_part = ""
-                    
-                    teacher_data.append([teacher_prompt_part, teacher_reasoning_part])
-
-            if teacher_data:
-                wandb.log({
-                    "step": self.global_step,
-                    "teacher_examples": wandb.Table(
-                        columns=["teacher_prompt", "teacher_reasoning"],
-                        data=teacher_data)
-                })
-
-            # 2.1.2 log student reasoning chains to wandb using Table (5 examples)
-            student_data = []
-            # Log up to 5 student examples from different experiences
-            for i in range(min(5, len(experiences))):
-                if len(experiences[i].sequences) > 0:
-                    student_vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
-
-                    # Extract student prompt and reasoning parts
-                    if "Assistant: <think>" in student_vis_example:
-                        student_prompt_part = student_vis_example.split("Assistant: <think>")[0]
-                        student_reasoning_part = student_vis_example.split("Assistant: <think>")[1]
-                    else:
-                        student_prompt_part = student_vis_example
-                        student_reasoning_part = ""
-                    
-                    student_data.append([student_prompt_part, student_reasoning_part])
-
-            if student_data:
-                wandb.log({
-                    "step": self.global_step,
-                    "student_examples": wandb.Table(
-                        columns=["student_prompt", "student_reasoning"],
-                        data=student_data)
-                })
 
         # 3. calculate advantages and returns / along with tensorboard logging
-        avg_rewards = 0
-        avg_kl = 0
-        avg_kl_max = 0
-        avg_response_length = 0
-        avg_orm_score = 0
-        avg_custom_rewards = 0
-        avg_advantages = 0
-        avg_advantages_abs = 0
+        for experiences, buffer, prefix in zip([student_experiences, teacher_experiences], 
+                                              [self.student_replay_buffer, self.teacher_replay_buffer], 
+                                              ["student", "teacher"]):
+            avg_rewards = 0
+            avg_kl = 0
+            avg_kl_max = 0
+            avg_response_length = 0
+            avg_orm_score = 0
+            avg_custom_rewards = 0
+            avg_advantages = 0
+            avg_advantages_abs = 0
+
+            async with Timer(f"Calculate {prefix} advantages and returns"):
+                adv_tasks = []
+                for experience in experiences:
+                    adv_tasks.append(self._calc_advantages_and_returns(experience))
+
+                for tsk in asyncio.as_completed(adv_tasks):
+                    experience, metrics = await tsk
+                    avg_rewards += metrics["avg_rewards"]
+                    avg_kl += metrics["avg_kl"]
+                    avg_kl_max += metrics["avg_kl_max"]
+                    avg_response_length += metrics["avg_response_length"]
+                    avg_orm_score += metrics["avg_orm_score"]
+                    avg_custom_rewards += metrics["avg_custom_rewards"]
+                    avg_advantages += metrics["avg_advantages"]
+                    avg_advantages_abs += metrics["avg_advantages_abs"]
+                    buffer.append(experience)
+
+            # 4. tensorboard logging for this prefix
+            if len(experiences) > 0:
+                logger.info(
+                    f"{prefix.upper()} - avg_raw_rewards: {avg_rewards / len(experiences)}, avg_kl: {avg_kl / len(experiences)}, avg_response_length: {avg_response_length / len(experiences)}, avg_orm_score: {avg_orm_score / len(experiences)}, avg_custom_rewards: {avg_custom_rewards / len(experiences)}"
+                )
+                self.writer.add_scalar(f"{prefix}_avg_raw_rewards", avg_rewards / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_kl", avg_kl / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_kl_max", avg_kl_max / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_response_length", avg_response_length / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_orm_score", avg_orm_score / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_custom_rewards", avg_custom_rewards / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_raw_advantages", avg_advantages / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_raw_advantages_abs", avg_advantages_abs / len(experiences), self.global_step)
+        
+        self.writer.flush()
 
         async with Timer("Calculate advantages and returns"):
             adv_tasks = []
@@ -422,17 +444,13 @@ class RayPPOTrainer:
 
     @torch.no_grad()
     async def inference_and_calculates(
-        self,
-        sequences_all: List[torch.Tensor],
-        attention_mask_all: List[torch.Tensor],
-        action_mask_all: Optional[List[torch.Tensor]],
-        num_actions_all: Optional[List[int]],
-        packed_seq_lens_all: Optional[List[int]],
-        custom_rewards_all: Optional[List[torch.Tensor]],
-        teacher_sequences_all: List[torch.Tensor],
-        teacher_attention_mask_all: List[torch.Tensor],
-        teacher_num_actions_all: Optional[List[int]],
-        teacher_packed_seq_lens_all: Optional[List[int]],
+            self,
+            sequences_all: List[torch.Tensor],
+            attention_mask_all: List[torch.Tensor],
+            action_mask_all: Optional[List[torch.Tensor]],
+            num_actions_all: Optional[List[int]],
+            packed_seq_lens_all: Optional[List[int]],
+            custom_rewards_all: Optional[List[torch.Tensor]],
     ):
         num_policy_dp_groups = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
         num_critic_dp_groups = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
@@ -446,15 +464,15 @@ class RayPPOTrainer:
             )
             dp_tasks = []
             for dp_rank, (
-                micro_sequences,
-                micro_num_actions,
-                micro_attention_mask,
-                micro_packed_seq_lens,
+                    micro_sequences,
+                    micro_num_actions,
+                    micro_attention_mask,
+                    micro_packed_seq_lens,
             ) in enumerate(dp_iterator):
                 model = self._get_dp_group_models(dp_rank, model_type)
 
                 async def forward_fn(
-                    local_model, fwd_sequences, fwd_num_actions, fwd_attention_mask, fwd_packed_seq_lens
+                        local_model, fwd_sequences, fwd_num_actions, fwd_attention_mask, fwd_packed_seq_lens
                 ):
                     return await local_model.forward.remote(
                         sequences=fwd_sequences,
@@ -521,7 +539,7 @@ class RayPPOTrainer:
                     sequences_all,
                     num_actions_all,
                     attention_mask_all,
-                    3,
+                    packed_seq_lens_all,
                 )
             )
 
@@ -591,7 +609,6 @@ class RayPPOTrainer:
         for i in range(len(action_log_probs)):
             response_length = torch.Tensor(num_actions_all[i]).unsqueeze(0)
             total_length = torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0)
-            teacher_total_length = torch.Tensor(teacher_packed_seq_lens_all[i]).unsqueeze(0)
             kl = compute_approx_kl(
                 action_log_probs[i],
                 base_log_probs[i],
@@ -605,7 +622,6 @@ class RayPPOTrainer:
                 local_reward = r[i]
             else:
                 local_reward = None
-
             info = {
                 "kl": kl_mean,
                 "kl_max": kl_max,
@@ -613,20 +629,17 @@ class RayPPOTrainer:
                 "custom_rewards": custom_rewards_all[i] if custom_rewards_all is not None else None,
                 "response_length": response_length,
                 "total_length": total_length,
-                "teacher_total_length": teacher_total_length,
                 "num_actions": num_actions_all[i],
             }
             experiences.append(
                 Experience(
                     sequences_all[i],
-                    teacher_sequences_all[i],
                     action_log_probs[i],
                     base_log_probs[i],
                     values[i] if self.critic_model is not None else None,
                     None,
                     None,
                     attention_mask_all[i],
-                    teacher_attention_mask_all[i],
                     None,
                     response_length,
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
@@ -829,13 +842,15 @@ class RayPPOTrainer:
 
         logger.info("init policy/ref/critic/reward models done")
 
-    async def ppo_local_train_policy(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int):
+    async def ppo_local_train_policy(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = ""):
         if global_steps > self.cfg.freezing_actor_steps:
-            async with Timer("Policy model training"):
+            async with Timer(f"{prefix.capitalize()} Policy model training"):
                 status = await self.policy_model.async_ppo_train(global_steps, replay_buffers)
-            self.writer.add_scalar("ppo_clip_count", status[0]["clip_ratio"], global_steps)
-            self.writer.add_scalar("policy_update_steps", status[0]["policy_update_steps"], global_steps)
-            self.writer.add_scalar("policy_entropy", status[0]["entropy"], global_steps)
+            # Log with prefix for separate tracking
+            metric_prefix = f"{prefix}_" if prefix else ""
+            self.writer.add_scalar(f"{metric_prefix}ppo_clip_count", status[0]["clip_ratio"], global_steps)
+            self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
+            self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
             await self.policy_model.async_run_method("empty_cache")
         if self.cfg.colocate_all:
             async with Timer("Backload vllm engines to gpu"):
@@ -846,12 +861,14 @@ class RayPPOTrainer:
         if global_steps > self.cfg.freezing_actor_steps:
             return status[0]
 
-    async def ppo_local_train_critic(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int):
-        async with Timer("Critic model training"):
+    async def ppo_local_train_critic(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = ""):
+        async with Timer(f"{prefix.capitalize()} Critic model training"):
             status = await self.critic_model.async_ppo_train(global_steps, replay_buffers)
         if critic_loss := status[0].get("critic_loss", None):
-            self.writer.add_scalar("critic_loss", critic_loss, global_steps)
-            self.writer.add_scalar("critic_update_steps", status[0]["critic_update_steps"], global_steps)
+            # Log with prefix for separate tracking
+            metric_prefix = f"{prefix}_" if prefix else ""
+            self.writer.add_scalar(f"{metric_prefix}critic_loss", critic_loss, global_steps)
+            self.writer.add_scalar(f"{metric_prefix}critic_update_steps", status[0]["critic_update_steps"], global_steps)
         return status[0]
 
     async def custom_reward_fn(
@@ -987,7 +1004,13 @@ class RayPPOTrainer:
         return sequences, attention_mask, action_mask
 
     def _convert_prompts_outputs_to_batch_tensors_packing(
-        self, prompts: List[str], outputs: List[str], custom_rewards: Optional[List[torch.Tensor]], packing_max_len: int
+        self, prompts: List[str],
+        teacher_prompts: List[str],
+        outputs: List[str],
+        custom_rewards: Optional[List[torch.Tensor]],
+        teacher_custom_rewards: Optional[List[torch.Tensor]],
+        packing_max_len: int,
+
     ):
         ret_sequences = []
         ret_attention_masks = []
@@ -998,9 +1021,20 @@ class RayPPOTrainer:
         else:
             ret_custom_rewards = None
 
+        if teacher_custom_rewards is not None:
+            ret_teacher_custom_rewards = []
+        else:
+            ret_teacher_custom_rewards = None
+        
+        # Teacher sequences (always provided)
+        ret_teacher_sequences = []
+        ret_teacher_attention_masks = []
+        ret_teacher_num_actions = []
+        ret_teacher_packed_seq_lens = []
+
         assert (
-            len(prompts) == len(outputs) and len(prompts) > 0
-        ), "prompts and outputs must have the same length and length must be greater than 0"
+            len(prompts) == len(outputs) and len(prompts) > 0 and len(teacher_prompts) == len(prompts)
+        ), "prompts, outputs, and teacher_prompts must have the same length and length must be greater than 0"
 
         def _new_instance():
             out_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
@@ -1008,16 +1042,31 @@ class RayPPOTrainer:
             out_num_actions = []
             out_packed_seq_lens = []
             rewards = [] if custom_rewards else None
+            teacher_rewards = [] if teacher_custom_rewards else None
             seq_offset = 0
             seq_index = 0
+            
+            # Teacher sequence variables
+            out_teacher_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
+            out_teacher_attention_mask = torch.zeros((packing_max_len,), dtype=torch.int)
+            out_teacher_num_actions = []
+            out_teacher_packed_seq_lens = []
+            teacher_seq_offset = 0
+            
             return (
                 out_sequence,
                 out_attention_mask,
                 out_num_actions,
                 out_packed_seq_lens,
                 rewards,
+                teacher_rewards,
                 seq_offset,
                 seq_index,
+                out_teacher_sequence,
+                out_teacher_attention_mask,
+                out_teacher_num_actions,
+                out_teacher_packed_seq_lens,
+                teacher_seq_offset,
             )
 
         def _accumulate(
@@ -1034,28 +1083,64 @@ class RayPPOTrainer:
             total_len,
             custom_rewards,
             i,
+            # Teacher sequence parameters
+            out_teacher_sequence,
+            out_teacher_attention_mask,
+            out_teacher_num_actions,
+            out_teacher_packed_seq_lens,
+            teacher_rewards,
+            teacher_seq_offset,
+            teacher_sequence,
+            teacher_attention_mask,
+            teacher_num_action,
+            teacher_total_len,
+            teacher_custom_rewards,
         ):
+            # Student sequence
             out_sequence[seq_offset : seq_offset + total_len] = torch.tensor(sequence)
             out_attention_mask[seq_offset : seq_offset + total_len] = seq_index + 1
             out_num_actions.append(num_action)
             out_packed_seq_lens.append(total_len)
             if custom_rewards:
                 rewards.append(custom_rewards[i])
-            return seq_offset + total_len, seq_index + 1
+            
+            # Teacher sequence
+            out_teacher_sequence[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = torch.tensor(teacher_sequence)
+            out_teacher_attention_mask[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = seq_index + 1
+            out_teacher_num_actions.append(teacher_num_action)
+            out_teacher_packed_seq_lens.append(teacher_total_len)
+            if teacher_custom_rewards:
+                teacher_rewards.append(teacher_custom_rewards[i])
+            
+            return seq_offset + total_len, seq_index + 1, teacher_seq_offset + teacher_total_len
 
         sequences = []
         attention_masks = []
         num_actions = []
         total_lens = []
+        
+        # Teacher sequences
+        teacher_sequences = []
+        teacher_attention_masks = []
+        teacher_num_actions = []
+        teacher_total_lens = []
 
         input_token_ids = self._tokenize(prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
         response_token_ids = self._tokenize(outputs, self.cfg.generate_max_len, padding=False)["input_ids"]
+        teacher_input_token_ids = self._tokenize(teacher_prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
 
-        for input_ids, response_ids in zip(input_token_ids, response_token_ids):
+        for input_ids, response_ids, teacher_input_ids in zip(input_token_ids, response_token_ids, teacher_input_token_ids):
+            # Student sequences
             sequences.append(input_ids + response_ids)
             attention_masks.append(torch.ones((len(input_ids) + len(response_ids),), dtype=torch.float32))
             num_actions.append(len(response_ids))
             total_lens.append(len(input_ids) + len(response_ids))
+            
+            # Teacher sequences (teacher prompt + same response)
+            teacher_sequences.append(teacher_input_ids + response_ids)
+            teacher_attention_masks.append(torch.ones((len(teacher_input_ids) + len(response_ids),), dtype=torch.float32))
+            teacher_num_actions.append(len(response_ids))
+            teacher_total_lens.append(len(teacher_input_ids) + len(response_ids))
 
         # make packed sequences
         (
@@ -1064,14 +1149,20 @@ class RayPPOTrainer:
             out_num_actions,
             out_packed_seq_lens,
             rewards,
+            teacher_rewards,
             seq_offset,
             seq_index,
+            out_teacher_sequence,
+            out_teacher_attention_mask,
+            out_teacher_num_actions,
+            out_teacher_packed_seq_lens,
+            teacher_seq_offset,
         ) = _new_instance()
-        for i, (sequence, attention_mask, num_action, total_len) in enumerate(
-            zip(sequences, attention_masks, num_actions, total_lens)
+        for i, (sequence, attention_mask, num_action, total_len, teacher_sequence, teacher_attention_mask, teacher_num_action, teacher_total_len) in enumerate(
+            zip(sequences, attention_masks, num_actions, total_lens, teacher_sequences, teacher_attention_masks, teacher_num_actions, teacher_total_lens)
         ):
-            if seq_offset + total_len < packing_max_len:
-                seq_offset, seq_index = _accumulate(
+            if seq_offset + total_len < packing_max_len and teacher_seq_offset + teacher_total_len < packing_max_len:
+                seq_offset, seq_index, teacher_seq_offset = _accumulate(
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
@@ -1085,9 +1176,20 @@ class RayPPOTrainer:
                     total_len,
                     custom_rewards,
                     i,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_rewards,
+                    teacher_seq_offset,
+                    teacher_sequence,
+                    teacher_attention_mask,
+                    teacher_num_action,
+                    teacher_total_len,
+                    teacher_custom_rewards,
                 )
-            elif seq_offset + total_len == packing_max_len:
-                seq_offset, seq_index = _accumulate(
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) == packing_max_len:
+                seq_offset, seq_index, teacher_seq_offset = _accumulate(
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
@@ -1101,7 +1203,19 @@ class RayPPOTrainer:
                     total_len,
                     custom_rewards,
                     i,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_rewards,
+                    teacher_seq_offset,
+                    teacher_sequence,
+                    teacher_attention_mask,
+                    teacher_num_action,
+                    teacher_total_len,
+                    teacher_custom_rewards,
                 )
+                # Pack student sequences
                 valid_size = out_attention_mask.nonzero().size(0)
                 ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
                 ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -1109,17 +1223,34 @@ class RayPPOTrainer:
                 ret_packed_seq_lens.append(out_packed_seq_lens)
                 if custom_rewards:
                     ret_custom_rewards.append(rewards)
+                
+                # Pack teacher sequences
+                valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+                ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+                ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+                ret_teacher_num_actions.append(out_teacher_num_actions)
+                ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                if teacher_custom_rewards:
+                    ret_teacher_custom_rewards.append(teacher_rewards)
+                
                 (
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
                     out_packed_seq_lens,
                     rewards,
+                    teacher_rewards,
                     seq_offset,
                     seq_index,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_seq_offset,
                 ) = _new_instance()
-            elif seq_offset + total_len > packing_max_len:
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) > packing_max_len:
                 if seq_offset > 0:
+                    # Pack student sequences
                     valid_size = out_attention_mask.nonzero().size(0)
                     ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
                     ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -1127,16 +1258,31 @@ class RayPPOTrainer:
                     ret_packed_seq_lens.append(out_packed_seq_lens)
                     if custom_rewards:
                         ret_custom_rewards.append(rewards)
+                    
+                    # Pack teacher sequences
+                    valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+                    ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+                    ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+                    ret_teacher_num_actions.append(out_teacher_num_actions)
+                    ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                    if teacher_custom_rewards:
+                        ret_teacher_custom_rewards.append(teacher_rewards)
                     (
                         out_sequence,
                         out_attention_mask,
                         out_num_actions,
                         out_packed_seq_lens,
                         rewards,
+                        teacher_rewards,
                         seq_offset,
                         seq_index,
+                        out_teacher_sequence,
+                        out_teacher_attention_mask,
+                        out_teacher_num_actions,
+                        out_teacher_packed_seq_lens,
+                        teacher_seq_offset,
                     ) = _new_instance()
-                    seq_offset, seq_index = _accumulate(
+                    seq_offset, seq_index, teacher_seq_offset = _accumulate(
                         out_sequence,
                         out_attention_mask,
                         out_num_actions,
@@ -1150,9 +1296,19 @@ class RayPPOTrainer:
                         total_len,
                         custom_rewards,
                         i,
+                        out_teacher_sequence,
+                        out_teacher_attention_mask,
+                        out_teacher_num_actions,
+                        out_teacher_packed_seq_lens,
+                        teacher_seq_offset,
+                        teacher_sequence,
+                        teacher_attention_mask,
+                        teacher_num_action,
+                        teacher_total_len,
                     )
 
         if seq_offset > 0:
+            # Pack final student sequences
             valid_size = out_attention_mask.nonzero().size(0)
             ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
             ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -1160,8 +1316,16 @@ class RayPPOTrainer:
             ret_packed_seq_lens.append(out_packed_seq_lens)
             if custom_rewards:
                 ret_custom_rewards.append(rewards)
+            
+            # Pack final teacher sequences
+            valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+            ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+            ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+            ret_teacher_num_actions.append(out_teacher_num_actions)
+            ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
 
-        return ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards
+        return (ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards, 
+                ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens, ret_teacher_custom_rewards)
 
     def _get_dp_group_models(self, dp_rank: int, model_type: str = ""):
         model = getattr(self, model_type)

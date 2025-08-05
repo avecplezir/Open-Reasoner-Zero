@@ -3,7 +3,6 @@ import random
 from abc import ABC
 from dataclasses import dataclass
 from typing import List, Optional, Union
-from loguru import logger
 
 import torch
 import torch.nn.functional as F
@@ -28,8 +27,7 @@ class Experience:
     Left padding for sequences is applied.
 
     Shapes of each tensor:
-    sequences: (B, S) - student sequences for training
-    teacher_sequences: (B, S) - teacher sequences with ground truth asnwer in its prompt
+    sequences: (B, S)
     action_log_probs: (B, A)
     base_action_log_probs: (B, A)
     values: (B, A)
@@ -43,14 +41,12 @@ class Experience:
     """
 
     sequences: torch.Tensor
-    teacher_sequences: torch.Tensor
     action_log_probs: torch.Tensor
     base_action_log_probs: torch.Tensor
     values: Optional[torch.Tensor]
     returns: Optional[torch.Tensor]
     advantages: Optional[torch.Tensor]
     attention_mask: Optional[torch.LongTensor]
-    teacher_attention_mask: torch.LongTensor
     action_mask: Optional[torch.BoolTensor]
     num_actions: Optional[torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
@@ -71,9 +67,6 @@ class Experience:
             self.advantages = to(self.advantages, device)
         if self.attention_mask is not None:
             self.attention_mask = to(self.attention_mask, device)
-        self.teacher_sequences = to(self.teacher_sequences, device)
-        if self.teacher_attention_mask is not None:
-            self.teacher_attention_mask = to(self.teacher_attention_mask, device)
         if self.action_mask is not None:
             self.action_mask = to(self.action_mask, device)
         if self.num_actions is not None:
@@ -83,7 +76,6 @@ class Experience:
 
     def pin_memory(self):
         self.sequences = pin_memory(self.sequences)
-        self.teacher_sequences = pin_memory(self.teacher_sequences)
         self.action_log_probs = pin_memory(self.action_log_probs)
         if self.base_action_log_probs is not None:
             self.base_action_log_probs = pin_memory(self.base_action_log_probs)
@@ -95,8 +87,6 @@ class Experience:
             self.advantages = pin_memory(self.advantages)
         if self.attention_mask is not None:
             self.attention_mask = self.attention_mask.pin_memory()
-        if self.teacher_attention_mask is not None:
-            self.teacher_attention_mask = self.teacher_attention_mask.pin_memory()
         if self.action_mask is not None:
             self.action_mask = self.action_mask.pin_memory()
         if self.num_actions is not None:
@@ -111,29 +101,25 @@ class BufferItem:
     """BufferItem is an item of experience data.
 
     Shapes of each tensor:
-    sequences: (S) - student sequences for training
-    teacher_sequences: (S) - teacher sequences with ground truth answer in prompt
+    sequences: (S)
     action_log_probs: (A)
     base_action_log_probs: (A)
     values: (1)
     returns: (1)
     advatanges: (1)
     attention_mask: (S)
-    teacher_attention_mask: (S)
     action_mask: (A)
 
     "A" is the number of actions.
     """
 
     sequences: torch.Tensor
-    teacher_sequences: torch.Tensor
     action_log_probs: torch.Tensor
     base_action_log_probs: torch.Tensor
     values: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
     attention_mask: Optional[torch.LongTensor]
-    teacher_attention_mask: Optional[torch.LongTensor]
     action_mask: Optional[torch.BoolTensor]
     num_actions: Optional[torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
@@ -158,14 +144,12 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
     batch_kwargs = [{} for _ in range(batch_size)]
     keys = (
         "sequences",
-        "teacher_sequences",
         "action_log_probs",
         "base_action_log_probs",
         "values",
         "returns",
         "advantages",
         "attention_mask",
-        "teacher_attention_mask",
         "action_mask",
         "num_actions",
         "packed_seq_lens",
@@ -215,14 +199,12 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
     kwargs = {}
     keys = (
         "sequences",
-        "teacher_sequences",
         "action_log_probs",
         "base_action_log_probs",
         "values",
         "returns",
         "advantages",
         "attention_mask",
-        "teacher_attention_mask",
         "action_mask",
         "num_actions",
         "packed_seq_lens",
