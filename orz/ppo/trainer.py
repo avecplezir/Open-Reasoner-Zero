@@ -231,9 +231,13 @@ class RayPPOTrainer:
         all_extras = []
         for student, teacher_yes, teacher_no, extra in paired_data:
             # Add both positive and negative examples
+            extra_yes = extra.copy()
+            extra_no = extra.copy()
+            extra_yes["teacher_answer"] = 'yes'
+            extra_no["teacher_answer"] = 'no'
             all_student_prompts.extend([student, student])
             all_teacher_prompts.extend([teacher_yes, teacher_no])
-            all_extras.extend([extra, extra])
+            all_extras.extend([extra_yes, extra_no])
 
         # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
         # 1.1 generate sequences via vllm engines
@@ -275,12 +279,12 @@ class RayPPOTrainer:
                 dp_tasks = []
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                 # Use student prompts for reward calculation since that's what the model will be trained on
-                all_student_prompts, outputs, custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
                 assert len(all_student_prompts) == len(
                     outputs
                 ), "generate objects number after custom reward function must be equal to all inputs number"
         else:
-            all_student_prompts, outputs, custom_rewards = all_student_prompts, outputs, None
+            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = all_student_prompts, outputs, None, None
 
         # empty data
         if len(all_student_prompts) == 0:
@@ -300,7 +304,7 @@ class RayPPOTrainer:
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
             ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                all_student_prompts, outputs, custom_rewards, self.cfg.packing_max_len, all_teacher_prompts
+                all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, self.cfg.packing_max_len,
             )
             action_masks = None
             teacher_action_masks = None
@@ -325,7 +329,7 @@ class RayPPOTrainer:
                 teacher_action_masks,
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
-                None,  # no custom rewards for teacher
+                None, 
             )
             logger.info(f"teacher experiences size: {len(teacher_experiences)}")
 
@@ -1000,8 +1004,13 @@ class RayPPOTrainer:
         return sequences, attention_mask, action_mask
 
     def _convert_prompts_outputs_to_batch_tensors_packing(
-        self, prompts: List[str], outputs: List[str], custom_rewards: Optional[List[torch.Tensor]], packing_max_len: int,
-        teacher_prompts: Optional[List[str]] = None
+        self, prompts: List[str],
+        teacher_prompts: List[str],
+        outputs: List[str],
+        custom_rewards: Optional[List[torch.Tensor]],
+        teacher_custom_rewards: Optional[List[torch.Tensor]],
+        packing_max_len: int,
+
     ):
         ret_sequences = []
         ret_attention_masks = []
@@ -1011,6 +1020,11 @@ class RayPPOTrainer:
             ret_custom_rewards = []
         else:
             ret_custom_rewards = None
+
+        if teacher_custom_rewards is not None:
+            ret_teacher_custom_rewards = []
+        else:
+            ret_teacher_custom_rewards = None
         
         # Teacher sequences (always provided)
         ret_teacher_sequences = []
@@ -1028,6 +1042,7 @@ class RayPPOTrainer:
             out_num_actions = []
             out_packed_seq_lens = []
             rewards = [] if custom_rewards else None
+            teacher_rewards = [] if teacher_custom_rewards else None
             seq_offset = 0
             seq_index = 0
             
@@ -1044,6 +1059,7 @@ class RayPPOTrainer:
                 out_num_actions,
                 out_packed_seq_lens,
                 rewards,
+                teacher_rewards,
                 seq_offset,
                 seq_index,
                 out_teacher_sequence,
@@ -1072,11 +1088,13 @@ class RayPPOTrainer:
             out_teacher_attention_mask,
             out_teacher_num_actions,
             out_teacher_packed_seq_lens,
+            teacher_rewards,
             teacher_seq_offset,
             teacher_sequence,
             teacher_attention_mask,
             teacher_num_action,
             teacher_total_len,
+            teacher_custom_rewards,
         ):
             # Student sequence
             out_sequence[seq_offset : seq_offset + total_len] = torch.tensor(sequence)
@@ -1091,6 +1109,8 @@ class RayPPOTrainer:
             out_teacher_attention_mask[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = seq_index + 1
             out_teacher_num_actions.append(teacher_num_action)
             out_teacher_packed_seq_lens.append(teacher_total_len)
+            if teacher_custom_rewards:
+                teacher_rewards.append(teacher_custom_rewards[i])
             
             return seq_offset + total_len, seq_index + 1, teacher_seq_offset + teacher_total_len
 
@@ -1129,6 +1149,7 @@ class RayPPOTrainer:
             out_num_actions,
             out_packed_seq_lens,
             rewards,
+            teacher_rewards,
             seq_offset,
             seq_index,
             out_teacher_sequence,
@@ -1159,11 +1180,13 @@ class RayPPOTrainer:
                     out_teacher_attention_mask,
                     out_teacher_num_actions,
                     out_teacher_packed_seq_lens,
+                    teacher_rewards,
                     teacher_seq_offset,
                     teacher_sequence,
                     teacher_attention_mask,
                     teacher_num_action,
                     teacher_total_len,
+                    teacher_custom_rewards,
                 )
             elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) == packing_max_len:
                 seq_offset, seq_index, teacher_seq_offset = _accumulate(
@@ -1184,11 +1207,13 @@ class RayPPOTrainer:
                     out_teacher_attention_mask,
                     out_teacher_num_actions,
                     out_teacher_packed_seq_lens,
+                    teacher_rewards,
                     teacher_seq_offset,
                     teacher_sequence,
                     teacher_attention_mask,
                     teacher_num_action,
                     teacher_total_len,
+                    teacher_custom_rewards,
                 )
                 # Pack student sequences
                 valid_size = out_attention_mask.nonzero().size(0)
@@ -1205,6 +1230,8 @@ class RayPPOTrainer:
                 ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
                 ret_teacher_num_actions.append(out_teacher_num_actions)
                 ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                if teacher_custom_rewards:
+                    ret_teacher_custom_rewards.append(teacher_rewards)
                 
                 (
                     out_sequence,
@@ -1212,6 +1239,7 @@ class RayPPOTrainer:
                     out_num_actions,
                     out_packed_seq_lens,
                     rewards,
+                    teacher_rewards,
                     seq_offset,
                     seq_index,
                     out_teacher_sequence,
@@ -1237,12 +1265,15 @@ class RayPPOTrainer:
                     ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
                     ret_teacher_num_actions.append(out_teacher_num_actions)
                     ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                    if teacher_custom_rewards:
+                        ret_teacher_custom_rewards.append(teacher_rewards)
                     (
                         out_sequence,
                         out_attention_mask,
                         out_num_actions,
                         out_packed_seq_lens,
                         rewards,
+                        teacher_rewards,
                         seq_offset,
                         seq_index,
                         out_teacher_sequence,
@@ -1294,7 +1325,7 @@ class RayPPOTrainer:
             ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
 
         return (ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards, 
-                ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens)
+                ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens, ret_teacher_custom_rewards)
 
     def _get_dp_group_models(self, dp_rank: int, model_type: str = ""):
         model = getattr(self, model_type)
