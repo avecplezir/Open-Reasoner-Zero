@@ -7,6 +7,8 @@ from functools import partial
 from heapq import heapify, heappop, heappush
 from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
 import wandb
+import numpy as np
+from collections import defaultdict
 
 import ray
 import torch
@@ -322,6 +324,7 @@ class RayPPOTrainer:
                 ret_custom_rewards,
             )
             logger.info(f"student experiences size: {len(student_experiences)} {len(ret_num_actions)}")
+            # logger.info(f"student log proba size: {student_experiences[0].action_log_probs.shape} {student_experiences[1].action_log_probs.shape} {student_experiences[0].sequences.shape}")
 
         # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
         async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
@@ -334,6 +337,99 @@ class RayPPOTrainer:
                 ret_teacher_custom_rewards,
             )
             logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
+            # logger.info(f"teacher log proba size: {teacher_experiences[0].action_log_probs.shape} {teacher_experiences[1].action_log_probs.shape} {teacher_experiences[0].sequences.shape}")
+
+        # Compute teacher reward
+        kl_max_coef = 0.01
+        kl_reward_list = []
+        kl_max_list = []
+        kl_mean_list = []
+
+        teacher_prompt_idx = 0
+        teacher_pass_at_n_dict = defaultdict(list)
+        for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
+            # Compute KL divergence with proper masking
+            kl_div_all = compute_approx_kl(
+                student_exp.action_log_probs,
+                teacher_exp.action_log_probs,
+                action_mask=student_exp.action_mask,
+                use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
+                use_abs_kl=self.cfg.use_abs_kl,
+            )
+
+            offset = 0
+            for i, num_action in enumerate(teacher_exp.num_actions[0]):
+                na = int(num_action.item())
+                start, end = offset, offset + na
+                kl_episode = kl_div_all[:, start:end].clone()
+                kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
+                kl_mean = masked_mean(kl_episode, None, dim=-1)
+                kl_reward_list.append(-kl_mean - kl_max_coef * kl_max)
+                teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(kl_reward_list[-1].item())
+                kl_max_list.append(kl_max)
+                kl_mean_list.append(kl_mean)
+                offset += na
+                teacher_prompt_idx += 1
+
+                if not self.cfg.use_grpo:
+                    teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + kl_reward_list[-1]
+
+            assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
+
+        assert len(kl_reward_list) == teacher_prompt_idx == len(all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
+
+        # Log average KL divergence between student and teacher
+        avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
+        avg_student_teacher_kl_max = kl_max_coef * sum(kl_max_list) / len(kl_max_list)
+        self.writer.add_scalar("avg_student_teacher_kl", avg_student_teacher_kl, self.global_step)
+        self.writer.add_scalar("avg_student_teacher_kl_max", avg_student_teacher_kl_max, self.global_step)
+
+
+        if self.cfg.use_grpo:
+            logger.info(f"computing GRPO normalized rewards")
+            teacher_prompt_idx = 0
+            teacher_score_sum = 0
+            reward_kl_coef = 1
+            reward_match_coef = 0.5
+            for teacher_exp in teacher_experiences:
+                assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
+                for i in range(len(teacher_exp.num_actions[0])):
+                    prompt = all_teacher_prompts[teacher_prompt_idx]
+                    teacher_score = kl_reward_list[teacher_prompt_idx].item()
+                    # logger.info(f"teacher_score {teacher_score}")
+                    teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
+                    # logger.info(f"np.mean(teacher_pass_at_n_dict[prompt]) {np.mean(teacher_pass_at_n_dict[prompt])} {len(teacher_pass_at_n_dict[prompt])}")
+                    if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                        teacher_score /= teacher_std
+
+                    teacher_score_sum += teacher_score
+
+                    # logger.info(f"2 teacher_score {teacher_score}")
+                    # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                    teacher_exp.info['custom_rewards'][i][-1] = reward_match_coef * teacher_exp.info['custom_rewards'][i][-1] + reward_kl_coef*teacher_score
+                    # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                    teacher_prompt_idx += 1
+
+        assert teacher_prompt_idx == len(all_teacher_prompts) == len(kl_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
+
+        self.writer.add_scalar("avg_teacher_kl_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
+
+        # Replace student action_log_probs with teacher action_log_probs
+        for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
+            student_experiences[i] = Experience(
+                student_exp.sequences,
+                teacher_exp.action_log_probs,  # Use teacher's action_log_probs
+                student_exp.base_action_log_probs,
+                student_exp.values,
+                student_exp.returns,
+                student_exp.advantages,
+                student_exp.attention_mask,
+                student_exp.action_mask,
+                student_exp.num_actions,
+                student_exp.packed_seq_lens,
+                student_exp.info,
+                student_exp.kl,
+            )
 
         # 2 vis student and teacher to wandb and writer
         for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
@@ -502,6 +598,7 @@ class RayPPOTrainer:
 
         # calculate rewards
         reward_refs = []
+        logger.info(f"self.cfg.use_orm_score {self.cfg.use_orm_score} self.reward_model {self.reward_model}")
         if self.cfg.use_orm_score and self.reward_model:
             reward_refs.append(
                 micro_infer_model(
@@ -874,6 +971,7 @@ class RayPPOTrainer:
             self.cfg.lambd,
             packing=True,
         )
+
         return_sums = reward.sum(dim=-1)
         return_sums /= len(num_actions)
         experience.info["return"] = return_sums
