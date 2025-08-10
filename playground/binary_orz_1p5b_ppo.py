@@ -129,6 +129,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     gamma: float = 1.0
     lambd: float = 1.0
+    kl_max_coef: float = 0.01
+    reward_kl_coef: float = 0.5
 
 
 if __name__ == "__main__":

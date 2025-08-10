@@ -341,7 +341,6 @@ class RayPPOTrainer:
 
         # Compute teacher reward
         async with Timer("Calculate teacher reward"):
-            kl_max_coef = 0.01
             kl_reward_list = []
             kl_max_list = []
             kl_mean_list = []
@@ -365,7 +364,7 @@ class RayPPOTrainer:
                     kl_episode = kl_div_all[:, start:end].clone()
                     kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
                     kl_mean = masked_mean(kl_episode, None, dim=-1)
-                    kl_reward_list.append(-kl_mean - kl_max_coef * kl_max)
+                    kl_reward_list.append(-kl_mean - self.cfg.kl_max_coef * kl_max)
                     teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(kl_reward_list[-1].item())
                     kl_max_list.append(kl_max)
                     kl_mean_list.append(kl_mean)
@@ -381,7 +380,7 @@ class RayPPOTrainer:
 
             # Log average KL divergence between student and teacher
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
-            avg_student_teacher_kl_max = kl_max_coef * sum(kl_max_list) / len(kl_max_list)
+            avg_student_teacher_kl_max = self.cfg.kl_max_coef * sum(kl_max_list) / len(kl_max_list)
             self.writer.add_scalar("avg_student_teacher_kl", avg_student_teacher_kl, self.global_step)
             self.writer.add_scalar("avg_student_teacher_kl_max", avg_student_teacher_kl_max, self.global_step)
             logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max}")
@@ -390,8 +389,7 @@ class RayPPOTrainer:
                 logger.info(f"computing GRPO normalized rewards")
                 teacher_prompt_idx = 0
                 teacher_score_sum = 0
-                reward_kl_coef = 1
-                reward_match_coef = 0.5
+                reward_match_coef = 1 - self.cfg.reward_kl_coef
                 for teacher_exp in teacher_experiences:
                     assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
                     for i in range(len(teacher_exp.num_actions[0])):
@@ -408,7 +406,7 @@ class RayPPOTrainer:
 
                         # logger.info(f"2 teacher_score {teacher_score}")
                         # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
-                        teacher_exp.info['custom_rewards'][i][-1] = reward_match_coef * teacher_exp.info['custom_rewards'][i][-1] + reward_kl_coef*teacher_score
+                        teacher_exp.info['custom_rewards'][i][-1] = reward_match_coef * teacher_exp.info['custom_rewards'][i][-1] + self.cfg.reward_kl_coef*teacher_score
                         # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
                         teacher_prompt_idx += 1
 
