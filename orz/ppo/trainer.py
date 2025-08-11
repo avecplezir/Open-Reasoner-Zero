@@ -373,17 +373,23 @@ class RayPPOTrainer:
 
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
-                    if final_answer_start is not None:
-                        final_answer_start, final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                    if final_answer_start is not None and final_answer_start < final_answer_end:
+
+                        s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        final_answer_start, final_answer_end = offset+ final_answer_start, offset + final_answer_end
+
+                        # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
+                        s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
+                        # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
-                        vis_final_answer = self._detokenize(student_exp.sequences[0][final_answer_start:final_answer_end])
-                        logger.info(f"reward {student_exp.info['reward']} final_answer_start: {final_answer_start}, final_answer_end: {final_answer_end}, vis_final_answer: {vis_final_answer}")
+                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                        logger.info(f"s_final_answer_start: {s_final_answer_start}, s_final_answer_end: {s_final_answer_end}, vis_final_answer: {vis_final_answer}")
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
                     else:
-                        ss_reward_mean = ss_reward_min = ss_reward = 0
+                        ss_reward_mean = ss_reward_min = ss_reward = -1.1
 
                     ss_reward_mean_list.append(ss_reward_mean)
                     ss_reward_min_list.append(ss_reward_min)
@@ -411,6 +417,7 @@ class RayPPOTrainer:
                         teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + final_reward_list[-1]
 
                 assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
+                assert len(student_exp.sequences[0]) == seq_offset, "student_exp.sequences must be equal to seq_offset at the end"
 
             assert len(final_reward_list) == teacher_prompt_idx == len(all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
 
