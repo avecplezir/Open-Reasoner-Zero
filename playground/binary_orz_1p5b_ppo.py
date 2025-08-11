@@ -134,7 +134,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # reward_kl_coef: float = 1.0 #0.8
     # reward_match_coef: float = 1.0
     reward_kl_coef: float = 1.
-    reward_match_coef: float = 0.01
+    reward_match_coef: float = 0.1
     ss_reward_coef: float = 0.33
 
 
