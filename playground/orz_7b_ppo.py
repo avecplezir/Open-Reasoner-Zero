@@ -189,7 +189,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         outputs: List[Any],
         extras: List[dict],
         reward_model_fn: Callable[[List[str], List[str]], Awaitable[torch.Tensor]],
-    ) -> Tuple[List[str], List[str], List[torch.Tensor], List[torch.Tensor]]:
+    ) -> Tuple[List[str], List[str], List[torch.Tensor], List[torch.Tensor], List[Tuple[int, int]]]:
         # make log metrics
         scores = []
         teacher_scores = []
@@ -294,12 +294,12 @@ class CustomRewardTrainer(RayPPOTrainer):
             # grpo reward normalization
             for i, prompt in enumerate(prompts):
                 scores[i] -= np.mean(pass_at_n_dict[prompt])
-                teacher_scores[i] -= np.mean(teacher_pass_at_n_dict[prompt])
                 if std := np.std(pass_at_n_dict[prompt]) > 0:
                     scores[i] /= std
-                if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-                    teacher_scores[i] /= teacher_std
-
+                if not self.cfg.grpo_normalize_only_at_trainer:
+                    teacher_scores[i] -= np.mean(teacher_pass_at_n_dict[prompt])
+                    if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                        teacher_scores[i] /= teacher_std
 
         def dump_results(prompts, outputs, scores):
             saved = []
@@ -358,14 +358,19 @@ class CustomRewardTrainer(RayPPOTrainer):
         res_responses = []
         res_score_tensors = []
         res_teacher_score_tensors = []
-        for prompt, response, score_tensor, teacher_score_tensor in zip(prompts, responses, score_tensors, teacher_score_tensors):
+        res_indices = []
+        for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
             if len(response) > 0:
                 res_prompts.append(prompt)
                 res_responses.append(response)
                 res_score_tensors.append(score_tensor)
                 res_teacher_score_tensors.append(teacher_score_tensor)
+                # Extract indices from output, defaulting to None if not present
+                begin_idx = output.get('answer_begin_idx', None)
+                end_idx = output.get('answer_end_idx', None)
+                res_indices.append((begin_idx, end_idx))
 
-        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors
+        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices
 
     @override
     @torch.no_grad()
@@ -394,14 +399,52 @@ class CustomRewardTrainer(RayPPOTrainer):
         )
 
         @ray.remote(num_cpus=1)
-        def extract_final_answers_batch(responses: List[str]) -> List[str]:
+        def extract_final_answers_batch(responses: List[str], tokenizer) -> List[dict]:
             # pattern = re.compile(r"(\\boxed{.*})")
             # pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
             pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             results = []
             for response in responses:
                 matches = re.findall(pattern, response)
-                results.append(matches[-1] if matches else "")
+                final_answer = matches[-1] if matches else ""
+                
+                # Compute begin and end indices of final answer in tokenized response
+                answer_begin_idx, answer_end_idx = None, None
+                if final_answer:
+                    # Find the position of <answer> and </answer> tags
+                    answer_start = response.find("<answer>")
+                    answer_end = response.find("</answer>")
+                    if answer_start != -1 and answer_end != -1:
+                        # Extract just the content between tags
+                        answer_content_start = answer_start + len("<answer>")
+                        answer_content = response[answer_content_start:answer_end]
+                        
+                        # Tokenize the full response to get token indices
+                        tokenized_full = tokenizer.encode(response, add_special_tokens=False)
+                        
+                        # Find where the answer content starts and ends by tokenizing segments
+                        prefix = response[:answer_content_start]
+                        prefix_tokens = tokenizer.encode(prefix, add_special_tokens=False)
+                        answer_begin_idx = len(prefix_tokens)
+                        
+                        # Tokenize prefix + answer content to find end
+                        prefix_plus_answer = response[:answer_end] 
+                        prefix_plus_answer_tokens = tokenizer.encode(prefix_plus_answer, add_special_tokens=False)
+                        answer_end_idx = len(prefix_plus_answer_tokens)
+                        
+                        # Verification: detokenize the extracted tokens back to text
+                        if answer_begin_idx is not None and answer_end_idx is not None:
+                            answer_tokens = tokenized_full[answer_begin_idx:answer_end_idx]
+                            detokenized_answer = tokenizer.decode(answer_tokens, skip_special_tokens=False)
+                            logger.info(f"Original final_answer: '{final_answer}' Answer content: '{answer_content}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
+                            # logger.info(f"Content match: {answer_content == detokenized_answer}")
+                            # logger.info(f"Final answer match: {final_answer == detokenized_answer}")
+                
+                results.append({
+                    "final_answer": final_answer,
+                    "answer_begin_idx": answer_begin_idx,
+                    "answer_end_idx": answer_end_idx
+                })
             return results
 
         BATCH_SIZE = 16
@@ -413,29 +456,25 @@ class CustomRewardTrainer(RayPPOTrainer):
             start_idx = i * BATCH_SIZE
             end_idx = min((i + 1) * BATCH_SIZE, len(responses))
             batch = responses[start_idx:end_idx]
-            extract_tasks.append(extract_final_answers_batch.remote(batch))
+            extract_tasks.append(extract_final_answers_batch.remote(batch, self.tokenizer))
         batched_results = await asyncio.gather(*[asyncio.to_thread(ray.get, task) for task in extract_tasks])
-        final_answers = [answer for batch in batched_results for answer in batch]
+        final_answer_items = [item for batch in batched_results for item in batch]
 
         # 判断对错
         global executor
         equal_tasks = []
-        for extra, final_answer in zip(extras, final_answers):
-            # logger.info('extra["answer"]' + str(extra["answer"]))
-            # logger.info('final_answer' + str(final_answer))
-            # logger.info('solution2answer(extra["answer"])' + str(solution2answer(extra["answer"])))
-            # logger.info('solution2answer(final_answer)' + str(solution2answer(final_answer)))
-            equal_tasks.append(is_equal(solution2answer(extra["answer"]), solution2answer(final_answer), executor))
+        for extra, final_answer_item in zip(extras, final_answer_items):
+            equal_tasks.append(is_equal(solution2answer(extra["answer"]), solution2answer(final_answer_item['final_answer']), executor))
         equal_results = await asyncio.gather(*equal_tasks)
 
         equal_teacher_tasks = []
-        for extra, final_answer in zip(extras, final_answers):
-            equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer), executor))
+        for extra, final_answer_item in zip(extras, final_answer_items):
+            equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
         equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
 
         results = []
-        for extra, response, final_answer, stop_reason, iscorrect, teacher_iscorrect in zip(
-            extras, responses, final_answers, stop_reasons, equal_results, equal_teacher_results
+        for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect in zip(
+            extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results
         ):
             results.append(
                 dict(
@@ -443,7 +482,9 @@ class CustomRewardTrainer(RayPPOTrainer):
                     iscorrect=iscorrect,
                     teacher_iscorrect=teacher_iscorrect,
                     stop_reason=stop_reason,
-                    final_answer=final_answer,
+                    final_answer=final_answer_item['final_answer'],
+                    answer_begin_idx=final_answer_item['answer_begin_idx'],
+                    answer_end_idx=final_answer_item['answer_end_idx'],
                 )
             )
 
@@ -500,11 +541,6 @@ class CustomRewardTrainer(RayPPOTrainer):
             ):
                 label = solution2answer(answer)
                 prefix_response = solution2answer(final_answer)
-
-                # logger.info('answer' + str(answer))
-                # logger.info('final_answer' + str(final_answer))
-                # logger.info('label' + str(label))
-                # logger.info('prefix_response' + str(prefix_response))
 
                 iscorrect = await is_equal(label, prefix_response, executor)
                 output_for_save.append(

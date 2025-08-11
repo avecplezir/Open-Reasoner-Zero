@@ -282,12 +282,12 @@ class RayPPOTrainer:
                 dp_tasks = []
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                 # Use student prompts for reward calculation since that's what the model will be trained on
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = await reward_fn(all_student_prompts, outputs, all_extras)
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices = await reward_fn(all_student_prompts, outputs, all_extras)
                 assert len(all_student_prompts) == len(
                     outputs
                 ), "generate objects number after custom reward function must be equal to all inputs number"
         else:
-            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards = all_student_prompts, outputs, None, None
+            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices = all_student_prompts, outputs, None, None, None
 
         # empty data
         if len(all_student_prompts) == 0:
@@ -341,60 +341,103 @@ class RayPPOTrainer:
 
         # Compute teacher reward
         async with Timer("Calculate teacher reward"):
-            kl_reward_list = []
+            final_reward_list = []
             kl_max_list = []
             kl_mean_list = []
+            match_reward_list = []
+            ss_reward_mean_list = []
+            ss_reward_min_list = []
+            ss_reward_list = []
+
+            reward_match_coef = self.cfg.reward_match_coef if self.cfg.grpo_normalize_only_at_trainer else 0
 
             teacher_prompt_idx = 0
             teacher_pass_at_n_dict = defaultdict(list)
             for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
                 # Compute KL divergence with proper masking
                 kl_div_all = compute_approx_kl(
-                    student_exp.action_log_probs,
                     teacher_exp.action_log_probs,
+                    student_exp.action_log_probs,
                     action_mask=student_exp.action_mask,
                     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
                     use_abs_kl=self.cfg.use_abs_kl,
                 )
 
                 offset = 0
+                seq_offset = 0
+                total_lengths = student_exp.info["total_length"].flatten()
                 for i, num_action in enumerate(teacher_exp.num_actions[0]):
                     na = int(num_action.item())
+                    seq_len = int(total_lengths[i])
+                    prompt_len = seq_len - na
+
+                    # computing answer alignment reward
+                    final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
+                    if final_answer_start is not None:
+                        final_answer_start, final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
+                        # check if we find indices correctly
+                        vis_final_answer = self._detokenize(student_exp.sequences[0][final_answer_start:final_answer_end])
+                        logger.info(f"reward {student_exp.info['reward']} final_answer_start: {final_answer_start}, final_answer_end: {final_answer_end}, vis_final_answer: {vis_final_answer}")
+                        ss_reward_mean = final_answer_log_propbs.mean().item()
+                        ss_reward_min = final_answer_log_propbs.min().item()
+                        ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
+                    else:
+                        ss_reward_mean = ss_reward_min = ss_reward = 0
+
+                    ss_reward_mean_list.append(ss_reward_mean)
+                    ss_reward_min_list.append(ss_reward_min)
+                    ss_reward_list.append(ss_reward)
+
+                    # computing kl divergence reward
                     start, end = offset, offset + na
                     kl_episode = kl_div_all[:, start:end].clone()
                     kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
                     kl_mean = masked_mean(kl_episode, None, dim=-1)
-                    kl_reward_list.append(-kl_mean - self.cfg.kl_max_coef * kl_max)
-                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(kl_reward_list[-1].item())
+                    match_reward = reward_match_coef*teacher_exp.info['custom_rewards'][i][-1]
+                    kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
+                    final_reward_list.append(self.cfg.ss_reward_coef * ss_reward_list[-1] + kl_reward + match_reward)
+                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1].item())
+
                     kl_max_list.append(kl_max)
                     kl_mean_list.append(kl_mean)
+                    match_reward_list.append(match_reward)
+
                     offset += na
                     teacher_prompt_idx += 1
+                    seq_offset += seq_len
 
                     if not self.cfg.use_grpo:
-                        teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + kl_reward_list[-1]
+                        teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + final_reward_list[-1]
 
                 assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
 
-            assert len(kl_reward_list) == teacher_prompt_idx == len(all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
+            assert len(final_reward_list) == teacher_prompt_idx == len(all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
 
             # Log average KL divergence between student and teacher
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = self.cfg.kl_max_coef * sum(kl_max_list) / len(kl_max_list)
+            avg_match_reward_trainer = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
             self.writer.add_scalar("avg_student_teacher_kl", avg_student_teacher_kl, self.global_step)
             self.writer.add_scalar("avg_student_teacher_kl_max", avg_student_teacher_kl_max, self.global_step)
-            logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max}")
+            self.writer.add_scalar("avg_match_reward_trainer", avg_match_reward_trainer, self.global_step)
+            self.writer.add_scalar("avg_ss_reward_mean", sum(ss_reward_mean_list) / len(ss_reward_mean_list), self.global_step) if len(ss_reward_mean_list) > 0 else None
+            self.writer.add_scalar("avg_ss_reward_min", sum(ss_reward_min_list) / len(ss_reward_min_list), self.global_step) if len(ss_reward_min_list) > 0 else None
+            self.writer.add_scalar("avg_ss_reward", sum(ss_reward_list) / len(ss_reward_list), self.global_step) if len(ss_reward_list) > 0 else None
+            logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward_trainer {avg_match_reward_trainer}")
 
             if self.cfg.use_grpo:
                 logger.info(f"computing GRPO normalized rewards")
                 teacher_prompt_idx = 0
                 teacher_score_sum = 0
-                reward_match_coef = 1 - self.cfg.reward_kl_coef
+                reward_match_coef = 1 - self.cfg.reward_kl_coef if not self.cfg.grpo_normalize_only_at_trainer else 0
+                reward_kl_coef = self.cfg.reward_kl_coef #if not self.cfg.grpo_normalize_only_at_trainer else 1
+                logger.info(f"reward_kl_coef {reward_kl_coef} reward_match_coef: {reward_match_coef}, cfg.grpo_normalize_only_at_trainer: {self.cfg.grpo_normalize_only_at_trainer}")
                 for teacher_exp in teacher_experiences:
                     assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
                     for i in range(len(teacher_exp.num_actions[0])):
                         prompt = all_teacher_prompts[teacher_prompt_idx]
-                        teacher_score = kl_reward_list[teacher_prompt_idx].item()
+                        teacher_score = final_reward_list[teacher_prompt_idx].item()
 
                         # logger.info(f"teacher_score {teacher_score}")
                         teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
@@ -406,11 +449,11 @@ class RayPPOTrainer:
 
                         # logger.info(f"2 teacher_score {teacher_score}")
                         # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
-                        teacher_exp.info['custom_rewards'][i][-1] = reward_match_coef * teacher_exp.info['custom_rewards'][i][-1] + self.cfg.reward_kl_coef*teacher_score
+                        teacher_exp.info['custom_rewards'][i][-1] = reward_match_coef * teacher_exp.info['custom_rewards'][i][-1] + reward_kl_coef*teacher_score
                         # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
                         teacher_prompt_idx += 1
 
-            assert teacher_prompt_idx == len(all_teacher_prompts) == len(kl_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
+            assert teacher_prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
 
             self.writer.add_scalar("avg_teacher_kl_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
             logger.info(f"avg_student_teacher_kl: {teacher_score_sum / len(all_teacher_prompts)}")
