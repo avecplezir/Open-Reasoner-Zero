@@ -4,6 +4,7 @@ import os
 import socket
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from typing import Dict, Optional, Type, Union
+from loguru import logger
 
 import deepspeed
 import ray
@@ -112,9 +113,10 @@ class PolicyLoss(nn.Module):
     Policy Loss for PPO
     """
 
-    def __init__(self, clip_eps: float = 0.2) -> None:
+    def __init__(self, clip_eps: float = 0.2, use_topr=False) -> None:
         super().__init__()
         self.clip_eps = clip_eps
+        self.use_topr = use_topr
 
     def forward(
         self,
@@ -123,11 +125,28 @@ class PolicyLoss(nn.Module):
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        ratio = (log_probs - old_log_probs).exp()
-        surr1 = ratio * advantages
-        surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
-        loss = -torch.min(surr1, surr2)
-        loss = masked_mean(loss, action_mask, dim=-1).mean()
+        if not self.use_topr:
+            ratio = (log_probs - old_log_probs).exp()
+            surr1 = ratio * advantages
+            surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
+            loss = -torch.min(surr1, surr2)
+            loss = masked_mean(loss, action_mask, dim=-1).mean()
+        else:
+            log_probs_sum = log_probs.sum(dim=-1)
+            old_log_probs_sum = old_log_probs.sum(dim=-1)
+
+            # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
+            # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
+            log_ratio = (log_probs_sum - old_log_probs_sum).clamp(max=0.0)
+            ratio_clipped_0_1 = torch.exp(log_ratio)  # in (0, 1]
+
+            # α = 1 for positives; α = clipped ratio for negatives; stop gradient through α
+            alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
+
+            # We *maximize* E[ alpha * adv * log π ], so the loss to *minimize* is the negative
+            per_example_loss = -(alpha * advantages * log_probs) # [B]
+            loss = per_example_loss.mean()
+
         return loss
 
 
@@ -391,8 +410,8 @@ class PolicyRayActorBase(RayActor):
             self.consumed_samples = states["consumed_samples"]
             self.strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
 
-        # set ppo loss function
-        self.actor_loss_fn = PolicyLoss(self.args.eps_clip)
+        # set ppo/topr loss function
+        self.actor_loss_fn = PolicyLoss(self.args.eps_clip, use_topr=self.args.use_topr)
 
     def save_model(self, tokenizer, iteration):
         args = self.strategy.args
@@ -522,6 +541,7 @@ class PolicyRayActorBase(RayActor):
 
         # loss function
         # TODO: recompute advantages
+        logger.info(f'action_log_probs {action_log_probs.shape} old_action_log_probs {old_action_log_probs.shape}')
         actor_loss = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,

@@ -249,12 +249,11 @@ class CustomRewardTrainer(RayPPOTrainer):
                 })
 
             wandb.log({
-                "step": self.global_step,
                 "reasoning_examples": wandb.Table(
                     columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct", "teacher_iscorrect", "stop_reason"],
                     data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"], ex['teacher_iscorrect'], ex["stop_reason"]] for ex in reasoning_examples]
                 )
-            })
+            }, step=self.global_step)
         for idx in range(len(outputs)):
             prompt, output, out_token = prompts[idx], outputs[idx], output_tokens[idx]
             rep_score, reflection_pattern_score = repeat_scores[idx], reflection_pattern_scores[idx]
@@ -610,12 +609,11 @@ class CustomRewardTrainer(RayPPOTrainer):
                 })
             
             wandb.log({
-                "step": self.global_step,
                 "eval_reasoning_examples": wandb.Table(
                     columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct"],
                     data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"]] for ex in eval_examples]
                 )
-            })
+            }, step=self.global_step)
 
 
 class PPOExp(BasePPOExp):

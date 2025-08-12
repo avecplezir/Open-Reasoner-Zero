@@ -137,6 +137,8 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_match_coef: float = 0.1
     ss_reward_coef: float = 0.33
 
+    use_topr: bool = True
+
 
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())

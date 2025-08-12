@@ -508,7 +508,7 @@ class RayPPOTrainer:
                     wandb.log({
                         "step": self.global_step,
                         f"{prefix}_examples": wandb.Table(
-                            columns=["student_prompt", "student_reasoning"],
+                            columns=["prompt", "reasoning"],
                             data=data)
                     })
 
