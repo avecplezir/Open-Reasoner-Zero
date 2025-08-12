@@ -130,7 +130,13 @@ class RayPPOTrainer:
                     self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                for replay_buffer, prefix in zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher']):
+                if self.cfg.train_teacher:
+                    train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
+                else:
+                    self.teacher_replay_buffer.clear()
+                    train_set = zip([self.student_replay_buffer], [""], [True])
+
+                for replay_buffer, prefix, backlog in train_set:
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     # serialize replay buffer to jsonl
                     async with Timer("Dumping replay buffer"):
@@ -160,14 +166,14 @@ class RayPPOTrainer:
                                 await self.critic_model.offload_to_cpu()
                         async with Timer("Actor model training"):
                             await self.policy_model.backload_to_gpu()
-                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
                             await self.policy_model.offload_to_cpu()
 
                     else:
                         if self.critic_model is not None:
                             async with Timer("Actor and Critic model training"):
                                 status = await asyncio.gather(
-                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix),
+                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog),
                                     self.ppo_local_train_critic(critic_buffers, self.global_step, prefix),
                                 )
                                 await asyncio.gather(
@@ -177,7 +183,7 @@ class RayPPOTrainer:
                                 status = status[0]
                         else:
                             async with Timer("Actor model training"):
-                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
                                 await self.policy_model.async_run_method("empty_cache")
 
                     replay_buffer.clear()
@@ -383,8 +389,8 @@ class RayPPOTrainer:
                         s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
                         # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
-                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
-                        logger.info(f"s_final_answer_start: {s_final_answer_start}, s_final_answer_end: {s_final_answer_end}, vis_final_answer: {vis_final_answer}")
+                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                        # logger.info(f"s_final_answer_start: {s_final_answer_start}, s_final_answer_end: {s_final_answer_end}, vis_final_answer: {vis_final_answer}")
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
@@ -408,6 +414,12 @@ class RayPPOTrainer:
                     kl_max_list.append(kl_max)
                     kl_mean_list.append(kl_mean)
                     match_reward_list.append(match_reward)
+
+                    # compute ratio_clipped_0_1 for TOPR
+                    if self.cfg.use_topr:
+                        log_ratio = (student_exp.action_log_probs[:, start:end].sum() - teacher_exp.action_log_probs[:, start:end].sum()).clamp(max=0.0)
+                        ratio_clipped_0_1 = torch.exp(log_ratio) * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
+                        logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -959,7 +971,7 @@ class RayPPOTrainer:
 
         logger.info("init policy/ref/critic/reward models done")
 
-    async def ppo_local_train_policy(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = ""):
+    async def ppo_local_train_policy(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = "", backlog: bool = False):
         if global_steps > self.cfg.freezing_actor_steps:
             async with Timer(f"{prefix.capitalize()} Policy model training"):
                 status = await self.policy_model.async_ppo_train(global_steps, replay_buffers)
@@ -969,7 +981,7 @@ class RayPPOTrainer:
             self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
             await self.policy_model.async_run_method("empty_cache")
-        if prefix == "teacher":
+        if backlog:
             if self.cfg.colocate_all:
                 async with Timer("Backload vllm engines to gpu"):
                     await self._backload_vllm_engines()

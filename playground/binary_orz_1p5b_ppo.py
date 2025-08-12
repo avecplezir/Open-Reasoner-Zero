@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    e_name = "teacherv5-grpo-4gpu-v0"
+    e_name = 'teacherv-untrained-6-grpo-4gpu-v0' #"teacherv5-topr-4gpu-v0"
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -137,7 +137,8 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_match_coef: float = 0.1
     ss_reward_coef: float = 0.33
 
-    use_topr: bool = True
+    use_topr: bool = False
+    train_teacher: bool = False
 
 
 if __name__ == "__main__":

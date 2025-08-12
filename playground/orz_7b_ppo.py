@@ -432,13 +432,11 @@ class CustomRewardTrainer(RayPPOTrainer):
                         answer_end_idx = len(prefix_plus_answer_tokens)
                         
                         # Verification: detokenize the extracted tokens back to text
-                        if answer_begin_idx is not None and answer_end_idx is not None:
-                            answer_tokens = tokenized_full[answer_begin_idx:answer_end_idx]
-                            detokenized_answer = tokenizer.decode(answer_tokens, skip_special_tokens=False)
-                            logger.info(f"Original final_answer: '{final_answer}' Answer content: '{answer_content}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
-                            # logger.info(f"Content match: {answer_content == detokenized_answer}")
-                            # logger.info(f"Final answer match: {final_answer == detokenized_answer}")
-                
+                        # if answer_begin_idx is not None and answer_end_idx is not None:
+                        #     answer_tokens = tokenized_full[answer_begin_idx:answer_end_idx]
+                        #     detokenized_answer = tokenizer.decode(answer_tokens, skip_special_tokens=False)
+                        #     logger.info(f"Original final_answer: '{final_answer}' Answer content: '{answer_content}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
+
                 results.append({
                     "final_answer": final_answer,
                     "answer_begin_idx": answer_begin_idx,
