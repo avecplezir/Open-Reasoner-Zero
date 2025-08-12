@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    e_name = 'teacherv-untrained-6-grpo-4gpu-v0' #"teacherv5-topr-4gpu-v0"
+    e_name = 'teacherv6-noreplace-noadvnorm-grpo-4gpu-v0' #"teacherv5-topr-4gpu-v0"
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -91,7 +91,7 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_max_len: int = 2048
     enable_prefix_caching: bool = True
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 if not DEBUG_MODE else 128
@@ -140,6 +140,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_topr: bool = False
     train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = False
+
 
 
 if __name__ == "__main__":

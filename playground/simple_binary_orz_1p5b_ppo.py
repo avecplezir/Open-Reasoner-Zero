@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    e_name = "simple-teacherv6-grpo-4gpu-v0"
+    e_name = 'teacherv-nonreplace-6-grpo-4gpu-v0' #"teacherv5-topr-4gpu-v0"
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -91,12 +91,12 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_max_len: int = 2048
     enable_prefix_caching: bool = True
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 16
-    micro_rollout_batch_size: int = 128 if not DEBUG_MODE else 240
+    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
+    micro_rollout_batch_size: int = 128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
     critic_update_steps: int = 12 if not DEBUG_MODE else 1
@@ -113,7 +113,7 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 400  # TODO: change to larger later
+    generate_max_len: int = 8000  # TODO: change to larger later
     max_len: int = 8192  # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
@@ -124,7 +124,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = True #False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -133,9 +133,14 @@ class PPOExpConfig(BasePPOExpConfig):
     grpo_normalize_only_at_trainer: bool = True
     # reward_kl_coef: float = 1.0 #0.8
     # reward_match_coef: float = 1.0
-    reward_kl_coef: float = 1.
-    reward_match_coef: float = 0.1
-    ss_reward_coef: float = 0.33
+    reward_kl_coef: float = 0. #1.
+    reward_match_coef: float = 1. #0.1
+    ss_reward_coef: float = 0. #0.33
+
+    use_topr: bool = True
+    train_teacher: bool = True
+    replace_student_logprops_w_teacher: bool = False
+
 
 
 if __name__ == "__main__":

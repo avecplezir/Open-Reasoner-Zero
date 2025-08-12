@@ -124,6 +124,7 @@ class PolicyLoss(nn.Module):
         old_log_probs: torch.Tensor,
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
+        ratio_clipped_0_1: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if not self.use_topr:
             ratio = (log_probs - old_log_probs).exp()
@@ -132,23 +133,14 @@ class PolicyLoss(nn.Module):
             loss = -torch.min(surr1, surr2)
             loss = masked_mean(loss, action_mask, dim=-1).mean()
         else:
-            logger.info(f'log_probs {log_probs.shape} old_log_probs {old_log_probs.shape}')
-            log_probs_sum = log_probs.sum(dim=-1)
-            old_log_probs_sum = old_log_probs.sum(dim=-1)
-
             # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
-            log_ratio = (log_probs_sum - old_log_probs_sum).clamp(max=0.0)
-            ratio_clipped_0_1 = torch.exp(log_ratio)  # in (0, 1]
-            logger.info(f'ratio_clipped_0_1 {ratio_clipped_0_1.shape}')
-
-            # α = 1 for positives; α = clipped ratio for negatives; stop gradient through α
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
-            logger.info(f'alpha {alpha.shape} advantages {advantages.shape} log_probs {log_probs.shape}')
+            logger.info(f'alpha {alpha.shape} advantages {advantages.shape} log_probs {log_probs.shape} advantages < 0 {(advantages <0).sum()} {(advantages > 0).sum()} {(advantages == 0).sum()}')
+            logger.info(f'alpha {alpha}')
 
-            # We *maximize* E[ alpha * adv * log π ], so the loss to *minimize* is the negative
-            per_example_loss = -(alpha * advantages * log_probs) # [B]
-            loss = per_example_loss.mean()
+            per_example_loss = -(alpha * advantages * log_probs)
+            loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
 
         return loss
 
@@ -533,8 +525,10 @@ class PolicyRayActorBase(RayActor):
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
 
-        logger.info(f'1 experience.action_log_probs {experience.action_log_probs[0].shape}')
-        logger.info(f'2 experience.base_action_log_probs {len(experience.base_action_log_probs[0])}')
+        if self.args.use_topr:
+            ratio_clipped_0_1 = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0)
+        else:
+            ratio_clipped_0_1 = None
 
         # actor loss
         action_log_probs, output = self.model(
@@ -552,6 +546,8 @@ class PolicyRayActorBase(RayActor):
             old_action_log_probs,
             advantages,
             action_mask=experience.action_mask,
+            ratio_clipped_0_1=ratio_clipped_0_1,
+
         )
         # clip ratio
         with torch.no_grad():

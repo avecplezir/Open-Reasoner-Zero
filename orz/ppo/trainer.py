@@ -359,6 +359,15 @@ class RayPPOTrainer:
             teacher_pass_at_n_dict = defaultdict(list)
             for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
                 # Compute KL divergence with proper masking
+                # kl = compute_approx_kl(
+                #     action_log_probs[i],
+                #     base_log_probs[i],
+                #     action_mask=None,
+                #     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
+                #     use_abs_kl=self.cfg.use_abs_kl,
+                # )
+                # kl_max = torch.max(kl.abs(), dim=-1)[0]
+
                 kl_div_all = compute_approx_kl(
                     teacher_exp.action_log_probs,
                     student_exp.action_log_probs,
@@ -384,7 +393,7 @@ class RayPPOTrainer:
 
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
-                        s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
+                        # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
                         # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
@@ -415,9 +424,12 @@ class RayPPOTrainer:
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.use_topr:
-                        log_ratio = (student_exp.action_log_probs[:, start:end].sum() - teacher_exp.action_log_probs[:, start:end].sum()).clamp(max=0.0)
+                        log_ratio = (student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0)
                         ratio_clipped_0_1 = torch.exp(log_ratio) * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
-                        logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
+                        # logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
+                        # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
+                        # ToDo:replace this with the proper solution
+                        student_exp.base_action_log_probs[:, start:end] = ratio_clipped_0_1
 
                     offset += na
                     teacher_prompt_idx += 1
