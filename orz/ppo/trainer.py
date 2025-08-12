@@ -474,21 +474,22 @@ class RayPPOTrainer:
             logger.info(f"avg_student_teacher_kl: {teacher_score_sum / len(all_teacher_prompts)}")
 
         # Replace student action_log_probs with teacher action_log_probs
-        for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
-            student_experiences[i] = Experience(
-                student_exp.sequences,
-                teacher_exp.action_log_probs,  # Use teacher's action_log_probs
-                student_exp.base_action_log_probs,
-                student_exp.values,
-                student_exp.returns,
-                student_exp.advantages,
-                student_exp.attention_mask,
-                student_exp.action_mask,
-                student_exp.num_actions,
-                student_exp.packed_seq_lens,
-                student_exp.info,
-                student_exp.kl,
-            )
+        if self.cfg.replace_student_logprops_w_teacher:
+            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
+                student_experiences[i] = Experience(
+                    student_exp.sequences,
+                    teacher_exp.action_log_probs,  # Use teacher's action_log_probs
+                    student_exp.base_action_log_probs,
+                    student_exp.values,
+                    student_exp.returns,
+                    student_exp.advantages,
+                    student_exp.attention_mask,
+                    student_exp.action_mask,
+                    student_exp.num_actions,
+                    student_exp.packed_seq_lens,
+                    student_exp.info,
+                    student_exp.kl,
+                )
 
         # 2 vis student and teacher to wandb and writer
         for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
@@ -498,7 +499,7 @@ class RayPPOTrainer:
             if wandb.run is not None:
                 data = []
                 # Log up to 5 examples from different experiences
-                for i in range(min(5, len(experiences))):
+                for i in range(min(2, len(experiences))):
                     if len(experiences[i].sequences) > 0:
                         vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
 
@@ -723,7 +724,6 @@ class RayPPOTrainer:
             await asyncio.gather(*empty_cache_tasks)
 
         # 6. calculate kl divergence
-
         experiences = []
         if self.critic_model is not None:
             values = values[: len(sequences_all)]

@@ -139,7 +139,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     use_topr: bool = False
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = True
+    replace_student_logprops_w_teacher: bool = False
 
 
 if __name__ == "__main__":
