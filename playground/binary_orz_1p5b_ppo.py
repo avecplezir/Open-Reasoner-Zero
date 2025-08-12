@@ -133,9 +133,9 @@ class PPOExpConfig(BasePPOExpConfig):
     grpo_normalize_only_at_trainer: bool = True
     # reward_kl_coef: float = 1.0 #0.8
     # reward_match_coef: float = 1.0
-    reward_kl_coef: float = 1.
-    reward_match_coef: float = 0.1
-    ss_reward_coef: float = 0.33
+    reward_kl_coef: float = 0. #1.
+    reward_match_coef: float = 1. #0.1
+    ss_reward_coef: float = 0. #0.33
 
     use_topr: bool = False
     train_teacher: bool = False
