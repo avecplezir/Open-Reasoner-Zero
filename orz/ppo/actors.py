@@ -113,10 +113,9 @@ class PolicyLoss(nn.Module):
     Policy Loss for PPO
     """
 
-    def __init__(self, clip_eps: float = 0.2, use_topr=False) -> None:
+    def __init__(self, clip_eps: float = 0.2) -> None:
         super().__init__()
         self.clip_eps = clip_eps
-        self.use_topr = use_topr
 
     def forward(
         self,
@@ -125,8 +124,9 @@ class PolicyLoss(nn.Module):
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
         ratio_clipped_0_1: Optional[torch.Tensor] = None,
+        use_topr: bool = False,
     ) -> torch.Tensor:
-        if not self.use_topr:
+        if not use_topr:
             ratio = (log_probs - old_log_probs).exp()
             surr1 = ratio * advantages
             surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
@@ -137,7 +137,8 @@ class PolicyLoss(nn.Module):
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
             logger.info(f'alpha {alpha.shape} advantages {advantages.shape} log_probs {log_probs.shape} advantages < 0 {(advantages <0).sum()} {(advantages > 0).sum()} {(advantages == 0).sum()}')
-            logger.info(f'alpha {alpha}')
+            logger.info(f'2 alpha  {(alpha < 0).sum()} {(alpha > 0).sum()} {(alpha == 0).sum()}')
+            logger.info(f'3 alpha {alpha}')
 
             per_example_loss = -(alpha * advantages * log_probs)
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
@@ -406,7 +407,7 @@ class PolicyRayActorBase(RayActor):
             self.strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
 
         # set ppo/topr loss function
-        self.actor_loss_fn = PolicyLoss(self.args.eps_clip, use_topr=self.args.use_topr)
+        self.actor_loss_fn = PolicyLoss(self.args.eps_clip)
 
     def save_model(self, tokenizer, iteration):
         args = self.strategy.args
@@ -525,10 +526,8 @@ class PolicyRayActorBase(RayActor):
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
 
-        if self.args.use_topr:
-            ratio_clipped_0_1 = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0)
-        else:
-            ratio_clipped_0_1 = None
+        use_topr = self.args.use_topr and int(experience.info['use_topr'][0].item())
+        ratio_clipped_0_1 = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0) if use_topr else None
 
         # actor loss
         action_log_probs, output = self.model(
@@ -541,13 +540,14 @@ class PolicyRayActorBase(RayActor):
 
         # loss function
         # TODO: recompute advantages
+        logger.info(f'use_topr {use_topr}')
         actor_loss = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
             action_mask=experience.action_mask,
             ratio_clipped_0_1=ratio_clipped_0_1,
-
+            use_topr=use_topr,
         )
         # clip ratio
         with torch.no_grad():

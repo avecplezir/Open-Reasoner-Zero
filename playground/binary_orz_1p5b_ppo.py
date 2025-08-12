@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Optional
 import wandb, omegaconf
 from dataclasses import asdict
+import random
 
 from loguru import logger
 from omegaconf.listconfig import ListConfig
@@ -64,7 +65,9 @@ class PPOExpConfig(BasePPOExpConfig):
     pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
-    e_name = 'teacherv-nonreplace-6-grpo-4gpu-v0' #"teacherv5-topr-4gpu-v0"
+    # current date and time
+    randint = random.randint(0, 1000)
+    e_name = f'teacherv-nonreplace-6-grpo-4gpu-v0-{randint}' #"teacherv5-topr-4gpu-v0"
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -96,7 +99,7 @@ class PPOExpConfig(BasePPOExpConfig):
     num_episodes: int = 20
     rollout_batch_size: int = 128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
-    micro_rollout_batch_size: int = 128 if not DEBUG_MODE else 240
+    micro_rollout_batch_size: int = 128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
     critic_update_steps: int = 12 if not DEBUG_MODE else 1
@@ -124,7 +127,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = True #False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -137,9 +140,9 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_match_coef: float = 1. #0.1
     ss_reward_coef: float = 0. #0.33
 
-    use_topr: bool = False
+    use_topr: bool = True
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = False
+    replace_student_logprops_w_teacher: bool = True
 
 
 

@@ -358,15 +358,6 @@ class RayPPOTrainer:
             teacher_prompt_idx = 0
             teacher_pass_at_n_dict = defaultdict(list)
             for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
-                # Compute KL divergence with proper masking
-                # kl = compute_approx_kl(
-                #     action_log_probs[i],
-                #     base_log_probs[i],
-                #     action_mask=None,
-                #     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
-                #     use_abs_kl=self.cfg.use_abs_kl,
-                # )
-                # kl_max = torch.max(kl.abs(), dim=-1)[0]
 
                 kl_div_all = compute_approx_kl(
                     teacher_exp.action_log_probs,
@@ -430,6 +421,8 @@ class RayPPOTrainer:
                         # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
                         # ToDo:replace this with the proper solution
                         student_exp.base_action_log_probs[:, start:end] = ratio_clipped_0_1
+                        student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
+                        teacher_exp.info['use_topr'] = torch.tensor(0.).unsqueeze(0)
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -445,7 +438,7 @@ class RayPPOTrainer:
 
             # Log average KL divergence between student and teacher
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
-            avg_student_teacher_kl_max = self.cfg.kl_max_coef * sum(kl_max_list) / len(kl_max_list)
+            avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
             avg_match_reward_trainer = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
             self.writer.add_scalar("avg_student_teacher_kl", avg_student_teacher_kl, self.global_step)
             self.writer.add_scalar("avg_student_teacher_kl_max", avg_student_teacher_kl_max, self.global_step)
