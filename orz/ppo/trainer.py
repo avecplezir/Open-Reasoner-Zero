@@ -403,7 +403,10 @@ class RayPPOTrainer:
                     start, end = offset, offset + na
                     kl_episode = kl_div_all[:, start:end].clone()
                     kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
-                    kl_mean = masked_mean(kl_episode, None, dim=-1)
+                    if self.cfg.reward_kl_reduction == "mean":
+                        kl_mean = masked_mean(kl_episode, None, dim=-1)
+                    elif self.cfg.reward_kl_reduction == "sum":
+                        kl_mean = kl_episode.sum(dim=-1)
                     match_reward = teacher_exp.info['custom_rewards'][i][-1]
                     kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
                     final_reward_list.append(self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward)
@@ -484,7 +487,7 @@ class RayPPOTrainer:
                 student_experiences[i] = Experience(
                     student_exp.sequences,
                     teacher_exp.action_log_probs,  # Use teacher's action_log_probs
-                    student_exp.base_action_log_probs,
+                    teacher_exp.base_action_log_probs,
                     student_exp.values,
                     student_exp.returns,
                     student_exp.advantages,

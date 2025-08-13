@@ -67,8 +67,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    # e_name = f'teacher-kl01-v6-topr-4gpu-{randint}' #"teacherv5-topr-4gpu-v0"
-    e_name = f'teacher-noreplace-ss01-v6-grpo-4gpu-{randint}'  # "teacherv5-topr-4gpu-v0"
+    e_name = f'teacher-v6-noreplace-kl01-sum-grpo-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -137,10 +136,10 @@ class PPOExpConfig(BasePPOExpConfig):
     grpo_normalize_only_at_trainer: bool = True
     # reward_kl_coef: float = 1.0 #0.8
     # reward_match_coef: float = 1.0
-    reward_kl_coef: float = 0. #1.
-    reward_kl_reduction: str = "mean"  # "mean" or "sum"
+    reward_kl_coef: float = 0.1 #1.
+    reward_kl_reduction: str = "sum"  # "mean" or "sum"
     reward_match_coef: float = 1. #0.1
-    ss_reward_coef: float = 0.1 #0.33
+    ss_reward_coef: float = 0. #0.33
 
     use_topr: bool = False
     train_teacher: bool = True
