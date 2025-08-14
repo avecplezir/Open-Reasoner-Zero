@@ -264,15 +264,16 @@ class BasePPOExp(BaseExp):
             # "NCCL_ALGO": "^Ring",
             "NCCL_NET_OVERHEAD": "1000000",
             "CUDA_LAUNCH_BLOCKING": "1",
+            # "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
         }
 
-        if use_ib0:
-            env_vars.update({
-                "NCCL_NET_GDR_LEVEL": "2",
-                "NCCL_SOCKET_IFNAME": "ib0",
-                "NCCL_IB_DISABLE": "0",
-                # "NCCL_IB_HCA": "mlx5_0, mlx5_1, mlx5_2, mlx5_3"
-            })
+        # if use_ib0:
+        #     env_vars.update({
+        #         "NCCL_NET_GDR_LEVEL": "2",
+        #         "NCCL_SOCKET_IFNAME": "ib0",
+        #         "NCCL_IB_DISABLE": "0",
+        #         "NCCL_IB_HCA": "mlx5_0, mlx5_1, mlx5_2, mlx5_3"
+        #     })
 
         # initialize the ray cluster
         ray.init(runtime_env=RuntimeEnv(env_vars=env_vars))
