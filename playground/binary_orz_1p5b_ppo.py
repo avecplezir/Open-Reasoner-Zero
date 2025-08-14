@@ -84,6 +84,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
+            # "data/strategyqa.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -128,7 +129,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = True #False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
