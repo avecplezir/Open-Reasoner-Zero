@@ -258,42 +258,6 @@ class BasePPOExp(BaseExp):
         use_ib0 = True #os.environ.get("USE_IB0", "").lower() == "true"
         logger.info(f"Using ib0 for ray: {use_ib0}")
 
-        # # initialize the ray cluster
-        # ray.init(
-        #     runtime_env=RuntimeEnv(
-        #         env_vars={
-        #             "NCCL_DEBUG": "WARN",
-        #             "NCCL_PXN_DISABLE": "1",
-        #             # "NCCL_ALGO": "^Ring",
-        #             "NCCL_NET_OVERHEAD": "1000000",
-        #             "CUDA_LAUNCH_BLOCKING": "1",
-        #         }
-        #     )
-        # )
-
-        # export
-        # NCCL_IB_GID_INDEX = 5
-        # export
-        # NCCL_IB_HCA = mlx5_9, mlx5_10, mlx5_11, mlx5_12, mlx5_13, mlx5_14, mlx5_15, mlx5_16
-        # export
-        # NCCL_IB_QPS_PER_CONNECTION = 8
-        # export
-        # NCCL_IB_PCI_RELAXED_ORDERING = 1
-        # export
-        # NCCL_IB_TC = 186
-        # export
-        # NCCL_IB_DISABLE = 0
-        # export
-        # NCCL_SOCKET_IFNAME = eno8303
-        # export
-        # NCCL_IB_TIMEOUT = 21
-        # export
-        # NCCL_IB_RETRY_CNT = 7
-        # export
-        # NCCL_DEBUG = INFO
-        # export
-        # NCCL_NVLS_ENABLE = 0
-
         env_vars = {
             "NCCL_DEBUG": "WARN",
             "NCCL_PXN_DISABLE": "1",
@@ -307,7 +271,7 @@ class BasePPOExp(BaseExp):
                 "NCCL_NET_GDR_LEVEL": "2",
                 "NCCL_SOCKET_IFNAME": "ib0",
                 "NCCL_IB_DISABLE": "0",
-                "NCCL_IB_HCA": "mlx5_0, mlx5_1, mlx5_2, mlx5_3"
+                # "NCCL_IB_HCA": "mlx5_0, mlx5_1, mlx5_2, mlx5_3"
             })
 
         # initialize the ray cluster
