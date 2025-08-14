@@ -43,3 +43,5 @@ COPY partitioned_param_coordinator.py /usr/local/lib/python3.10/dist-packages/de
 
 # launch script
 WORKDIR /workspace/
+
+pip install loguru tqdm ninja tensorboard sentencepiece fire tabulate easydict awscli rpyc pythonping

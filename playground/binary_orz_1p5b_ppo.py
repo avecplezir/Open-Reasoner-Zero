@@ -67,8 +67,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    # e_name = f'teacher-kl01-v6-topr-4gpu-{randint}' #"teacherv5-topr-4gpu-v0"
-    e_name = f'teacher-noreplace-ss01-v6-grpo-4gpu-{randint}'  # "teacherv5-topr-4gpu-v0"
+    e_name = f'teacher-noreplace-ss01-v6-grpo-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
     save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
@@ -94,14 +93,17 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_learning_rate: float = 5e-6
     num_warmup_steps: int = 50
     prompt_max_len: int = 2048
+
     enable_prefix_caching: bool = True
+    enforce_eager: bool = False
+
     update_ref_every_epoch: bool = True
     advantage_normalize: bool = True
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128 if not DEBUG_MODE else 128
+    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
-    micro_rollout_batch_size: int = 128 #if not DEBUG_MODE else 240
+    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
     critic_update_steps: int = 12 if not DEBUG_MODE else 1
@@ -118,8 +120,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 8000  # TODO: change to larger later
-    max_len: int = 8192  # TODO: change to larger later
+    generate_max_len: int = 8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -134,14 +136,13 @@ class PPOExpConfig(BasePPOExpConfig):
 
     gamma: float = 1.0
     lambd: float = 1.0
+
     kl_max_coef: float = 0.01
     grpo_normalize_only_at_trainer: bool = True
-    # reward_kl_coef: float = 1.0 #0.8
-    # reward_match_coef: float = 1.0
-    reward_kl_coef: float = 0. #1.
+    reward_kl_coef: float = 0.
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1. #0.1
-    ss_reward_coef: float = 0.1 #0.33
+    reward_match_coef: float = 1.
+    ss_reward_coef: float = 0.1
 
     use_topr: bool = False
     train_teacher: bool = True

@@ -570,7 +570,7 @@ class PolicyRayActorBase(RayActor):
             action_log_probs_all = torch.cat(action_log_probs_all_list, dim=1)
 
             # Calculate entropy in chunks to avoid OOM
-            chunk_size = 512  # Adjust this value based on your GPU memory
+            chunk_size = 256  # Adjust this value based on your GPU memory
             num_chunks = (action_log_probs_all.size(1) + chunk_size - 1) // chunk_size
             entropy_sum = 0
             total_tokens = 0

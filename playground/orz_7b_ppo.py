@@ -254,6 +254,7 @@ class CustomRewardTrainer(RayPPOTrainer):
                     data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"], ex['teacher_iscorrect'], ex["stop_reason"]] for ex in reasoning_examples]
                 )
             }, step=self.global_step)
+
         for idx in range(len(outputs)):
             prompt, output, out_token = prompts[idx], outputs[idx], output_tokens[idx]
             rep_score, reflection_pattern_score = repeat_scores[idx], reflection_pattern_scores[idx]
@@ -286,6 +287,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         correct_tokens_arr = np.array([]) if np.all(scores_arr == 0) else np.array(num_tokens_arr[scores_arr == 1])
         incorrect_tokens_arr = np.array([]) if np.all(scores_arr == 1) else np.array(num_tokens_arr[scores_arr == 0])
 
+        initial_scores = copy.deepcopy(scores)
         # GRPO
         if self.cfg.use_grpo:
             self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
@@ -369,7 +371,7 @@ class CustomRewardTrainer(RayPPOTrainer):
                 end_idx = output.get('answer_end_idx', None)
                 res_indices.append((begin_idx, end_idx))
 
-        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices
+        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores)
 
     @override
     @torch.no_grad()
