@@ -36,6 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
+# prefix = '/home/a/anokhin/links/scratch'
+prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
@@ -62,16 +64,16 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'teacher-noreplace-ss01-v6-grpo-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
-    ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
-    save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
-    tensorboard_log_dir: str = f"/home/a/anokhin/links/scratch/orz_logs/{exp_name}"
+    ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
+    save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
+    tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
     # MathTrain dataset and Math500 eval dataset
     # data related settings
