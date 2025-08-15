@@ -425,9 +425,9 @@ class RayPPOTrainer:
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.use_topr:
-                        log_ratio = (student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0)
-                        ratio_clipped_0_1 = torch.exp(log_ratio)
-                        ratio_clipped_0_1 = torch.exp(log_ratio) * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
+                        clamped_log_ratio = (student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0)
+                        scalar_ratio_clipped_0_1 = torch.exp(clamped_log_ratio)
+                        ratio_clipped_0_1 = scalar_ratio_clipped_0_1 * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
                         # logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
                         # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
                         # ToDo:replace this with the proper solution
@@ -478,13 +478,13 @@ class RayPPOTrainer:
                 "avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
                 "avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
                 "avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
-                "avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.std(incorrect_kl_mean_list).item(),
+                "avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
                 "avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
-                "avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.std(incorrect_kl_max_list).item(),
+                "avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
                 "avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(correct_ss_reward_mean_list).item(),
-                "avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.std(incorrect_ss_reward_mean_list).item(),
+                "avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.mean(incorrect_ss_reward_mean_list).item(),
                 "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
-                "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.std(incorrect_ss_reward_min_list).item(),
+                "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
                 "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
             }
 

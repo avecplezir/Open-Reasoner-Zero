@@ -36,8 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
-# prefix = '/home/a/anokhin/links/scratch'
-prefix = '/home/anokhin/scratch'
+prefix = '/home/a/anokhin/links/scratch'
+# prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
