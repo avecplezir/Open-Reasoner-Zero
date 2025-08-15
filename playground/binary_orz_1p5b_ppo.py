@@ -36,8 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
-# prefix = '/home/a/anokhin/links/scratch'
-prefix = '/home/anokhin/scratch'
+prefix = '/home/a/anokhin/links/scratch'
+# prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'teacher-noreplace-ss01-v6-grpo-4gpu-{randint}'
+    e_name = f'teacher-noreplace-v6-grpo-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -144,7 +144,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
-    ss_reward_coef: float = 0.1
+    ss_reward_coef: float = 0.
 
     use_topr: bool = False
     train_teacher: bool = True

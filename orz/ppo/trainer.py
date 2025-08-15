@@ -289,12 +289,12 @@ class RayPPOTrainer:
                 dp_tasks = []
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                 # Use student prompts for reward calculation since that's what the model will be trained on
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_student_reward = await reward_fn(all_student_prompts, outputs, all_extras)
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores = await reward_fn(all_student_prompts, outputs, all_extras)
                 assert len(all_student_prompts) == len(
                     outputs
                 ), "generate objects number after custom reward function must be equal to all inputs number"
         else:
-            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores = all_student_prompts, outputs, None, None, None, None
+            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores = all_student_prompts, outputs, None, None, None, None, None
 
         # empty data
         if len(all_student_prompts) == 0:
@@ -443,17 +443,25 @@ class RayPPOTrainer:
             assert len(final_reward_list) == teacher_prompt_idx == len(all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
 
             # Log average KL divergence between student and teacher
+            kl_mean_list = np.array(kl_mean_list)
+            kl_max_list = np.array(kl_max_list)
+            ss_reward_mean_list = np.array(ss_reward_mean_list)
+            ss_reward_min_list = np.array(ss_reward_min_list)
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
             avg_match_reward_trainer = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
-            correct_kl_mean_list = np.array([]) if np.all(initial_scores == 0) else np.array(kl_mean_list[initial_scores == 1])
-            incorrect_kl_mean_list = np.array([]) if np.all(initial_scores == 1) else np.array(kl_mean_list[initial_scores == 0])
-            correct_kl_max_list = np.array([]) if np.all(initial_scores == 0) else np.array(kl_max_list[initial_scores == 1])
-            incorrect_kl_max_list = np.array([]) if np.all(initial_scores == 1) else np.array(kl_max_list[initial_scores == 0])
-            correct_ss_reward_mean_list = np.array([]) if np.all(initial_scores == 0) else np.array(ss_reward_mean_list[initial_scores == 1])
-            incorrect_ss_reward_mean_list = np.array([]) if np.all(initial_scores == 1) else np.array(ss_reward_mean_list[initial_scores == 0])
-            correct_ss_reward_min_list = np.array([]) if np.all(initial_scores == 0) else np.array(ss_reward_min_list[initial_scores == 1])
-            incorrect_ss_reward_min_list = np.array([]) if np.all(initial_scores == 1) else np.array(ss_reward_min_list[initial_scores == 0])
+            ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
+            cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
+            ii = np.logical_and(initial_scores == 0, initial_teacher_scores == 0)
+
+            correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
+            incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
+            correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
+            incorrect_kl_max_list = np.array([]) if np.all(cc) else np.array(kl_max_list[ic])
+            correct_ss_reward_mean_list = np.array([]) if np.all(ic) else np.array(ss_reward_mean_list[cc])
+            incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
+            correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
+            incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
 
 
             log_dict = {
@@ -471,6 +479,7 @@ class RayPPOTrainer:
                 "avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.std(incorrect_ss_reward_mean_list).item(),
                 "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
                 "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.std(incorrect_ss_reward_min_list).item(),
+                "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
             }
 
             for k, v in log_dict.items():
@@ -514,7 +523,7 @@ class RayPPOTrainer:
                 student_experiences[i] = Experience(
                     student_exp.sequences,
                     teacher_exp.action_log_probs,  # Use teacher's action_log_probs
-                    teacher_exp.base_action_log_probs,
+                    student_exp.base_action_log_probs,
                     student_exp.values,
                     student_exp.returns,
                     student_exp.advantages,

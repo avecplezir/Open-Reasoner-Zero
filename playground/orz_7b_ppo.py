@@ -288,6 +288,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         incorrect_tokens_arr = np.array([]) if np.all(scores_arr == 1) else np.array(num_tokens_arr[scores_arr == 0])
 
         initial_scores = copy.deepcopy(scores)
+        initial_teacher_scores = copy.deepcopy(teacher_scores)
         # GRPO
         if self.cfg.use_grpo:
             self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
@@ -371,7 +372,7 @@ class CustomRewardTrainer(RayPPOTrainer):
                 end_idx = output.get('answer_end_idx', None)
                 res_indices.append((begin_idx, end_idx))
 
-        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores)
+        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores), np.array(initial_teacher_scores)
 
     @override
     @torch.no_grad()

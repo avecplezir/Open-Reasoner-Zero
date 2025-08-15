@@ -459,6 +459,8 @@ class PolicyRayActorBase(RayActor):
                 disable=not self.strategy.is_rank_0(),
             )
             for local_step, experience in enumerate(pbar):
+                if local_step % 10 == 0:
+                    torch.cuda.empty_cache()
                 experience.to_device(device)
                 status = self.training_step(experience, global_steps, local_step, accumulation_steps)
                 policy_update_steps += 1
@@ -570,7 +572,7 @@ class PolicyRayActorBase(RayActor):
             action_log_probs_all = torch.cat(action_log_probs_all_list, dim=1)
 
             # Calculate entropy in chunks to avoid OOM
-            chunk_size = 256  # Adjust this value based on your GPU memory
+            chunk_size = 512  # Adjust this value based on your GPU memory
             num_chunks = (action_log_probs_all.size(1) + chunk_size - 1) // chunk_size
             entropy_sum = 0
             total_tokens = 0

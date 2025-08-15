@@ -36,6 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
+prefix = '/home/a/anokhin/links/scratch'
+# prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
@@ -62,16 +64,16 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = "/home/a/anokhin/links/scratch/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'teacher-v6-noreplace-kl01-mean-grpo-4gpu-{randint}'
+    e_name = f'teacher-noreplace-v6-grpo-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
-    ckpt_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
-    save_path: str = f"/home/a/anokhin/links/scratch/orz_ckpt/{exp_name}"
-    tensorboard_log_dir: str = f"/home/a/anokhin/links/scratch/orz_logs/{exp_name}"
+    ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
+    save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
+    tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
     # MathTrain dataset and Math500 eval dataset
     # data related settings
@@ -83,6 +85,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
+            # "data/strategyqa.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -92,14 +95,17 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_learning_rate: float = 5e-6
     num_warmup_steps: int = 50
     prompt_max_len: int = 2048
+
     enable_prefix_caching: bool = True
+    enforce_eager: bool = False
+
     update_ref_every_epoch: bool = True
     advantage_normalize: bool = True
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128 if not DEBUG_MODE else 128
+    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
-    micro_rollout_batch_size: int = 128 #if not DEBUG_MODE else 240
+    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
     critic_update_steps: int = 12 if not DEBUG_MODE else 1
@@ -116,8 +122,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 8000  # TODO: change to larger later
-    max_len: int = 8192  # TODO: change to larger later
+    generate_max_len: int = 8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -127,23 +133,22 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = True #False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
     lambd: float = 1.0
+
     kl_max_coef: float = 0.01
     grpo_normalize_only_at_trainer: bool = True
-    # reward_kl_coef: float = 1.0 #0.8
-    # reward_match_coef: float = 1.0
-    reward_kl_coef: float = 0.1 #1.
+    reward_kl_coef: float = 0.
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1. #0.1
-    ss_reward_coef: float = 0. #0.33
+    reward_match_coef: float = 1.
+    ss_reward_coef: float = 0.
 
-    use_topr: bool = False
+    use_topr: bool = True
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = False
+    replace_student_logprops_w_teacher: bool = True
 
 
 
