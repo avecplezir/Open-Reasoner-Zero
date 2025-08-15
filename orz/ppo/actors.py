@@ -6,6 +6,7 @@ from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from typing import Dict, Optional, Type, Union
 from loguru import logger
 
+from accelerate import get_accelerator
 import deepspeed
 import ray
 import torch
@@ -459,8 +460,11 @@ class PolicyRayActorBase(RayActor):
                 disable=not self.strategy.is_rank_0(),
             )
             for local_step, experience in enumerate(pbar):
-                if local_step % 10 == 0:
-                    torch.cuda.empty_cache()
+                if (local_step + 1) % accumulation_steps == 0:
+                    # accelerator.wait_for_everyone()
+                    torch.distributed.barrier()
+                    get_accelerator().empty_cache()
+
                 experience.to_device(device)
                 status = self.training_step(experience, global_steps, local_step, accumulation_steps)
                 policy_update_steps += 1

@@ -296,6 +296,10 @@ class RayPPOTrainer:
         else:
             all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores = all_student_prompts, outputs, None, None, None, None, None
 
+        ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
+        cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
+        ii = np.logical_and(initial_scores == 0, initial_teacher_scores == 0)
+
         # empty data
         if len(all_student_prompts) == 0:
             return
@@ -381,15 +385,15 @@ class RayPPOTrainer:
                     if final_answer_start is not None and final_answer_start < final_answer_end:
 
                         s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
-                        final_answer_start, final_answer_end = offset+ final_answer_start, offset + final_answer_end
+                        final_answer_start, final_answer_end = offset + final_answer_start, offset + final_answer_end
 
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
                         # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
-                        # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
+                        logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
-                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
-                        # logger.info(f"s_final_answer_start: {s_final_answer_start}, s_final_answer_end: {s_final_answer_end}, vis_final_answer: {vis_final_answer}")
+                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                        logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
@@ -422,6 +426,7 @@ class RayPPOTrainer:
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.use_topr:
                         log_ratio = (student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0)
+                        ratio_clipped_0_1 = torch.exp(log_ratio)
                         ratio_clipped_0_1 = torch.exp(log_ratio) * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
                         # logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
                         # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
@@ -449,11 +454,10 @@ class RayPPOTrainer:
             ss_reward_min_list = np.array(ss_reward_min_list)
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
-            avg_match_reward_trainer = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
-            ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
-            cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
-            ii = np.logical_and(initial_scores == 0, initial_teacher_scores == 0)
+            avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
 
+            correct_match_reward_trainer = np.array([]) if np.all(ic) else np.array(match_reward_list[cc])
+            incorrect_match_reward_trainer = np.array([]) if np.all(cc) else np.array(match_reward_list[ic])
             correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
             incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
             correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
@@ -467,7 +471,9 @@ class RayPPOTrainer:
             log_dict = {
                 "avg_student_teacher_kl": avg_student_teacher_kl,
                 "avg_student_teacher_kl_max": avg_student_teacher_kl_max,
-                "avg_match_reward_trainer": avg_match_reward_trainer,
+                "avg_match_reward": avg_match_reward,
+                "avg_correct_match_reward": 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item(),
+                "avg_incorrect_match_reward": 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item(),
                 "avg_ss_reward_mean": 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item(),
                 "avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
                 "avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
@@ -485,7 +491,7 @@ class RayPPOTrainer:
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
 
-            logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward_trainer {avg_match_reward_trainer}")
+            logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward {avg_match_reward}")
 
             if self.cfg.use_grpo and self.cfg.grpo_normalize_only_at_trainer:
                 logger.info(f"computing GRPO normalized rewards")
@@ -1022,16 +1028,16 @@ class RayPPOTrainer:
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
             await self.policy_model.async_run_method("empty_cache")
 
-        get_accelerator().empty_cache()
+        # get_accelerator().empty_cache()
         if backlog:
             # get_accelerator().empty_cache()
             if self.cfg.colocate_all:
                 async with Timer("Backload vllm engines to gpu"):
                     await self._backload_vllm_engines()
-                get_accelerator().empty_cache()
+                # get_accelerator().empty_cache()
             async with Timer("Broadcast actor weights to vllm engines"):
                 await self._sync_policy_weights_to_vllm()
-                get_accelerator().empty_cache()
+                # get_accelerator().empty_cache()
 
         if global_steps > self.cfg.freezing_actor_steps:
             return status[0]
