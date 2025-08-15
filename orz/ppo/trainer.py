@@ -436,7 +436,7 @@ class RayPPOTrainer:
                         student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
                         teacher_exp.info['use_topr'] = torch.tensor(0.).unsqueeze(0)
                         # if initial_scores[teacher_prompt_idx] > 0:
-                        ratio_clipped_0_1_list.append(scalar_ratio_clipped_0_1)
+                        ratio_clipped_0_1_list.append(scalar_ratio_clipped_0_1.item())
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -455,12 +455,14 @@ class RayPPOTrainer:
             kl_max_list = np.array(kl_max_list)
             ss_reward_mean_list = np.array(ss_reward_mean_list)
             ss_reward_min_list = np.array(ss_reward_min_list)
+            match_reward_list = np.array(match_reward_list)
+            ratio_clipped_0_1_list = np.array(ratio_clipped_0_1_list)
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
             avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
 
-            correct_match_reward_trainer = np.array([]) if np.all(ic) else np.array(match_reward_list[cc])
-            incorrect_match_reward_trainer = np.array([]) if np.all(cc) else np.array(match_reward_list[ic])
+            correct_match_reward_trainer = np.array([]) if np.all(initial_scores == 0) else np.array(match_reward_list[initial_scores == 1])
+            incorrect_match_reward_trainer = np.array([]) if np.all(initial_scores == 1) else np.array(match_reward_list[initial_scores == 0])
             correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
             incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
             correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])

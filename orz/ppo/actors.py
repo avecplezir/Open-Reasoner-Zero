@@ -6,7 +6,7 @@ from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from typing import Dict, Optional, Type, Union
 from loguru import logger
 
-from accelerate import get_accelerator
+from deepspeed.accelerator import get_accelerator
 import deepspeed
 import ray
 import torch
@@ -137,9 +137,9 @@ class PolicyLoss(nn.Module):
             # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
-            logger.info(f'alpha {alpha.shape} advantages {advantages.shape} log_probs {log_probs.shape} advantages < 0 {(advantages <0).sum()} {(advantages > 0).sum()} {(advantages == 0).sum()}')
-            logger.info(f'2 alpha  {(alpha < 0).sum()} {(alpha > 0).sum()} {(alpha == 0).sum()}')
-            logger.info(f'3 alpha {alpha}')
+            # logger.info(f'alpha {alpha.shape} advantages {advantages.shape} log_probs {log_probs.shape} advantages < 0 {(advantages <0).sum()} {(advantages > 0).sum()} {(advantages == 0).sum()}')
+            # logger.info(f'2 alpha  {(alpha < 0).sum()} {(alpha > 0).sum()} {(alpha == 0).sum()}')
+            # logger.info(f'3 alpha {alpha}')
 
             per_example_loss = -(alpha * advantages * log_probs)
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()

@@ -36,8 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
-# prefix = '/home/a/anokhin/links/scratch'
-prefix = '/home/anokhin/scratch'
+prefix = '/home/a/anokhin/links/scratch'
+# prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'teacher-noreplace-v6-grpo-4gpu-{randint}'
+    e_name = f'topr-v7-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -85,7 +85,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
-            # "data/strategyqa.json",
+            "data/eval_data/strategyqa.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -100,7 +100,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -143,14 +143,14 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_max_coef: float = 0.01
     grpo_normalize_only_at_trainer: bool = True
     reward_kl_coef: float = 0.
-    reward_kl_reduction: str = "mean"  # "mean" or "sum"
+    reward_kl_reduction: str = "sum"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
-    use_topr: bool = False
+    use_topr: bool = True
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = False
+    replace_student_logprops_w_teacher: bool = True
 
 
 
