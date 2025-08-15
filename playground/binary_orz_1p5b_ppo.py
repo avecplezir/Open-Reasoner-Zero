@@ -132,6 +132,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # grpo related settings
     use_grpo: bool = True #False
+    remove_student_grpo_normalization: bool = True
 
     gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
@@ -144,6 +145,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
+    reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
     use_topr: bool = False

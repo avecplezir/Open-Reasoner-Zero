@@ -359,6 +359,7 @@ class RayPPOTrainer:
             ss_reward_mean_list = []
             ss_reward_min_list = []
             ss_reward_list = []
+            ratio_clipped_0_1_list = []
 
             teacher_prompt_idx = 0
             teacher_pass_at_n_dict = defaultdict(list)
@@ -366,7 +367,7 @@ class RayPPOTrainer:
 
                 kl_div_all = compute_approx_kl(
                     teacher_exp.action_log_probs,
-                    student_exp.action_log_probs,
+                    student_exp.action_log_probs if not self.cfg.reward_kl_toward_ref_model else student_exp.base_action_log_probs,
                     action_mask=student_exp.action_mask,
                     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
                     use_abs_kl=self.cfg.use_abs_kl,
@@ -390,10 +391,10 @@ class RayPPOTrainer:
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
                         # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
-                        logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
+                        # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
-                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
-                        logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
+                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                        # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
@@ -434,6 +435,8 @@ class RayPPOTrainer:
                         student_exp.base_action_log_probs[:, start:end] = ratio_clipped_0_1
                         student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
                         teacher_exp.info['use_topr'] = torch.tensor(0.).unsqueeze(0)
+                        # if initial_scores[teacher_prompt_idx] > 0:
+                        ratio_clipped_0_1_list.append(scalar_ratio_clipped_0_1)
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -466,7 +469,8 @@ class RayPPOTrainer:
             incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
             correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
             incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
-
+            correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(ratio_clipped_0_1_list[cc])
+            incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(ratio_clipped_0_1_list[ic])
 
             log_dict = {
                 "avg_student_teacher_kl": avg_student_teacher_kl,
@@ -486,6 +490,8 @@ class RayPPOTrainer:
                 "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
                 "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
                 "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
+                "avg_correct_ratio_clipped_0_1": 0 if len(correct_ratio_clipped_0_1_list) == 0 else np.mean(correct_ratio_clipped_0_1_list).item(),
+                "avg_incorrect_ratio_clipped_0_1": 0 if len(incorrect_ratio_clipped_0_1_list) == 0 else np.mean(incorrect_ratio_clipped_0_1_list).item(),
             }
 
             for k, v in log_dict.items():

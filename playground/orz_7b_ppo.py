@@ -293,12 +293,19 @@ class CustomRewardTrainer(RayPPOTrainer):
         if self.cfg.use_grpo:
             self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
             self.writer.add_scalar("grpo_teacher_raw_reward", np.mean(teacher_scores), self.global_step)
-            # grpo reward normalization
+            # grpo student reward normalization
             for i, prompt in enumerate(prompts):
-                scores[i] -= np.mean(pass_at_n_dict[prompt])
-                if std := np.std(pass_at_n_dict[prompt]) > 0:
-                    scores[i] /= std
-                if not self.cfg.grpo_normalize_only_at_trainer:
+                if not self.cfg.remove_student_grpo_normalization:
+                    scores[i] -= np.mean(pass_at_n_dict[prompt])
+                    if std := np.std(pass_at_n_dict[prompt]) > 0:
+                        scores[i] /= std
+                else:
+                    # transform scores to -1, 1 if student_grpo_normalization is removed
+                    scores[i] = 2 * (scores[i] - 0.5)
+
+            # grpo teacher reward normalization
+            if not self.cfg.grpo_normalize_only_at_trainer:
+                for i, prompt in enumerate(prompts):
                     teacher_scores[i] -= np.mean(teacher_pass_at_n_dict[prompt])
                     if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
                         teacher_scores[i] /= teacher_std
