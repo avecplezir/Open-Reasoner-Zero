@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-v7-4gpu-{randint}'
+    e_name = f'topr-16-v7-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -85,7 +85,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa.json",
+            "data/eval_data/strategyqa_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 8
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
@@ -118,7 +118,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
+    enable_eval: bool = True #if not DEBUG_MODE else False
     eval_interval: int = 10
 
     # generate related settings
@@ -151,7 +151,6 @@ class PPOExpConfig(BasePPOExpConfig):
     use_topr: bool = True
     train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = True
-
 
 
 if __name__ == "__main__":

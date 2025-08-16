@@ -64,12 +64,12 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B-Instruct" #"/home/a/anokhin/links/scratch/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'teacher-v6-topr-4gpu-{randint}'
+    e_name = f'grpo-16-noreplace-kl06-ss02-v7-4gpu-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -85,7 +85,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/math500.json",
             # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
-            # "data/strategyqa.json",
+            "data/eval_data/strategyqa_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -100,11 +100,11 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 8
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 8
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
@@ -132,6 +132,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # grpo related settings
     use_grpo: bool = True #False
+    remove_student_grpo_normalization: bool = True
 
     gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
@@ -141,15 +142,15 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     grpo_normalize_only_at_trainer: bool = True
-    reward_kl_coef: float = 0.
-    reward_kl_reduction: str = "mean"  # "mean" or "sum"
+    reward_kl_coef: float = 0.6
+    reward_kl_reduction: str = "sum"  # "mean" or "sum"
     reward_match_coef: float = 1.
-    ss_reward_coef: float = 0.
+    reward_kl_toward_ref_model: bool = True
+    ss_reward_coef: float = 0.2
 
-    use_topr: bool = True
+    use_topr: bool = False
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = True
-
+    replace_student_logprops_w_teacher: bool = False
 
 
 if __name__ == "__main__":
