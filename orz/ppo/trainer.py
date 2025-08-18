@@ -381,13 +381,18 @@ class RayPPOTrainer:
             all_teacher_prompts = []
             for student_prompt, all_extra, final_answer, score in zip(all_student_prompts, all_extras, final_answers, initial_teacher_scores):
                 if score:
-                    teacher_prompt = student_prompt + f" The final answer is {final_answer}."
+                    if 'yes' in final_answer.lower():
+                        teacher_prompt = all_extra["teacher_prompt_yes"]
+                    elif 'no' in final_answer.lower():
+                        teacher_prompt = all_extra["teacher_prompt_no"]
+                    else:
+                        assert 0, f"final answer must contain yes or no, {final_answer.lower()}"
                 else:
                     # decide randomly yes/no
                     if random.random() > 0.5:
-                        teacher_prompt = student_prompt + " The final answer is yes."
+                        teacher_prompt = all_extra["teacher_prompt_yes"]
                     else:
-                        teacher_prompt = student_prompt + " The final answer is no."
+                        teacher_prompt = all_extra["teacher_prompt_no"]
                 all_teacher_prompts.extend([teacher_prompt])
 
             replace_teacher_logprops = [True] * len(all_student_prompts)
