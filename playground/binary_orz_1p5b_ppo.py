@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-replacebaselogs-16-ikl004-v7-{randint}'
+    e_name = f'grpo-replace-baselogs-tlogs-tsorder-ekl001-v7-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -114,7 +114,7 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.04
+    kl_loss_coef: float = 0.01
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
@@ -152,10 +152,13 @@ class PPOExpConfig(BasePPOExpConfig):
     train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = False
     replace_student_base_logprops_w_teacher: bool = True
-    replace_teacher_logprops_w_student: bool = False
+    replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_teacher_order: True
+    student_teacher_order: bool = False
+
+    generate_with_teacher: bool = True
+    generate_with_student: bool = False
 
 
 if __name__ == "__main__":

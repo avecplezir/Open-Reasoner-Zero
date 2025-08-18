@@ -368,6 +368,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         res_score_tensors = []
         res_teacher_score_tensors = []
         res_indices = []
+        final_answers = []
         for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
             if len(response) > 0:
                 res_prompts.append(prompt)
@@ -378,8 +379,9 @@ class CustomRewardTrainer(RayPPOTrainer):
                 begin_idx = output.get('answer_begin_idx', None)
                 end_idx = output.get('answer_end_idx', None)
                 res_indices.append((begin_idx, end_idx))
+                final_answers.append(output.get('final_answer', ''))
 
-        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores), np.array(initial_teacher_scores)
+        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores), np.array(initial_teacher_scores), final_answers
 
     @override
     @torch.no_grad()
@@ -426,10 +428,9 @@ class CustomRewardTrainer(RayPPOTrainer):
                     if answer_start != -1 and answer_end != -1:
                         # Extract just the content between tags
                         answer_content_start = answer_start + len("<answer>")
-                        answer_content = response[answer_content_start:answer_end]
-                        
-                        # Tokenize the full response to get token indices
-                        tokenized_full = tokenizer.encode(response, add_special_tokens=False)
+                        # answer_content = response[answer_content_start:answer_end]
+                        # # Tokenize the full response to get token indices
+                        # tokenized_full = tokenizer.encode(response, add_special_tokens=False)
                         
                         # Find where the answer content starts and ends by tokenizing segments
                         prefix = response[:answer_content_start]
@@ -474,10 +475,14 @@ class CustomRewardTrainer(RayPPOTrainer):
             equal_tasks.append(is_equal(solution2answer(extra["answer"]), solution2answer(final_answer_item['final_answer']), executor))
         equal_results = await asyncio.gather(*equal_tasks)
 
-        equal_teacher_tasks = []
-        for extra, final_answer_item in zip(extras, final_answer_items):
-            equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
-        equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
+        if extras[0].get("teacher_answer", None) is None:
+            # If teacher_answer is not provided, we assume all teacher answers are correct or not with respect to the true answer
+            equal_teacher_results = copy.deepcopy(equal_results)
+        else:
+            equal_teacher_tasks = []
+            for extra, final_answer_item in zip(extras, final_answer_items):
+                equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
+            equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
 
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect in zip(
