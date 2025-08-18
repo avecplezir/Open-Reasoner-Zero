@@ -115,7 +115,7 @@ class RayPPOTrainer:
                     await self.eval()
 
                 # 3. make experiences, calculate advantages and returns
-                await self.make_experience(rand_prompts)
+                await self.make_teacher_experience(rand_prompts)
 
                 # check if has enough data
                 if len(self.student_replay_buffer) <= 0 or len(self.teacher_replay_buffer) <= 0:
@@ -132,7 +132,10 @@ class RayPPOTrainer:
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
                 if self.cfg.train_teacher:
-                    train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
+                    if self.cfg.student_teacher_order:
+                        train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
+                    else:
+                        train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''], [False, True])
                 else:
                     self.teacher_replay_buffer.clear()
                     train_set = zip([self.student_replay_buffer], [""], [True])
@@ -217,7 +220,466 @@ class RayPPOTrainer:
         logger.info("Successfully save model weights, training done.")
 
     @torch.no_grad()
-    async def make_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]], **generate_kwargs):
+    async def make_student_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]],
+                                      **generate_kwargs):
+        experiences = []
+        # Create paired data (positive/negative for each prompt)
+        paired_data = []
+        for prompt in all_inputs:
+            for _ in range(self.cfg.n_samples_per_prompt):
+                # Create a pair: (student, teacher_yes, teacher_no, extra)
+                paired_data.append((
+                    prompt[0],  # student prompt
+                    prompt[1]  # extra info
+                ))
+
+        # Shuffle the pairs to randomize order, but keep pairs together
+        rng = random.Random(42)
+        rng.shuffle(paired_data)
+
+        # Flatten into separate lists, ensuring each pair stays together
+        all_student_prompts = []
+        all_teacher_prompts = []
+        all_extras = []
+        for student, extra in paired_data:
+            # Add both positive and negative examples
+            extra_yes = extra.copy()
+            extra_no = extra.copy()
+            extra_yes["teacher_answer"] = 'yes'
+            extra_no["teacher_answer"] = 'no'
+            all_student_prompts.extend([student, student])
+            all_teacher_prompts.extend([teacher_yes, teacher_no])
+            all_extras.extend([extra_yes, extra_no])
+
+        # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
+        # 1.1 generate sequences via vllm engines
+        outputs = []
+        num_vllm_dp_gruops = len(self.vllm_engines)
+
+        async with Timer("Generate sequences via vllm engines"):
+            dp_prompt_size = (len(all_teacher_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+            dp_tasks = []
+            for dp_rank in range(num_vllm_dp_gruops):
+                # Use teacher prompts for generation (they have the ground truth answer)
+                dp_teacher_inputs = all_student_prompts[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                dp_extras = all_extras[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                # handle last batch has no enough data
+                if len(dp_teacher_inputs) <= 0:
+                    continue
+                gen_func = self._get_generate_function(dp_rank)
+                dp_tasks.append(self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, **generate_kwargs))
+
+            logger.info("start generation from teacher prompts")
+            local_responses = await asyncio.gather(*dp_tasks)
+            outputs.extend(sum(local_responses, []))
+            logger.info("generate local rollout batch done")
+
+            # offload vllm engines when colocate all models
+            if self.cfg.colocate_all:
+                async with Timer("Offload vllm engines to cpu"):
+                    await self._offload_vllm_engines()
+
+        # skip when data is not enough
+        if len(outputs) <= 0:
+            return
+
+        assert len(all_teacher_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
+
+        # 1.2 calculate custom rewards if has custom reward function
+        if self.cfg.use_compute_reward_fn:
+            async with Timer("Calculate custom rewards"):
+                dp_tasks = []
+                reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
+                # Use student prompts for reward calculation since that's what the model will be trained on
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores = await reward_fn(
+                    all_student_prompts, outputs, all_extras)
+                assert len(all_student_prompts) == len(
+                    outputs
+                ), "generate objects number after custom reward function must be equal to all inputs number"
+        else:
+            all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores = all_student_prompts, outputs, None, None, None, None, None
+
+        ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
+        cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
+        ii = np.logical_and(initial_scores == 0, initial_teacher_scores == 0)
+
+        # empty data
+        if len(all_student_prompts) == 0:
+            return
+
+        # 1.3 packing samples
+        async with Timer("Packing samples"):
+            # Pack student sequences (for training)
+            (
+                ret_sequences,
+                ret_attention_masks,
+                ret_num_actions,
+                ret_packed_seq_lens,
+                ret_custom_rewards,
+                ret_teacher_sequences,
+                ret_teacher_attention_masks,
+                ret_teacher_num_actions,
+                ret_teacher_packed_seq_lens,
+                ret_teacher_custom_rewards,
+            ) = self._convert_prompts_outputs_to_batch_tensors_packing(
+                all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards,
+                self.cfg.packing_max_len,
+            )
+            action_masks = None
+            teacher_action_masks = None
+
+        # 1.4 inference and calculate values, log probs, rewards, kl divergence for student sequences
+        async with Timer("Inference and calculate values, log probs, rewards, kl divergence for student"):
+            student_experiences = await self.inference_and_calculates(
+                ret_sequences,
+                ret_attention_masks,
+                action_masks,
+                ret_num_actions,
+                ret_packed_seq_lens,
+                ret_custom_rewards,
+            )
+            logger.info(f"student experiences size: {len(student_experiences)} {len(ret_num_actions)}")
+            # logger.info(f"student log proba size: {student_experiences[0].action_log_probs.shape} {student_experiences[1].action_log_probs.shape} {student_experiences[0].sequences.shape}")
+
+        # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
+        async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
+            teacher_experiences = await self.inference_and_calculates(
+                ret_teacher_sequences,
+                ret_teacher_attention_masks,
+                teacher_action_masks,
+                ret_teacher_num_actions,
+                ret_teacher_packed_seq_lens,
+                ret_teacher_custom_rewards,
+            )
+            logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
+            # logger.info(f"teacher log proba size: {teacher_experiences[0].action_log_probs.shape} {teacher_experiences[1].action_log_probs.shape} {teacher_experiences[0].sequences.shape}")
+
+        # Compute teacher reward
+        async with Timer("Calculate teacher reward"):
+            final_reward_list = []
+            kl_max_list = []
+            kl_mean_list = []
+            match_reward_list = []
+            ss_reward_mean_list = []
+            ss_reward_min_list = []
+            ss_reward_list = []
+            ratio_clipped_0_1_list = []
+
+            teacher_prompt_idx = 0
+            teacher_pass_at_n_dict = defaultdict(list)
+            for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
+
+                kl_div_all = compute_approx_kl(
+                    teacher_exp.action_log_probs,
+                    student_exp.action_log_probs if not self.cfg.reward_kl_toward_ref_model else student_exp.base_action_log_probs,
+                    action_mask=student_exp.action_mask,
+                    use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
+                    use_abs_kl=self.cfg.use_abs_kl,
+                )
+
+                offset = 0
+                seq_offset = 0
+                total_lengths = student_exp.info["total_length"].flatten()
+                for i, num_action in enumerate(teacher_exp.num_actions[0]):
+                    na = int(num_action.item())
+                    seq_len = int(total_lengths[i])
+                    prompt_len = seq_len - na
+
+                    # computing answer alignment reward
+                    final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
+                    if final_answer_start is not None and final_answer_start < final_answer_end:
+
+                        s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        final_answer_start, final_answer_end = offset + final_answer_start, offset + final_answer_end
+
+                        # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
+                        final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
+                        # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
+                        # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
+                        # check if we find indices correctly
+                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                        # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
+                        ss_reward_mean = final_answer_log_propbs.mean().item()
+                        ss_reward_min = final_answer_log_propbs.min().item()
+                        ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
+                    else:
+                        ss_reward_mean = ss_reward_min = ss_reward = -1.1
+
+                    ss_reward_mean_list.append(ss_reward_mean)
+                    ss_reward_min_list.append(ss_reward_min)
+                    ss_reward_list.append(ss_reward)
+
+                    # computing kl divergence reward
+                    start, end = offset, offset + na
+                    kl_episode = kl_div_all[:, start:end].clone()
+                    kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
+                    if self.cfg.reward_kl_reduction == "mean":
+                        kl_mean = masked_mean(kl_episode, None, dim=-1)
+                    elif self.cfg.reward_kl_reduction == "sum":
+                        kl_mean = kl_episode.sum(dim=-1)
+                    match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
+                    match_reward = teacher_exp.info['custom_rewards'][i][-1]
+                    assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
+                    kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
+                    final_reward_list.append(self.cfg.ss_reward_coef * ss_reward_list[
+                        -1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward)
+                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1].item())
+
+                    kl_max_list.append(kl_max.item())
+                    kl_mean_list.append(kl_mean.item())
+                    match_reward_list.append(match_reward.item())
+
+                    # compute ratio_clipped_0_1 for TOPR
+                    if self.cfg.use_topr:
+                        clamped_log_ratio = (
+                                    student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:,
+                                                                                         start:end].sum(-1)).clamp(
+                            max=0.0)
+                        scalar_ratio_clipped_0_1 = torch.exp(clamped_log_ratio)
+                        ratio_clipped_0_1 = scalar_ratio_clipped_0_1 * torch.ones_like(
+                            student_exp.action_log_probs[:, start:end])  # in (0, 1]
+                        # logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
+                        # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
+                        # ToDo:replace this with the proper solution
+                        student_exp.base_action_log_probs[:, start:end] = ratio_clipped_0_1
+                        student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
+                        teacher_exp.info['use_topr'] = torch.tensor(0.).unsqueeze(0)
+                        # if initial_scores[teacher_prompt_idx] > 0:
+                        ratio_clipped_0_1_list.append(scalar_ratio_clipped_0_1.item())
+
+                    offset += na
+                    teacher_prompt_idx += 1
+                    seq_offset += seq_len
+
+                    if not self.cfg.use_grpo:
+                        teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + \
+                                                                    final_reward_list[-1]
+
+                assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
+                assert len(student_exp.sequences[
+                               0]) == seq_offset, "student_exp.sequences must be equal to seq_offset at the end"
+
+            assert len(final_reward_list) == teacher_prompt_idx == len(
+                all_teacher_prompts), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
+
+            # Log average KL divergence between student and teacher
+            kl_mean_list = np.array(kl_mean_list)
+            kl_max_list = np.array(kl_max_list)
+            ss_reward_mean_list = np.array(ss_reward_mean_list)
+            ss_reward_min_list = np.array(ss_reward_min_list)
+            match_reward_list = np.array(match_reward_list)
+            ratio_clipped_0_1_list = np.array(ratio_clipped_0_1_list)
+            avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
+            avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
+            avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
+
+            correct_match_reward_trainer = np.array([]) if np.all(initial_scores == 0) else np.array(
+                match_reward_list[initial_scores == 1])
+            incorrect_match_reward_trainer = np.array([]) if np.all(initial_scores == 1) else np.array(
+                match_reward_list[initial_scores == 0])
+            correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
+            incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
+            correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
+            incorrect_kl_max_list = np.array([]) if np.all(cc) else np.array(kl_max_list[ic])
+            correct_ss_reward_mean_list = np.array([]) if np.all(ic) else np.array(ss_reward_mean_list[cc])
+            incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
+            correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
+            incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
+            correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(
+                ratio_clipped_0_1_list[cc])
+            incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(
+                ratio_clipped_0_1_list[ic])
+
+            log_dict = {
+                "avg_student_teacher_kl": avg_student_teacher_kl,
+                "avg_student_teacher_kl_max": avg_student_teacher_kl_max,
+                "avg_match_reward": avg_match_reward,
+                "avg_correct_match_reward": 0 if len(correct_match_reward_trainer) == 0 else np.mean(
+                    correct_match_reward_trainer).item(),
+                "avg_incorrect_match_reward": 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(
+                    incorrect_match_reward_trainer).item(),
+                "avg_ss_reward_mean": 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item(),
+                "avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
+                "avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
+                "avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
+                "avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(
+                    incorrect_kl_mean_list).item(),
+                "avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
+                "avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
+                "avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(
+                    correct_ss_reward_mean_list).item(),
+                "avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.mean(
+                    incorrect_ss_reward_mean_list).item(),
+                "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(
+                    correct_ss_reward_min_list).item(),
+                "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(
+                    incorrect_ss_reward_min_list).item(),
+                "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
+                "avg_correct_ratio_clipped_0_1": 0 if len(correct_ratio_clipped_0_1_list) == 0 else np.mean(
+                    correct_ratio_clipped_0_1_list).item(),
+                "avg_incorrect_ratio_clipped_0_1": 0 if len(incorrect_ratio_clipped_0_1_list) == 0 else np.mean(
+                    incorrect_ratio_clipped_0_1_list).item(),
+            }
+
+            for k, v in log_dict.items():
+                self.writer.add_scalar(k, v, self.global_step)
+
+            logger.info(
+                f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward {avg_match_reward}")
+
+            if self.cfg.use_grpo and self.cfg.grpo_normalize_only_at_trainer:
+                logger.info(f"computing GRPO normalized rewards")
+                teacher_prompt_idx = 0
+                teacher_score_sum = 0
+                for teacher_exp in teacher_experiences:
+                    assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[
+                                                                              0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
+                    for i in range(len(teacher_exp.num_actions[0])):
+                        prompt = all_teacher_prompts[teacher_prompt_idx]
+                        teacher_score = final_reward_list[teacher_prompt_idx].item()
+
+                        # logger.info(f"teacher_score {teacher_score}")
+                        teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
+                        # logger.info(f"np.mean(teacher_pass_at_n_dict[prompt]) {np.mean(teacher_pass_at_n_dict[prompt])} {len(teacher_pass_at_n_dict[prompt])}")
+                        if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                            teacher_score /= teacher_std
+
+                        teacher_score_sum += teacher_score
+
+                        # logger.info(f"2 teacher_score {teacher_score}")
+                        # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                        teacher_exp.info['custom_rewards'][i][-1] = teacher_score
+
+                        # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                        teacher_prompt_idx += 1
+
+            assert teacher_prompt_idx == len(all_teacher_prompts) == len(
+                final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
+
+            self.writer.add_scalar("avg_teacher_kl_reward", teacher_score_sum / len(all_teacher_prompts),
+                                   self.global_step)
+            logger.info(f"avg_student_teacher_kl: {teacher_score_sum / len(all_teacher_prompts)}")
+
+        # Replace student action_log_probs with teacher action_log_probs
+        if self.cfg.replace_student_logprops_w_teacher or self.cfg.replace_student_base_logprops_w_teacher:
+            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
+                student_experiences[i] = Experience(
+                    student_exp.sequences,
+                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher else student_exp.action_log_probs,
+                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher else student_exp.action_log_probs,
+                    student_exp.values,
+                    student_exp.returns,
+                    student_exp.advantages,
+                    student_exp.attention_mask,
+                    student_exp.action_mask,
+                    student_exp.num_actions,
+                    student_exp.packed_seq_lens,
+                    student_exp.info,
+                    student_exp.kl,
+                )
+
+        # Replace teacher action_log_probs with student action_log_probs
+        if self.cfg.replace_teacher_logprops_w_student or self.cfg.replace_teacher_base_logprops_w_student:
+            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
+                teacher_experiences[i] = Experience(
+                    teacher_exp.sequences,
+                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student else teacher_exp.action_log_probs,
+                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student else teacher_exp.action_log_probs,
+                    teacher_exp.values,
+                    teacher_exp.returns,
+                    teacher_exp.advantages,
+                    teacher_exp.attention_mask,
+                    teacher_exp.action_mask,
+                    teacher_exp.num_actions,
+                    teacher_exp.packed_seq_lens,
+                    teacher_exp.info,
+                    teacher_exp.kl,
+                )
+
+        # 2 vis student and teacher to wandb and writer
+        for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
+            vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
+            self.writer.add_text(f"{prefix}_sequences", vis, self.global_step)
+
+            if wandb.run is not None:
+                data = []
+                # Log up to 5 examples from different experiences
+                for i in range(min(2, len(experiences))):
+                    if len(experiences[i].sequences) > 0:
+                        vis_example = self._detokenize(
+                            experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
+
+                        # Extract student prompt and reasoning parts
+                        if "Assistant: <think>" in vis_example:
+                            prompt_part = vis_example.split("Assistant: <think>")[0]
+                            reasoning_part = vis_example.split("Assistant: <think>")[1]
+                        else:
+                            prompt_part = vis_example
+                            reasoning_part = ""
+
+                        data.append([prompt_part, reasoning_part])
+
+                if data:
+                    wandb.log({
+                        "step": self.global_step,
+                        f"{prefix}_examples": wandb.Table(
+                            columns=["prompt", "reasoning"],
+                            data=data)
+                    })
+
+        self.writer.flush()
+
+        # 3. calculate advantages and returns / along with tensorboard logging
+        for experiences, buffer, prefix in zip([student_experiences, teacher_experiences],
+                                               [self.student_replay_buffer, self.teacher_replay_buffer],
+                                               ["student", "teacher"]):
+            avg_rewards = 0
+            avg_kl = 0
+            avg_kl_max = 0
+            avg_response_length = 0
+            avg_orm_score = 0
+            avg_custom_rewards = 0
+            avg_advantages = 0
+            avg_advantages_abs = 0
+
+            async with Timer(f"Calculate {prefix} advantages and returns"):
+                adv_tasks = []
+                for experience in experiences:
+                    adv_tasks.append(self._calc_advantages_and_returns(experience))
+
+                for tsk in asyncio.as_completed(adv_tasks):
+                    experience, metrics = await tsk
+                    avg_rewards += metrics["avg_rewards"]
+                    avg_kl += metrics["avg_kl"]
+                    avg_kl_max += metrics["avg_kl_max"]
+                    avg_response_length += metrics["avg_response_length"]
+                    avg_orm_score += metrics["avg_orm_score"]
+                    avg_custom_rewards += metrics["avg_custom_rewards"]
+                    avg_advantages += metrics["avg_advantages"]
+                    avg_advantages_abs += metrics["avg_advantages_abs"]
+                    buffer.append(experience)
+
+            # 4. tensorboard logging for this prefix
+            if len(experiences) > 0:
+                logger.info(
+                    f"{prefix.upper()} - avg_raw_rewards: {avg_rewards / len(experiences)}, avg_kl: {avg_kl / len(experiences)}, avg_response_length: {avg_response_length / len(experiences)}, avg_orm_score: {avg_orm_score / len(experiences)}, avg_custom_rewards: {avg_custom_rewards / len(experiences)}")
+                self.writer.add_scalar(f"{prefix}_avg_raw_rewards", avg_rewards / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_kl", avg_kl / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_kl_max", avg_kl_max / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_response_length", avg_response_length / len(experiences),
+                                       self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_orm_score", avg_orm_score / len(experiences), self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_custom_rewards", avg_custom_rewards / len(experiences),
+                                       self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_raw_advantages", avg_advantages / len(experiences),
+                                       self.global_step)
+                self.writer.add_scalar(f"{prefix}_avg_raw_advantages_abs", avg_advantages_abs / len(experiences),
+                                       self.global_step)
+
+        self.writer.flush()
+
+    @torch.no_grad()
+    async def make_teacher_experience(self, all_inputs: Union[Tuple[str, dict], List[Tuple[str, dict]]], **generate_kwargs):
         experiences = []
         # Create paired data (positive/negative for each prompt)
         paired_data = []

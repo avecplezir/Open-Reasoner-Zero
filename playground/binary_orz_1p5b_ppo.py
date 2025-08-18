@@ -155,6 +155,8 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = False
     replace_teacher_base_logprops_w_student: bool = True
 
+    student_teacher_order: True
+
 
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())
