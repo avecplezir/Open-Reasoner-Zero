@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-16-v7-4gpu-{randint}'
+    e_name = f'grpo-replacebaselogs-16-ikl004-v7-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -114,11 +114,11 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.04
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True #if not DEBUG_MODE else False
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
     # generate related settings
@@ -148,9 +148,12 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
-    use_topr: bool = True
+    use_topr: bool = False
     train_teacher: bool = True
-    replace_student_logprops_w_teacher: bool = True
+    replace_student_logprops_w_teacher: bool = False
+    replace_student_base_logprops_w_teacher: bool = True
+    replace_teacher_logprops_w_student: bool = False
+    replace_teacher_base_logprops_w_student: bool = True
 
 
 if __name__ == "__main__":

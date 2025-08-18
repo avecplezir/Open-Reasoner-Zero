@@ -532,12 +532,12 @@ class RayPPOTrainer:
             logger.info(f"avg_student_teacher_kl: {teacher_score_sum / len(all_teacher_prompts)}")
 
         # Replace student action_log_probs with teacher action_log_probs
-        if self.cfg.replace_student_logprops_w_teacher:
+        if self.cfg.replace_student_logprops_w_teacher or self.cfg.replace_student_base_logprops_w_teacher:
             for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
                 student_experiences[i] = Experience(
                     student_exp.sequences,
-                    teacher_exp.action_log_probs,  # Use teacher's action_log_probs
-                    student_exp.base_action_log_probs,
+                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher else student_exp.action_log_probs,
+                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher else student_exp.action_log_probs,
                     student_exp.values,
                     student_exp.returns,
                     student_exp.advantages,
@@ -547,6 +547,24 @@ class RayPPOTrainer:
                     student_exp.packed_seq_lens,
                     student_exp.info,
                     student_exp.kl,
+                )
+
+        # Replace teacher action_log_probs with student action_log_probs
+        if self.cfg.replace_teacher_logprops_w_student or self.cfg.replace_teacher_base_logprops_w_student:
+            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
+                teacher_experiences[i] = Experience(
+                    teacher_exp.sequences,
+                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student else teacher_exp.action_log_probs,
+                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student else teacher_exp.action_log_probs,
+                    teacher_exp.values,
+                    teacher_exp.returns,
+                    teacher_exp.advantages,
+                    teacher_exp.attention_mask,
+                    teacher_exp.action_mask,
+                    teacher_exp.num_actions,
+                    teacher_exp.packed_seq_lens,
+                    teacher_exp.info,
+                    teacher_exp.kl,
                 )
 
         # 2 vis student and teacher to wandb and writer

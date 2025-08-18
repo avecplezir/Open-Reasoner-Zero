@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-16-noreplace-v7-4gpu-{randint}'
+    e_name = f'grpo-replace-baselogs-tlogs-16-v7-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -151,6 +151,9 @@ class PPOExpConfig(BasePPOExpConfig):
     use_topr: bool = False
     train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = False
+    replace_student_base_logprops_w_teacher: bool = True
+    replace_teacher_logprops_w_student: bool = True
+    replace_teacher_base_logprops_w_student: bool = True
 
 
 if __name__ == "__main__":
