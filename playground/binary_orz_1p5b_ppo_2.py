@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-studentdata-v8-{randint}'
+    e_name = f'topr-student-data-v8-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -122,8 +122,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -133,6 +133,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # grpo related settings
     use_grpo: bool = True #False
     remove_student_grpo_normalization: bool = True
+    remove_teacher_grpo_normalization: bool = True
 
     gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
@@ -148,12 +149,12 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
-    use_topr: bool = False
+    use_topr: bool = True
     train_teacher: bool = False
     replace_student_logprops_w_teacher: bool = False
     replace_student_base_logprops_w_teacher: bool = False
     replace_teacher_logprops_w_student: bool = False
-    replace_teacher_base_logprops_w_student: bool = True
+    replace_teacher_base_logprops_w_student: bool = False
 
     student_teacher_order: bool = False
 

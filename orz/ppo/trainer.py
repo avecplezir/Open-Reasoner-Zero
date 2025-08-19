@@ -308,8 +308,8 @@ class RayPPOTrainer:
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
-            replace_student_logprops.extend([True] * len(all_student_prompts))
             replace_teacher_logprops.extend([False] * len(all_student_prompts))
+            replace_student_logprops.extend([True] * len(all_student_prompts))
 
             combined_all_student_prompts.extend(all_student_prompts)
             combined_all_teacher_prompts.extend(all_teacher_prompts)
@@ -402,8 +402,16 @@ class RayPPOTrainer:
 
             all_teacher_prompts = []
             for student_prompt, all_extra, final_answer, score in zip(all_student_prompts, all_extras, final_answers, initial_teacher_scores):
-                teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
-                # if score:
+
+                if score:
+                    # logger.info(f"score {score}, final_answer {final_answer}")
+                    teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
+                else:
+                    if random.random() > 0.5:
+                        teacher_prompt = all_extra["teacher_prompt_yes"]
+                    else:
+                        teacher_prompt = all_extra["teacher_prompt_no"]
+
                     # logger.info(f"score {score}, final_answer.lower() {final_answer.lower()}")
                 #     if 'yes' in final_answer.lower():
                 #         teacher_prompt = all_extra["teacher_prompt_yes"]
@@ -442,6 +450,7 @@ class RayPPOTrainer:
         all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = \
             combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers
 
+        initial_scores, initial_teacher_scores = np.array(initial_scores), np.array(initial_teacher_scores)
 
         logger.info(f"all_student_prompts: {len(all_student_prompts)}, all_teacher_prompts: {len(all_teacher_prompts)}")
         assert len(all_student_prompts) == len(all_teacher_prompts), logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}")
@@ -592,8 +601,8 @@ class RayPPOTrainer:
                     teacher_prompt_idx += 1
                     seq_offset += seq_len
 
-                    if not self.cfg.use_grpo:
-                        teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + final_reward_list[-1]
+                    # if not self.cfg.use_grpo:
+                    #     teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + final_reward_list[-1]
 
                 assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
                 assert len(student_exp.sequences[0]) == seq_offset, "student_exp.sequences must be equal to seq_offset at the end"
@@ -686,8 +695,8 @@ class RayPPOTrainer:
             for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
                 student_experiences[i] = Experience(
                     student_exp.sequences,
-                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher else student_exp.action_log_probs,
-                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher else student_exp.action_log_probs,
+                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher and replace_student_logprops[i] else student_exp.action_log_probs,
+                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher and replace_student_logprops[i] else student_exp.action_log_probs,
                     student_exp.values,
                     student_exp.returns,
                     student_exp.advantages,
@@ -704,8 +713,8 @@ class RayPPOTrainer:
             for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
                 teacher_experiences[i] = Experience(
                     teacher_exp.sequences,
-                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student else teacher_exp.action_log_probs,
-                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student else teacher_exp.action_log_probs,
+                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student and replace_teacher_logprops[i] else teacher_exp.action_log_probs,
+                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student and replace_teacher_logprops[i] else teacher_exp.action_log_probs,
                     teacher_exp.values,
                     teacher_exp.returns,
                     teacher_exp.advantages,

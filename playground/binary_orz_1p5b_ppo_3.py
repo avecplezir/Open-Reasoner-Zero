@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-studentdata-v8-{randint}'
+    e_name = f'pretain-grpo-student-data-v8-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -102,7 +102,7 @@ class PPOExpConfig(BasePPOExpConfig):
     update_ref_every_epoch: bool = True
     advantage_normalize: bool = False
 
-    num_episodes: int = 20
+    num_episodes: int = 3
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 8
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
@@ -122,8 +122,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -131,8 +131,9 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True
+    use_grpo: bool = True #False
     remove_student_grpo_normalization: bool = True
+    remove_teacher_grpo_normalization: bool = True
 
     gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
@@ -149,7 +150,7 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     use_topr: bool = False
-    train_teacher: bool = True
+    train_teacher: bool = False
     replace_student_logprops_w_teacher: bool = False
     replace_student_base_logprops_w_teacher: bool = False
     replace_teacher_logprops_w_student: bool = False
