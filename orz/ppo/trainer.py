@@ -32,6 +32,8 @@ from orz.ppo.utils import (
     normalize_advantages,
 )
 
+from playground.zero_setting_base import create_teacher_prompt_from_answer
+
 
 class RayPPOTrainer:
     def __init__(
@@ -225,6 +227,9 @@ class RayPPOTrainer:
         teacher_experiences = []
         student_experiences = []
 
+        combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
+        replace_student_logprops, replace_teacher_logprops = [], []
+
         if self.cfg.generate_with_teacher:
             # Create paired data (positive/negative for each prompt)
             paired_data = []
@@ -303,7 +308,19 @@ class RayPPOTrainer:
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
-            replace_student_logprops = [True] * len(all_student_prompts)
+            replace_student_logprops.extend([True] * len(all_student_prompts))
+            replace_teacher_logprops.extend([False] * len(all_student_prompts))
+
+            combined_all_student_prompts.extend(all_student_prompts)
+            combined_all_teacher_prompts.extend(all_teacher_prompts)
+            combined_outputs.extend(outputs)
+            combined_custom_rewards.extend(custom_rewards)
+            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
+            combined_answer_indices.extend(answer_indices)
+            combined_initial_scores.extend(initial_scores)
+            combined_initial_teacher_scores.extend(initial_teacher_scores)
+            combined_final_answers.extend(final_answers)
+
 
         if self.cfg.generate_with_student:
             # the same, but now generate data with student prompts
@@ -378,24 +395,56 @@ class RayPPOTrainer:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
             # create teacher prompts from student prompts
+            if self.tokenizer.bos_token_id is None:
+                bos_token = ""
+            else:
+                bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+
             all_teacher_prompts = []
             for student_prompt, all_extra, final_answer, score in zip(all_student_prompts, all_extras, final_answers, initial_teacher_scores):
-                if score:
-                    if 'yes' in final_answer.lower():
-                        teacher_prompt = all_extra["teacher_prompt_yes"]
-                    elif 'no' in final_answer.lower():
-                        teacher_prompt = all_extra["teacher_prompt_no"]
-                    else:
-                        assert 0, f"final answer must contain yes or no, {final_answer.lower()}"
-                else:
-                    # decide randomly yes/no
-                    if random.random() > 0.5:
-                        teacher_prompt = all_extra["teacher_prompt_yes"]
-                    else:
-                        teacher_prompt = all_extra["teacher_prompt_no"]
-                all_teacher_prompts.extend([teacher_prompt])
+                teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
+                # if score:
+                    # logger.info(f"score {score}, final_answer.lower() {final_answer.lower()}")
+                #     if 'yes' in final_answer.lower():
+                #         teacher_prompt = all_extra["teacher_prompt_yes"]
+                #     elif 'no' in final_answer.lower():
+                #         teacher_prompt = all_extra["teacher_prompt_no"]
+                #     else:
+                #         assert 0, logger.info(f"final answer must contain yes or no, {final_answer.lower()}")
+                # else:
+                #     teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
 
-            replace_teacher_logprops = [True] * len(all_student_prompts)
+                #     if 'yes' in final_answer.lower():
+                #         teacher_prompt = all_extra["teacher_prompt_yes"]
+                #     elif 'no' in final_answer.lower():
+                #         teacher_prompt = all_extra["teacher_prompt_no"]
+                #     # decide randomly yes/no
+                #     elif random.random() > 0.5:
+                #         teacher_prompt = all_extra["teacher_prompt_yes"]
+                #     else:
+                #         teacher_prompt = all_extra["teacher_prompt_no"]
+
+                all_teacher_prompts.append(teacher_prompt)
+
+            replace_teacher_logprops.extend([True] * len(all_student_prompts))
+            replace_student_logprops.extend([False] * len(all_student_prompts))
+
+            combined_all_student_prompts.extend(all_student_prompts)
+            combined_all_teacher_prompts.extend(all_teacher_prompts)
+            combined_outputs.extend(outputs)
+            combined_custom_rewards.extend(custom_rewards)
+            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
+            combined_answer_indices.extend(answer_indices)
+            combined_initial_scores.extend(initial_scores)
+            combined_initial_teacher_scores.extend(initial_teacher_scores)
+            combined_final_answers.extend(final_answers)
+
+        all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = \
+            combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers
+
+
+        logger.info(f"all_student_prompts: {len(all_student_prompts)}, all_teacher_prompts: {len(all_teacher_prompts)}")
+        assert len(all_student_prompts) == len(all_teacher_prompts), logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}")
 
         ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
         cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
@@ -676,7 +725,7 @@ class RayPPOTrainer:
             if wandb.run is not None:
                 data = []
                 # Log up to 5 examples from different experiences
-                for i in range(min(2, len(experiences))):
+                for i in range(min(5, len(experiences))):
                     if len(experiences[i].sequences) > 0:
                         vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
 

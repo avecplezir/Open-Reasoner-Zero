@@ -370,16 +370,16 @@ class CustomRewardTrainer(RayPPOTrainer):
         res_indices = []
         final_answers = []
         for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
-            if len(response) > 0:
-                res_prompts.append(prompt)
-                res_responses.append(response)
-                res_score_tensors.append(score_tensor)
-                res_teacher_score_tensors.append(teacher_score_tensor)
-                # Extract indices from output, defaulting to None if not present
-                begin_idx = output.get('answer_begin_idx', None)
-                end_idx = output.get('answer_end_idx', None)
-                res_indices.append((begin_idx, end_idx))
-                final_answers.append(output.get('final_answer', ''))
+            response = response if len(response) > 0 else "<empty response>"
+            res_prompts.append(prompt)
+            res_responses.append(response)
+            res_score_tensors.append(score_tensor)
+            res_teacher_score_tensors.append(teacher_score_tensor)
+            # Extract indices from output, defaulting to None if not present
+            begin_idx = output.get('answer_begin_idx', None)
+            end_idx = output.get('answer_end_idx', None)
+            res_indices.append((begin_idx, end_idx))
+            final_answers.append(output.get('final_answer', ''))
 
         return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, np.array(initial_scores), np.array(initial_teacher_scores), final_answers
 
@@ -476,8 +476,8 @@ class CustomRewardTrainer(RayPPOTrainer):
         equal_results = await asyncio.gather(*equal_tasks)
 
         if extras[0].get("teacher_answer", None) is None:
-            # If teacher_answer is not provided, we assume all teacher answers are correct or not with respect to the true answer
-            equal_teacher_results = copy.deepcopy(equal_results)
+            # If teacher_answer is not provided, we assume all teacher answers are correct
+            equal_teacher_results = [True] * len(equal_results)
         else:
             equal_teacher_tasks = []
             for extra, final_answer_item in zip(extras, final_answer_items):
