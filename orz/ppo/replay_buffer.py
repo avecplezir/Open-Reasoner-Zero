@@ -52,6 +52,7 @@ class Experience:
     packed_seq_lens: Optional[torch.Tensor]
     info: Optional[dict]
     kl: Optional[torch.Tensor] = None
+    ratio_clipped_0_1: Optional[torch.Tensor] = None
 
     @torch.no_grad()
     def to_device(self, device: torch.device) -> None:
@@ -73,6 +74,10 @@ class Experience:
             self.num_actions = to(self.num_actions, device)
         if self.packed_seq_lens is not None:
             self.packed_seq_lens = to(self.packed_seq_lens, device)
+        if self.kl is not None:
+            self.kl = to(self.kl, device)
+        if self.ratio_clipped_0_1 is not None:
+            self.ratio_clipped_0_1 = to(self.ratio_clipped_0_1, device)
 
     def pin_memory(self):
         self.sequences = pin_memory(self.sequences)
@@ -93,6 +98,10 @@ class Experience:
             self.num_actions = self.num_actions.pin_memory()
         if self.packed_seq_lens is not None:
             self.packed_seq_lens = self.packed_seq_lens.pin_memory()
+        if self.kl is not None:
+            self.kl = self.kl.pin_memory()
+        if self.ratio_clipped_0_1 is not None:
+            self.ratio_clipped_0_1 = self.ratio_clipped_0_1.pin_memory()
         return self
 
 
@@ -123,6 +132,7 @@ class BufferItem:
     action_mask: Optional[torch.BoolTensor]
     num_actions: Optional[torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
+    ratio_clipped_0_1: Optional[torch.Tensor]
     info: Optional[dict]
 
     def to_json(self) -> dict:
@@ -153,6 +163,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         "action_mask",
         "num_actions",
         "packed_seq_lens",
+        "ratio_clipped_0_1",
     )
     for key in keys:
         value = getattr(experience, key)
@@ -208,6 +219,7 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
         "action_mask",
         "num_actions",
         "packed_seq_lens",
+        "ratio_clipped_0_1",
     )
     for key in keys:
         vals = [getattr(item, key) for item in items]
@@ -226,7 +238,7 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
 
 def remove_padding_in_sequences(items):
     for item in items:
-        seq, act_log_prob, base_act_log_prob, value, ret, adv, att_mask, act_mask = (
+        seq, act_log_prob, base_act_log_prob, value, ret, adv, att_mask, act_mask, ratio_clip = (
             item.sequences,
             item.action_log_probs,
             item.base_action_log_probs,
@@ -235,6 +247,7 @@ def remove_padding_in_sequences(items):
             item.advantages,
             item.attention_mask,
             item.action_mask,
+            item.ratio_clipped_0_1,
         )
         right_pad = (1 - act_mask.long()).sum()
         right_pad = None if right_pad == 0 else -right_pad
@@ -250,6 +263,7 @@ def remove_padding_in_sequences(items):
             item.advantages,
             item.attention_mask,
             item.action_mask,
+            item.ratio_clipped_0_1,
         ) = (
             seq[left_pad:right_pad],
             act_log_prob[:right_pad],
@@ -259,6 +273,7 @@ def remove_padding_in_sequences(items):
             adv[:right_pad] if adv is not None else None,
             att_mask[left_pad:right_pad] if att_mask is not None else None,
             act_mask[:right_pad] if act_mask is not None else None,
+            ratio_clip[:right_pad] if ratio_clip is not None else None,
         )
     return items
 

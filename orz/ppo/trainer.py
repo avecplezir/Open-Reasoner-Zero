@@ -228,7 +228,7 @@ class RayPPOTrainer:
         student_experiences = []
 
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
-        replace_student_logprops, replace_teacher_logprops = [], []
+        teacher_generated = []
 
         if self.cfg.generate_with_teacher:
             # Create paired data (positive/negative for each prompt)
@@ -308,8 +308,7 @@ class RayPPOTrainer:
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
-            replace_teacher_logprops.extend([False] * len(all_student_prompts))
-            replace_student_logprops.extend([True] * len(all_student_prompts))
+            teacher_generated.extend([True] * len(all_student_prompts))
 
             combined_all_student_prompts.extend(all_student_prompts)
             combined_all_teacher_prompts.extend(all_teacher_prompts)
@@ -434,8 +433,7 @@ class RayPPOTrainer:
 
                 all_teacher_prompts.append(teacher_prompt)
 
-            replace_teacher_logprops.extend([True] * len(all_student_prompts))
-            replace_student_logprops.extend([False] * len(all_student_prompts))
+            teacher_generated.extend([False] * len(all_student_prompts))
 
             combined_all_student_prompts.extend(all_student_prompts)
             combined_all_teacher_prompts.extend(all_teacher_prompts)
@@ -518,7 +516,8 @@ class RayPPOTrainer:
             ss_reward_mean_list = []
             ss_reward_min_list = []
             ss_reward_list = []
-            ratio_clipped_0_1_list = []
+            teacher_ratio_clipped_0_1_list = []
+            student_ratio_clipped_0_1_list = []
 
             teacher_prompt_idx = 0
             teacher_pass_at_n_dict = defaultdict(list)
@@ -585,17 +584,19 @@ class RayPPOTrainer:
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.use_topr:
-                        clamped_log_ratio = (student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0)
-                        scalar_ratio_clipped_0_1 = torch.exp(clamped_log_ratio)
-                        ratio_clipped_0_1 = scalar_ratio_clipped_0_1 * torch.ones_like(student_exp.action_log_probs[:, start:end])  # in (0, 1]
-                        # logger.info(f"Computing ratio_clipped_0_1 for TOPR log_ratio {log_ratio.shape} ratio_clipped_0_1 {ratio_clipped_0_1.shape}")
-                        # as a temporary solution, we use ratio_clipped_0_1 to replace student_exp.base_action_log_probs as the kl loss set to zero anyway in default settings
-                        # ToDo:replace this with the proper solution
-                        student_exp.base_action_log_probs[:, start:end] = ratio_clipped_0_1
+                        if teacher_generated[teacher_prompt_idx]:
+                            teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
+                            student_ratio_clipped_0_1_scalar = torch.exp((student_exp.action_log_probs[:, start:end].sum(-1) - teacher_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0))
+                            student_exp.ratio_clipped_0_1[:, start:end] = student_ratio_clipped_0_1_scalar
+                        else:
+                            student_ratio_clipped_0_1_scalar = torch.tensor(1)
+                            teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:, start:end].sum(-1) - student_exp.action_log_probs[:, start:end].sum(-1)).clamp(max=0.0))
+                            teacher_exp.ratio_clipped_0_1[:, start:end] = teacher_ratio_clipped_0_1_scalar
+
                         student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
-                        teacher_exp.info['use_topr'] = torch.tensor(0.).unsqueeze(0)
-                        # if initial_scores[teacher_prompt_idx] > 0:
-                        ratio_clipped_0_1_list.append(scalar_ratio_clipped_0_1.item())
+                        teacher_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
+                        teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
+                        student_ratio_clipped_0_1_list.append(student_ratio_clipped_0_1_scalar.item())
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -615,7 +616,8 @@ class RayPPOTrainer:
             ss_reward_mean_list = np.array(ss_reward_mean_list)
             ss_reward_min_list = np.array(ss_reward_min_list)
             match_reward_list = np.array(match_reward_list)
-            ratio_clipped_0_1_list = np.array(ratio_clipped_0_1_list)
+            teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
+            student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
             avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
@@ -630,8 +632,10 @@ class RayPPOTrainer:
             incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
             correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
             incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
-            correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(ratio_clipped_0_1_list[cc])
-            incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(ratio_clipped_0_1_list[ic])
+            teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[cc])
+            teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[ic])
+            student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[cc])
+            student_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[ic])
 
             log_dict = {
                 "avg_student_teacher_kl": avg_student_teacher_kl,
@@ -651,8 +655,8 @@ class RayPPOTrainer:
                 "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
                 "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
                 "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
-                "avg_correct_ratio_clipped_0_1": 0 if len(correct_ratio_clipped_0_1_list) == 0 else np.mean(correct_ratio_clipped_0_1_list).item(),
-                "avg_incorrect_ratio_clipped_0_1": 0 if len(incorrect_ratio_clipped_0_1_list) == 0 else np.mean(incorrect_ratio_clipped_0_1_list).item(),
+                "avg_correct_ratio_clipped_0_1": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
+                "avg_incorrect_ratio_clipped_0_1": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
             }
 
             for k, v in log_dict.items():
@@ -695,8 +699,8 @@ class RayPPOTrainer:
             for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
                 student_experiences[i] = Experience(
                     student_exp.sequences,
-                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher and replace_student_logprops[i] else student_exp.action_log_probs,
-                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher and replace_student_logprops[i] else student_exp.action_log_probs,
+                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher and teacher_generated[i] else student_exp.action_log_probs,
+                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher and teacher_generated[i] else student_exp.action_log_probs,
                     student_exp.values,
                     student_exp.returns,
                     student_exp.advantages,
@@ -706,6 +710,7 @@ class RayPPOTrainer:
                     student_exp.packed_seq_lens,
                     student_exp.info,
                     student_exp.kl,
+                    student_exp.ratio_clipped_0_1,
                 )
 
         # Replace teacher action_log_probs with student action_log_probs
@@ -713,8 +718,8 @@ class RayPPOTrainer:
             for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
                 teacher_experiences[i] = Experience(
                     teacher_exp.sequences,
-                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student and replace_teacher_logprops[i] else teacher_exp.action_log_probs,
-                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student and replace_teacher_logprops[i] else teacher_exp.action_log_probs,
+                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student and not teacher_generated[i] else teacher_exp.action_log_probs,
+                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[i] else teacher_exp.action_log_probs,
                     teacher_exp.values,
                     teacher_exp.returns,
                     teacher_exp.advantages,
@@ -724,6 +729,7 @@ class RayPPOTrainer:
                     teacher_exp.packed_seq_lens,
                     teacher_exp.info,
                     teacher_exp.kl,
+                    teacher_exp.ratio_clipped_0_1,
                 )
 
         # 2 vis student and teacher to wandb and writer
@@ -1005,6 +1011,7 @@ class RayPPOTrainer:
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
                     info,
                     kl,
+                    torch.ones_like(action_log_probs[i]) if self.cfg.use_topr else None,
                 )
             )
         return experiences

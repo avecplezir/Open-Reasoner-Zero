@@ -533,7 +533,7 @@ class PolicyRayActorBase(RayActor):
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
 
         use_topr = self.args.use_topr and int(experience.info['use_topr'][0].item())
-        ratio_clipped_0_1 = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0) if use_topr else None
+        ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if use_topr else None
 
         # actor loss
         action_log_probs, output = self.model(
