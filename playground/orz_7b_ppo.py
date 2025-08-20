@@ -310,6 +310,9 @@ class CustomRewardTrainer(RayPPOTrainer):
                     if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
                         teacher_scores[i] /= teacher_std
 
+            if self.cfg.use_minus_plus_one_teacher_reward:
+                teacher_scores[i] = 2 * (teacher_scores[i] - 0.5)
+
         def dump_results(prompts, outputs, scores):
             saved = []
             for prompt, output, score in zip(prompts, outputs, scores):

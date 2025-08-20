@@ -64,12 +64,12 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-student-data-v8-{randint}'
+    e_name = f'topr-student-aug-data-v9-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 8
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     policy_update_steps: int = 1
@@ -150,16 +150,17 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     use_topr: bool = True
-    train_teacher: bool = False
-    replace_student_logprops_w_teacher: bool = False
-    replace_student_base_logprops_w_teacher: bool = False
-    replace_teacher_logprops_w_student: bool = False
-    replace_teacher_base_logprops_w_student: bool = False
+    train_teacher: bool = True
+    replace_student_logprops_w_teacher: bool = True
+    replace_student_base_logprops_w_teacher: bool = True
+    replace_teacher_logprops_w_student: bool = True
+    replace_teacher_base_logprops_w_student: bool = True
 
-    student_teacher_order: bool = False
+    student_teacher_order: bool = True
 
     generate_with_teacher: bool = False
     generate_with_student: bool = True
+    augment_student_generation_with_teacher: bool = True
 
 
 if __name__ == "__main__":
