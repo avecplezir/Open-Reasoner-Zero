@@ -385,7 +385,7 @@ class RayPPOTrainer:
                     # Use student prompts for reward calculation since that's what the model will be trained on
                     all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(
                         all_student_prompts, outputs, all_extras)
-                    assert len(all_student_prompts) == len(outputs) == len(all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
+                    assert len(all_student_prompts) == len(outputs), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
@@ -408,6 +408,8 @@ class RayPPOTrainer:
                         teacher_prompt = all_extra["teacher_prompt_no"]
 
                 all_teacher_prompts.append(teacher_prompt)
+
+            assert len(all_student_prompts) == len(all_teacher_prompts), "student and teacher prompts must be equal in length"
 
             teacher_generated.extend([False] * len(all_student_prompts))
 
@@ -497,7 +499,7 @@ class RayPPOTrainer:
             # logger.info(f"teacher log proba size: {teacher_experiences[0].action_log_probs.shape} {teacher_experiences[1].action_log_probs.shape} {teacher_experiences[0].sequences.shape}")
 
         # Compute teacher reward
-        async with Timer("Calculate teacher reward"):
+        async with Timer("Calculate teacher reward, replace student or teacher log probs w/ the correct one, compute torp ratio"):
             final_reward_list = []
             kl_max_list = []
             kl_mean_list = []
@@ -589,6 +591,15 @@ class RayPPOTrainer:
                         teacher_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
                         student_ratio_clipped_0_1_list.append(student_ratio_clipped_0_1_scalar.item())
+
+                    if self.cfg.replace_teacher_logprops_w_student and not teacher_generated[i]:
+                        teacher_exp.action_log_probs[:, start:end] = student_exp.action_log_probs[:, start:end]
+                    if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[i]:
+                        teacher_exp.base_action_log_probs[:, start:end] = student_exp.base_action_log_probs[:, start:end]
+                    if self.cfg.replace_student_logprops_w_teacher and teacher_generated[i]:
+                        student_exp.action_log_probs[:, start:end] = teacher_exp.action_log_probs[:, start:end]
+                    if self.cfg.replace_student_base_logprops_w_teacher and teacher_generated[i]:
+                        student_exp.base_action_log_probs[:, start:end] = teacher_exp.base_action_log_probs[:, start:end]
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -692,44 +703,6 @@ class RayPPOTrainer:
 
             self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
             logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
-
-        # Replace student action_log_probs with teacher action_log_probs
-        if self.cfg.replace_student_logprops_w_teacher or self.cfg.replace_student_base_logprops_w_teacher:
-            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
-                student_experiences[i] = Experience(
-                    student_exp.sequences,
-                    teacher_exp.action_log_probs if self.cfg.replace_student_logprops_w_teacher and teacher_generated[i] else student_exp.action_log_probs,
-                    teacher_exp.base_action_log_probs if self.cfg.replace_student_base_logprops_w_teacher and teacher_generated[i] else student_exp.action_log_probs,
-                    student_exp.values,
-                    student_exp.returns,
-                    student_exp.advantages,
-                    student_exp.attention_mask,
-                    student_exp.action_mask,
-                    student_exp.num_actions,
-                    student_exp.packed_seq_lens,
-                    student_exp.info,
-                    student_exp.kl,
-                    student_exp.ratio_clipped_0_1,
-                )
-
-        # Replace teacher action_log_probs with student action_log_probs
-        if self.cfg.replace_teacher_logprops_w_student or self.cfg.replace_teacher_base_logprops_w_student:
-            for i, (student_exp, teacher_exp) in enumerate(zip(student_experiences, teacher_experiences)):
-                teacher_experiences[i] = Experience(
-                    teacher_exp.sequences,
-                    student_exp.action_log_probs if self.cfg.replace_teacher_logprops_w_student and not teacher_generated[i] else teacher_exp.action_log_probs,
-                    student_exp.base_action_log_probs if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[i] else teacher_exp.action_log_probs,
-                    teacher_exp.values,
-                    teacher_exp.returns,
-                    teacher_exp.advantages,
-                    teacher_exp.attention_mask,
-                    teacher_exp.action_mask,
-                    teacher_exp.num_actions,
-                    teacher_exp.packed_seq_lens,
-                    teacher_exp.info,
-                    teacher_exp.kl,
-                    teacher_exp.ratio_clipped_0_1,
-                )
 
         # 2 vis student and teacher to wandb and writer
         for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
