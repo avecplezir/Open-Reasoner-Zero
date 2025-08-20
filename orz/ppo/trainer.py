@@ -244,8 +244,8 @@ class RayPPOTrainer:
                     ))
 
             # Shuffle the pairs to randomize order, but keep pairs together
-            rng = random.Random(42)
-            rng.shuffle(paired_data)
+            # rng = random.Random(42)
+            # rng.shuffle(paired_data)
 
             # Flatten into separate lists, ensuring each pair stays together
             all_student_prompts = []
@@ -332,8 +332,8 @@ class RayPPOTrainer:
                     ))
 
             # Shuffle the pairs to randomize order, but keep pairs together
-            rng = random.Random(42)
-            rng.shuffle(paired_data)
+            # rng = random.Random(42)
+            # rng.shuffle(paired_data)
 
             # Flatten into separate lists, ensuring each pair stays together
             all_student_prompts = []
@@ -423,6 +423,19 @@ class RayPPOTrainer:
 
         all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = \
             combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers
+
+        # Randomize order of all arrays
+        indices = np.random.permutation(len(all_student_prompts))
+        all_student_prompts = [all_student_prompts[i] for i in indices]
+        all_teacher_prompts = [all_teacher_prompts[i] for i in indices]
+        outputs = [outputs[i] for i in indices]
+        custom_rewards = [custom_rewards[i] for i in indices]
+        teacher_custom_rewards = [teacher_custom_rewards[i] for i in indices]
+        answer_indices = [answer_indices[i] for i in indices]
+        initial_scores = [initial_scores[i] for i in indices]
+        initial_teacher_scores = [initial_teacher_scores[i] for i in indices]
+        final_answers = [final_answers[i] for i in indices]
+        teacher_generated = [teacher_generated[i] for i in indices]
 
         initial_scores, initial_teacher_scores = np.array(initial_scores), np.array(initial_teacher_scores)
 
@@ -520,7 +533,7 @@ class RayPPOTrainer:
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
                     if final_answer_start is not None and final_answer_start < final_answer_end:
 
-                        s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        # s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
                         final_answer_start, final_answer_end = offset + final_answer_start, offset + final_answer_end
 
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
