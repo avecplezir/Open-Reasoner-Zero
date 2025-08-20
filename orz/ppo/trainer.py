@@ -302,9 +302,7 @@ class RayPPOTrainer:
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
                     all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(all_student_prompts, outputs, all_extras)
-                    assert len(all_student_prompts) == len(
-                        outputs
-                    ), "generate objects number after custom reward function must be equal to all inputs number"
+                    assert len(all_student_prompts) == len(outputs) == len(all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
@@ -387,9 +385,7 @@ class RayPPOTrainer:
                     # Use student prompts for reward calculation since that's what the model will be trained on
                     all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(
                         all_student_prompts, outputs, all_extras)
-                    assert len(all_student_prompts) == len(
-                        outputs
-                    ), "generate objects number after custom reward function must be equal to all inputs number"
+                    assert len(all_student_prompts) == len(outputs) == len(all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
 
@@ -410,26 +406,6 @@ class RayPPOTrainer:
                         teacher_prompt = all_extra["teacher_prompt_yes"]
                     else:
                         teacher_prompt = all_extra["teacher_prompt_no"]
-
-                    # logger.info(f"score {score}, final_answer.lower() {final_answer.lower()}")
-                #     if 'yes' in final_answer.lower():
-                #         teacher_prompt = all_extra["teacher_prompt_yes"]
-                #     elif 'no' in final_answer.lower():
-                #         teacher_prompt = all_extra["teacher_prompt_no"]
-                #     else:
-                #         assert 0, logger.info(f"final answer must contain yes or no, {final_answer.lower()}")
-                # else:
-                #     teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
-
-                #     if 'yes' in final_answer.lower():
-                #         teacher_prompt = all_extra["teacher_prompt_yes"]
-                #     elif 'no' in final_answer.lower():
-                #         teacher_prompt = all_extra["teacher_prompt_no"]
-                #     # decide randomly yes/no
-                #     elif random.random() > 0.5:
-                #         teacher_prompt = all_extra["teacher_prompt_yes"]
-                #     else:
-                #         teacher_prompt = all_extra["teacher_prompt_no"]
 
                 all_teacher_prompts.append(teacher_prompt)
 
@@ -512,6 +488,7 @@ class RayPPOTrainer:
             final_reward_list = []
             kl_max_list = []
             kl_mean_list = []
+            kl_sum_list = []
             match_reward_list = []
             ss_reward_mean_list = []
             ss_reward_min_list = []
@@ -567,19 +544,21 @@ class RayPPOTrainer:
                     start, end = offset, offset + na
                     kl_episode = kl_div_all[:, start:end].clone()
                     kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
+                    kl_mean = masked_mean(kl_episode, None, dim=-1)
+                    kl_sum = kl_episode.sum(dim=-1)
                     if self.cfg.reward_kl_reduction == "mean":
-                        kl_mean = masked_mean(kl_episode, None, dim=-1)
+                        kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
                     elif self.cfg.reward_kl_reduction == "sum":
-                        kl_mean = kl_episode.sum(dim=-1)
+                        kl_reward = -kl_sum - self.cfg.kl_max_coef * kl_max
                     match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
                     match_reward = teacher_exp.info['custom_rewards'][i][-1]
                     assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
-                    kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
                     final_reward_list.append(self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward)
                     teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1].item())
 
                     kl_max_list.append(kl_max.item())
                     kl_mean_list.append(kl_mean.item())
+                    kl_sum_list.append(kl_sum.item())
                     match_reward_list.append(match_reward.item())
 
                     # compute ratio_clipped_0_1 for TOPR
@@ -612,6 +591,7 @@ class RayPPOTrainer:
 
             # Log average KL divergence between student and teacher
             kl_mean_list = np.array(kl_mean_list)
+            kl_sum_list = np.array(kl_sum_list)
             kl_max_list = np.array(kl_max_list)
             ss_reward_mean_list = np.array(ss_reward_mean_list)
             ss_reward_min_list = np.array(ss_reward_min_list)
@@ -624,6 +604,8 @@ class RayPPOTrainer:
 
             correct_match_reward_trainer = np.array([]) if np.all(initial_scores == 0) else np.array(match_reward_list[initial_scores == 1])
             incorrect_match_reward_trainer = np.array([]) if np.all(initial_scores == 1) else np.array(match_reward_list[initial_scores == 0])
+            correct_kl_sum_list = np.array([]) if np.all(ic) else np.array(kl_sum_list[cc])
+            incorrect_kl_sum_list = np.array([]) if np.all(cc) else np.array(kl_sum_list[ic])
             correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
             incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
             correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
@@ -648,6 +630,8 @@ class RayPPOTrainer:
                 "avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
                 "avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
                 "avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
+                "avg_correct_kl_sum": 0 if len(correct_kl_sum_list) == 0 else np.mean(correct_kl_sum_list).item(),
+                "avg_incorrect_kl_sum": 0 if len(incorrect_kl_sum_list) == 0 else np.mean(incorrect_kl_sum_list).item(),
                 "avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
                 "avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
                 "avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(correct_ss_reward_mean_list).item(),
@@ -655,8 +639,10 @@ class RayPPOTrainer:
                 "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
                 "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
                 "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
-                "avg_correct_ratio_clipped_0_1": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
-                "avg_incorrect_ratio_clipped_0_1": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
+                "avg_teacher_correct_alpha": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
+                "avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
+                "avg_student_correct_alpha": 0 if len(student_correct_ratio_clipped_0_1_list) == 0 else np.mean(student_correct_ratio_clipped_0_1_list).item(),
+                "avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(student_incorrect_ratio_clipped_0_1_list).item(),
             }
 
             for k, v in log_dict.items():
@@ -691,8 +677,8 @@ class RayPPOTrainer:
 
             assert teacher_prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
 
-            self.writer.add_scalar("avg_teacher_kl_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
-            logger.info(f"avg_student_teacher_kl: {teacher_score_sum / len(all_teacher_prompts)}")
+            self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
+            logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
 
         # Replace student action_log_probs with teacher action_log_probs
         if self.cfg.replace_student_logprops_w_teacher or self.cfg.replace_student_base_logprops_w_teacher:
