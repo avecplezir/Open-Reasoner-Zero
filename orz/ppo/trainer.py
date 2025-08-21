@@ -751,35 +751,35 @@ class RayPPOTrainer:
 
             logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward {avg_match_reward}")
 
-            if self.cfg.use_grpo and self.cfg.grpo_normalize_only_at_trainer and not self.cfg.remove_teacher_grpo_normalization:
-                logger.info(f"computing GRPO normalized rewards")
-                teacher_prompt_idx = 0
-                teacher_score_sum = 0
-                for teacher_exp in teacher_experiences:
-                    assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
-                    for i in range(len(teacher_exp.num_actions[0])):
-                        prompt = all_teacher_prompts[teacher_prompt_idx]
-                        teacher_score = final_reward_list[teacher_prompt_idx].item()
+            async with Timer(f"computing GRPO normalized rewards"):
+                if self.cfg.use_grpo and not self.cfg.remove_teacher_grpo_normalization:
+                    teacher_prompt_idx = 0
+                    teacher_score_sum = 0
+                    for teacher_exp in teacher_experiences:
+                        assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
+                        for i in range(len(teacher_exp.num_actions[0])):
+                            prompt = all_teacher_prompts[teacher_prompt_idx]
+                            teacher_score = final_reward_list[teacher_prompt_idx].item()
 
-                        # logger.info(f"teacher_score {teacher_score}")
-                        teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
-                        # logger.info(f"np.mean(teacher_pass_at_n_dict[prompt]) {np.mean(teacher_pass_at_n_dict[prompt])} {len(teacher_pass_at_n_dict[prompt])}")
-                        if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-                            teacher_score /= teacher_std
+                            # logger.info(f"teacher_score {teacher_score}")
+                            teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
+                            # logger.info(f"np.mean(teacher_pass_at_n_dict[prompt]) {np.mean(teacher_pass_at_n_dict[prompt])} {len(teacher_pass_at_n_dict[prompt])}")
+                            if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                                teacher_score /= teacher_std
 
-                        teacher_score_sum += teacher_score
+                            teacher_score_sum += teacher_score
 
-                        # logger.info(f"2 teacher_score {teacher_score}")
-                        # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
-                        teacher_exp.info['custom_rewards'][i][-1] = teacher_score
+                            # logger.info(f"2 teacher_score {teacher_score}")
+                            # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                            teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
-                        # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
-                        teacher_prompt_idx += 1
+                            # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
+                            teacher_prompt_idx += 1
 
-            assert teacher_prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
+                    assert teacher_prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
 
-            self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
-            logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
+                    self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
+                    logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
 
         # 2 vis student and teacher to wandb and writer
         for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
