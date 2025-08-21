@@ -1001,6 +1001,12 @@ class RefRayActorBase(RayActor):
             )
         return log_probs.to("cpu")
 
+    def get_model_update_group(self):
+        return getattr(self, '_model_update_group', None)
+    
+    def set_model_update_group(self, group):
+        self._model_update_group = group
+
 
 PolicyRayActor = ray.remote(num_gpus=1)(PolicyRayActorBase)
 CriticRayActor = ray.remote(num_gpus=1)(CriticRayActorBase)

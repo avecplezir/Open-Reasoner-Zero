@@ -166,6 +166,8 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
 
+    separate_teacher_model: bool = False
+
 
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())
