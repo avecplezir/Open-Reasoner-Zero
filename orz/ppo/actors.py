@@ -355,6 +355,8 @@ class PPORayActorGroup:
 
     async def async_run_method(self, method_name, *args, **kwargs):
         refs = []
+        logger.info(f"Run method {method_name} on {len(self._actor_handlers)} actors")
+        logger.info(f"_actor_handlers: {self._actor_handlers}")
         for actor in self._actor_handlers:
             method = getattr(actor, method_name)
             refs.append(method.remote(*args, **kwargs))
@@ -691,10 +693,10 @@ class PolicyRayActorBase(RayActor):
             ray.get(refs)
         torch.distributed.barrier()
 
-    def _broadcast_to_vllm(self, vllm_engines):
+    def _broadcast_to_vllm(self, vllm_engines, model=None):
         # avoid OOM
         torch.cuda.empty_cache()
-        model = self.model.model.module
+        model = self.model.model.module  if model is None else model.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
@@ -713,10 +715,10 @@ class PolicyRayActorBase(RayActor):
                     ray.get(refs)
         self.strategy.print("Broadcast actor weights to vllm engines done")
 
-    def _broadcast_to_vllm_cudaipc(self, vllm_engines):
+    def _broadcast_to_vllm_cudaipc(self, vllm_engines, model=None):
         # avoid OOM
         torch.cuda.empty_cache()
-        model = self.model.model.module
+        model = self.model.model.module if model is None else model.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
@@ -758,10 +760,17 @@ class PolicyRayActorBase(RayActor):
         return stats
 
     def _get_model_update_group(self):
-        return getattr(self, '_model_update_group', None)
+        model_update_group = None
+        if torch.distributed.get_rank() == 0:
+            model_update_group = getattr(self, '_model_update_group', None)
+
+        torch.distributed.barrier()
+        return model_update_group
 
     def _set_model_update_group(self, group):
-        self._model_update_group = group
+        if torch.distributed.get_rank() == 0:
+            self._model_update_group = group
+        torch.distributed.barrier()
 
 class CriticRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):

@@ -84,9 +84,9 @@ class RayPPOTrainer:
         await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
         
         # Share the process group with teacher model if separate
-        if self.cfg.separate_teacher_model:
-            policy_group = await self.policy_model.async_run_method("_get_model_update_group")
-            await self.teacher_model.async_run_method("_set_model_update_group", policy_group)
+        # if self.cfg.separate_teacher_model:
+        #     policy_group = await self.policy_model.async_run_method("_get_model_update_group")
+        #     await self.teacher_model.async_run_method("_set_model_update_group", policy_group)
         
         logger.info("Create vllm engine gourps done.")
 
@@ -365,7 +365,7 @@ class RayPPOTrainer:
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
                     await self.teacher_model.backload_to_gpu()
-                    await self._sync_teacher_weights_to_vllm()
+                    await self._sync_policy_weights_to_vllm(model=self.teacher_model)
                     await self.teacher_model.offload_to_cpu()
 
             # create the oposite teacher prompt and collect data with it
@@ -1971,11 +1971,11 @@ class RayPPOTrainer:
             backload_tasks.append(engine.backload_to_gpu.remote())
         await asyncio.gather(*backload_tasks)
 
-    async def _sync_policy_weights_to_vllm(self):
+    async def _sync_policy_weights_to_vllm(self, model=None):
         if self.cfg.colocate_all:
-            await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+            await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines, model=model)
         else:
-            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines, model=model)
 
     async def _sync_teacher_weights_to_vllm(self):
         if self.cfg.colocate_all:
