@@ -85,8 +85,8 @@ class RayPPOTrainer:
         
         # Share the process group with teacher model if separate
         if self.cfg.separate_teacher_model:
-            policy_group = await self.policy_model.async_run_method("get_model_update_group")
-            await self.teacher_model.async_run_method("set_model_update_group", policy_group)
+            policy_group = await self.policy_model.async_run_method("_get_model_update_group")
+            await self.teacher_model.async_run_method("_set_model_update_group", policy_group)
         
         logger.info("Create vllm engine gourps done.")
 

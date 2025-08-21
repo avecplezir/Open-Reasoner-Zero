@@ -757,6 +757,11 @@ class PolicyRayActorBase(RayActor):
 
         return stats
 
+    def _get_model_update_group(self):
+        return getattr(self, '_model_update_group', None)
+
+    def _set_model_update_group(self, group):
+        self._model_update_group = group
 
 class CriticRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
@@ -1000,12 +1005,6 @@ class RefRayActorBase(RayActor):
                 packed_seq_lens=packed_seq_lens,
             )
         return log_probs.to("cpu")
-
-    def get_model_update_group(self):
-        return getattr(self, '_model_update_group', None)
-    
-    def set_model_update_group(self, group):
-        self._model_update_group = group
 
 
 PolicyRayActor = ray.remote(num_gpus=1)(PolicyRayActorBase)
