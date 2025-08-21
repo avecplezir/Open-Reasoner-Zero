@@ -133,14 +133,20 @@ class RayPPOTrainer:
                     self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                if self.cfg.train_teacher:
+                if self.cfg.student_training_frequency > 0:
+                    if (episode + 1) % self.cfg.student_training_frequency == 0:
+                        logger.info(f'training student model, {episode + 1} episode')
+                        train_set = zip([self.student_replay_buffer], ["",], [True])
+                        self.teacher_replay_buffer.clear()
+                    else:
+                        logger.info(f'training teacher model, {episode + 1} episode')
+                        train_set = zip([self.teacher_replay_buffer], ["teacher",], [True])
+                        self.student_replay_buffer.clear()
+                else:
                     if self.cfg.student_teacher_order:
                         train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
                     else:
                         train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''], [False, True])
-                else:
-                    self.teacher_replay_buffer.clear()
-                    train_set = zip([self.student_replay_buffer], [""], [True])
 
                 for replay_buffer, prefix, backlog in train_set:
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
@@ -622,7 +628,7 @@ class RayPPOTrainer:
                         # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
-                        ss_reward = ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
+                        ss_reward = self.cfg.kl_mean_coef * ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
                     else:
                         ss_reward_mean = ss_reward_min = ss_reward = -1.1
 
@@ -637,9 +643,11 @@ class RayPPOTrainer:
                     kl_mean = masked_mean(kl_episode, None, dim=-1)
                     kl_sum = kl_episode.sum(dim=-1)
                     if self.cfg.reward_kl_reduction == "mean":
-                        kl_reward = -kl_mean - self.cfg.kl_max_coef * kl_max
+                        kl_reward = -self.cfg.kl_mean_coef * kl_mean - self.cfg.kl_max_coef * kl_max
                     elif self.cfg.reward_kl_reduction == "sum":
-                        kl_reward = -kl_sum - self.cfg.kl_max_coef * kl_max
+                        kl_reward = -self.cfg.kl_mean_coef * kl_sum - self.cfg.kl_max_coef * kl_max
+                    kl_reward = torch.clamp(kl_reward, min=-self.cfg.kl_reward_clamp)
+
                     match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
                     match_reward = teacher_exp.info['custom_rewards'][i][-1]
                     assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
