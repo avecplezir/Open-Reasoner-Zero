@@ -241,7 +241,7 @@ class RayPPOTrainer:
 
         await self.policy_model.async_save_model(self.tokenizer, self.cfg.num_episodes * len(self.prompts_dataloader))
         if self.cfg.separate_teacher_model:
-            await self.teacher_model.async_save_model(self.tokenizer, f'teacher-{self.cfg.num_episodes * len(self.prompts_dataloader)})
+            await self.teacher_model.async_save_model(self.tokenizer, f'teacher-{self.cfg.num_episodes * len(self.prompts_dataloader)}')
 
         logger.info("Successfully save model weights, training done.")
 
