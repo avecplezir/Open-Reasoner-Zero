@@ -17,6 +17,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel
+from contextlib import nullcontext
 
 # from openrlhf.models import Actor
 from transformers.trainer import get_scheduler
@@ -693,32 +694,47 @@ class PolicyRayActorBase(RayActor):
             ray.get(refs)
         torch.distributed.barrier()
 
-    def _broadcast_to_vllm(self, vllm_engines, model=None):
+    def _broadcast_to_vllm(self, vllm_engines, external_weights=None):
         # avoid OOM
         torch.cuda.empty_cache()
-        model = self.model.model.module  if model is None else model.model.module
-        count, num_params = 0, len(list(model.named_parameters()))
-        for name, param in model.named_parameters():
+        
+        if external_weights is not None:
+            if torch.distributed.get_rank() == 0:
+                count, num_params = 0, len(external_weights)
+                iterable = external_weights.items()
+            else:
+                external_weights = None
+        else:
+            model = self.model.model.module
+            count, num_params = 0, len(list(model.named_parameters()))
+            iterable = model.named_parameters()
+            
+        for name, param in iterable:
             count += 1  # empty_cache at last param
 
             # Fire all vllm engines for broadcast
             if torch.distributed.get_rank() == 0:
-                shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
+                shape = param.shape if self.strategy.args.zero_stage != 3 or external_weights is not None else param.ds_shape
                 refs = [
                     engine.update_weight.remote(name, dtype=param.dtype, shape=shape, empty_cache=count == num_params)
                     for engine in vllm_engines
                 ]
+                
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+            context = deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3) if external_weights is None else nullcontext()
+            with context:
                 if torch.distributed.get_rank() == 0:
+                    # transfer to gpu if param is on cpu
+                    if param.device.type == "cpu":
+                        param = param.to(torch.cuda.current_device())
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)
         self.strategy.print("Broadcast actor weights to vllm engines done")
 
-    def _broadcast_to_vllm_cudaipc(self, vllm_engines, model=None):
+    def _broadcast_to_vllm_cudaipc(self, vllm_engines):
         # avoid OOM
         torch.cuda.empty_cache()
-        model = self.model.model.module if model is None else model.model.module
+        model = self.model.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
@@ -771,6 +787,24 @@ class PolicyRayActorBase(RayActor):
         if torch.distributed.get_rank() == 0:
             self._model_update_group = group
         torch.distributed.barrier()
+
+    def _extract_model_weights(self):
+        """Extract model weights for cross-actor transfer"""
+        if torch.distributed.get_rank() != 0:
+            return None
+            
+        weights = {}
+        model = self.model.model.module
+        
+        for name, param in model.named_parameters():
+            # For ZeRO-3, gather sharded parameters
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                # Only rank 0 has the gathered parameters
+                if torch.distributed.get_rank() == 0:
+                    # Copy to CPU to avoid GPU memory issues during transfer
+                    weights[name] = param.clone().cpu()
+        
+        return weights
 
 class CriticRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
