@@ -157,16 +157,8 @@ class RayPPOTrainer:
                     else:
                         train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''])
 
-                if self.cfg.colocate_all:
-                    await self.teacher_model.offload_to_cpu()
-                    await self.policy_model.offload_to_cpu()
-                    await self.teacher_model.async_run_method("empty_cache")
-                    await self.policy_model.async_run_method("empty_cache")
-                    torch.cuda.empty_cache()
-
                 for replay_buffer, prefix in train_set:
                     model = self.teacher_model if self.cfg.separate_teacher_model and prefix == "teacher" else self.policy_model
-                    await model.backload_to_gpu()
 
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     # serialize replay buffer to jsonl
@@ -246,6 +238,14 @@ class RayPPOTrainer:
                     )
                 )
                 logger.info("Successfully update ref model with policy model, training continue.")
+
+                if self.cfg.separate_teacher_model and self.cfg.update_teacher_every_epoch:
+                    await asyncio.gather(
+                        *self.teacher_model.async_init_model_from_pretrained(
+                            self.strategy, os.path.join(self.cfg.save_path, f"iter{self.global_step}", "policy")
+                        )
+                    )
+                    logger.info("Successfully update teacher model with policy model, training continue.")
 
         await self.policy_model.async_save_model(self.tokenizer, self.cfg.num_episodes * len(self.prompts_dataloader))
         if self.cfg.separate_teacher_model:
@@ -533,6 +533,7 @@ class RayPPOTrainer:
                 ret_teacher_num_actions,
                 ret_teacher_packed_seq_lens,
                 ret_teacher_custom_rewards,
+                use_teacher_model=self.cfg.separate_teacher_model,
             )
             logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
 
@@ -830,6 +831,7 @@ class RayPPOTrainer:
             num_actions_all: Optional[List[int]],
             packed_seq_lens_all: Optional[List[int]],
             custom_rewards_all: Optional[List[torch.Tensor]],
+            use_teacher_model: bool = False,
     ):
         num_policy_dp_groups = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
         num_critic_dp_groups = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
@@ -928,11 +930,14 @@ class RayPPOTrainer:
 
         # calculate action log probs
         if self.cfg.colocate_all:
-            await self.policy_model.backload_to_gpu()
+            if not use_teacher_model:
+                await self.policy_model.backload_to_gpu()
+            else:
+                await self.teacher_model.backload_to_gpu()
 
         action_log_probs_ref = micro_infer_model(
             num_policy_dp_groups,
-            "policy_model",
+            "policy_model" if not use_teacher_model else "teacher_model",
             sequences_all,
             num_actions_all,
             attention_mask_all,
@@ -941,7 +946,10 @@ class RayPPOTrainer:
         action_log_probs = None
         if self.cfg.colocate_all:
             action_log_probs = await action_log_probs_ref
-            await self.policy_model.offload_to_cpu()
+            if not use_teacher_model:
+                await self.policy_model.offload_to_cpu()
+            else:
+                await self.teacher_model.offload_to_cpu()
 
         # wait all models done
         # if not colocate_actor_ref, then need to gather base_log_probs
@@ -968,7 +976,7 @@ class RayPPOTrainer:
         r = torch.stack(rewards).sum(dim=0) if len(rewards) > 0 else None
         if not self.cfg.colocate_all:
             empty_cache_tasks = [
-                self.policy_model.async_run_method("empty_cache"),
+                self.policy_model.async_run_method("empty_cache") if not use_teacher_model else self.teacher_model.async_run_method("empty_cache"),
                 self.ref_model.async_run_method("empty_cache"),
             ]
             if self.critic_model:

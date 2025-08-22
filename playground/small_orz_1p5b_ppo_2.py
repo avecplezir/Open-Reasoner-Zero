@@ -100,6 +100,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
+    update_teacher_every_epoch: bool = True
     advantage_normalize: bool = False
 
     num_episodes: int = 5
