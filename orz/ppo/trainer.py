@@ -83,12 +83,6 @@ class RayPPOTrainer:
 
         await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
         
-        # Share the process group with teacher model if separate
-        # if self.cfg.separate_teacher_model:
-            # await self.teacher_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
-            # policy_group = await self.policy_model.async_run_method("_get_model_update_group")
-            # await self.teacher_model.async_run_method("_set_model_update_group", policy_group)
-        
         logger.info("Create vllm engine gourps done.")
 
         async with Timer("Sync actor weights to vllm engines"):
@@ -111,6 +105,7 @@ class RayPPOTrainer:
         self.global_step = consumed_samples // self.cfg.rollout_batch_size
         start_episode = consumed_samples // self.cfg.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * self.cfg.rollout_batch_size)
+
         for episode in range(start_episode, self.cfg.num_episodes):
             pbar = tqdm(
                 range(self.prompts_dataloader.__len__()), desc=f"Episode [{episode + 1}/{self.cfg.num_episodes}]"
@@ -134,6 +129,8 @@ class RayPPOTrainer:
                         await self._backload_vllm_engines()
                         await self._sync_policy_weights_to_vllm()
                         await self.policy_model.offload_to_cpu()
+                        if self.cfg.separate_teacher_model:
+                            await self.teacher_model.offload_to_cpu()
                     continue
 
                 if self.cfg.advantage_normalize:
@@ -151,19 +148,22 @@ class RayPPOTrainer:
                         self.student_replay_buffer.clear()
                 else:
                     if self.cfg.student_teacher_order:
-                        train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
+                        train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'])
                     else:
-                        train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''], [False, True])
+                        train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''])
 
-                for replay_buffer, prefix, backlog in train_set:
-                    if self.cfg.separate_teacher_model:
-                        # Use teacher model for training if separate
-                        if prefix == "teacher":
-                            model = self.teacher_model
-                        else:
-                            model = self.policy_model
-                    else:
-                        model = self.policy_model
+                if self.cfg.colocate_all:
+                    await self.teacher_model.offload_to_cpu()
+                    await self.policy_model.offload_to_cpu()
+                    await self.teacher_model.async_run_method("empty_cache")
+                    await self.policy_model.async_run_method("empty_cache")
+                    torch.cuda.empty_cache()
+                    torch.distributed.barrier()
+
+
+                for replay_buffer, prefix in train_set:
+                    model = self.teacher_model if self.cfg.separate_teacher_model and prefix == "teacher" else self.policy_model
+                    await model.backload_to_gpu()
 
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     # serialize replay buffer to jsonl
@@ -194,14 +194,14 @@ class RayPPOTrainer:
                                 await self.critic_model.offload_to_cpu()
                         async with Timer("Actor model training"):
                             await model.backload_to_gpu()
-                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
+                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
                             await model.offload_to_cpu()
 
                     else:
                         if self.critic_model is not None:
                             async with Timer("Actor and Critic model training"):
                                 status = await asyncio.gather(
-                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog),
+                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix),
                                     self.ppo_local_train_critic(critic_buffers, self.global_step, prefix),
                                 )
                                 await asyncio.gather(
@@ -211,13 +211,17 @@ class RayPPOTrainer:
                                 status = status[0]
                         else:
                             async with Timer("Actor model training"):
-                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
+                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
                                 await model.async_run_method("empty_cache")
 
                     replay_buffer.clear()
 
                     # 5. set logs
                     logger.info(f'{prefix} {status}')
+
+                if self.cfg.colocate_all:
+                    async with Timer("Backload vllm engines to gpu"):
+                        await self._backload_vllm_engines()
 
                 pbar.update()
                 # log epoch info
@@ -268,8 +272,8 @@ class RayPPOTrainer:
                     ))
 
             # Shuffle the pairs to randomize order, but keep pairs together
-            # rng = random.Random(42)
-            # rng.shuffle(paired_data)
+            rng = random.Random(42)
+            rng.shuffle(paired_data)
 
             # Flatten into separate lists, ensuring each pair stays together
             all_student_prompts = []
@@ -286,6 +290,7 @@ class RayPPOTrainer:
 
             # Sync student (policy) model weights to VLLM engines before generation
             async with Timer("Sync policy weights to VLLM engines for student generation"):
+                # await self._sync_teacher_weights_to_vllm()
                 await self.policy_model.backload_to_gpu()
                 await self._sync_policy_weights_to_vllm()
                 await self.policy_model.offload_to_cpu()
@@ -1263,13 +1268,6 @@ class RayPPOTrainer:
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
             await model.async_run_method("empty_cache")
 
-        if backlog:
-            if self.cfg.colocate_all:
-                async with Timer("Backload vllm engines to gpu"):
-                    await self._backload_vllm_engines()
-        #     async with Timer("Broadcast actor weights to vllm engines"):
-        #         await self._sync_policy_weights_to_vllm()
-
         if global_steps > self.cfg.freezing_actor_steps:
             return status[0]
 
@@ -1974,16 +1972,19 @@ class RayPPOTrainer:
         await asyncio.gather(*backload_tasks)
 
     async def _sync_policy_weights_to_vllm(self):
-        if self.cfg.colocate_all:
-            await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
-        else:
-            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        # if self.cfg.colocate_all:
+        #     await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+        # else:
+        #     await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
 
     async def _sync_teacher_weights_to_vllm(self):
-        # Extract teacher weights and use policy model's broadcast infrastructure
-        teacher_weights = await self.teacher_model.async_run_method("_extract_model_weights")
-        # Get weights from rank 0 actor (only rank 0 has the weights)
-        teacher_weights = teacher_weights[0] if teacher_weights and teacher_weights[0] is not None else None
-        
-        if teacher_weights is not None:
-            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines, teacher_weights)
+        async with Timer("teacher _extract_model_weights"):
+            # Extract teacher weights and use policy model's broadcast infrastructure
+            teacher_weights = await self.teacher_model.async_run_method("_extract_model_weights")
+            # Get weights from rank 0 actor (only rank 0 has the weights)
+            teacher_weights = teacher_weights[0] if teacher_weights and teacher_weights[0] is not None else None
+
+        async with Timer("teacher _broadcast_to_vllm_w_external_weights"):
+            if teacher_weights is not None:
+                await self.policy_model.async_run_method("_broadcast_to_vllm_w_external_weights", self.vllm_engines, teacher_weights)

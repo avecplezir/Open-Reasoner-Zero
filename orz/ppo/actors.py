@@ -694,39 +694,63 @@ class PolicyRayActorBase(RayActor):
             ray.get(refs)
         torch.distributed.barrier()
 
-    def _broadcast_to_vllm(self, vllm_engines, external_weights=None):
+    def _broadcast_to_vllm_w_external_weights(self, vllm_engines, external_weights):
         # avoid OOM
         torch.cuda.empty_cache()
-        
-        if external_weights is not None:
-            if torch.distributed.get_rank() == 0:
-                count, num_params = 0, len(external_weights)
-                iterable = external_weights.items()
-            else:
-                external_weights = None
+
+        if external_weights is not None and torch.distributed.get_rank() == 0:
+            count, num_params = 0, len(external_weights)
+            for name, param in external_weights.items():
+                count += 1  # empty_cache at last param
+
+                # Fire all vllm engines for broadcast (only rank 0)
+                refs = [
+                    engine.update_weight.remote(name, dtype=param.dtype, shape=param.shape, empty_cache=count == num_params)
+                    for engine in vllm_engines
+                ]
+
+                # Transfer to GPU if param is on CPU
+                if param.device.type == "cpu":
+                    param = param.to(torch.cuda.current_device())
+                
+                # ALL ranks must participate in broadcast
+                torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
+                ray.get(refs)
+                
+                # Clear GPU memory immediately after each parameter
+                del param
+                torch.cuda.empty_cache()
         else:
-            model = self.model.model.module
-            count, num_params = 0, len(list(model.named_parameters()))
-            iterable = model.named_parameters()
-            
-        for name, param in iterable:
+            # Non-rank-0 actors: participate in broadcasts but don't do Ray calls
+            if external_weights is not None:
+                # We need to know how many parameters to broadcast
+                # This is a limitation - we need rank 0 to send this info first
+                pass
+        
+        # All ranks must reach this barrier
+        del external_weights
+        torch.cuda.empty_cache()
+        self.strategy.print("Broadcast external weights to vllm engines done")
+        torch.distributed.barrier()
+
+    def _broadcast_to_vllm(self, vllm_engines):
+        # avoid OOM
+        torch.cuda.empty_cache()
+        model = self.model.model.module
+        count, num_params = 0, len(list(model.named_parameters()))
+        for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
 
             # Fire all vllm engines for broadcast
             if torch.distributed.get_rank() == 0:
-                shape = param.shape if self.strategy.args.zero_stage != 3 or external_weights is not None else param.ds_shape
+                shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
                 refs = [
                     engine.update_weight.remote(name, dtype=param.dtype, shape=shape, empty_cache=count == num_params)
                     for engine in vllm_engines
                 ]
-                
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            context = deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3) if external_weights is None else nullcontext()
-            with context:
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
-                    # transfer to gpu if param is on cpu
-                    if param.device.type == "cpu":
-                        param = param.to(torch.cuda.current_device())
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)
         self.strategy.print("Broadcast actor weights to vllm engines done")
@@ -775,35 +799,21 @@ class PolicyRayActorBase(RayActor):
 
         return stats
 
-    def _get_model_update_group(self):
-        model_update_group = None
-        if torch.distributed.get_rank() == 0:
-            model_update_group = getattr(self, '_model_update_group', None)
-
-        torch.distributed.barrier()
-        return model_update_group
-
-    def _set_model_update_group(self, group):
-        if torch.distributed.get_rank() == 0:
-            self._model_update_group = group
-        torch.distributed.barrier()
-
     def _extract_model_weights(self):
         """Extract model weights for cross-actor transfer"""
-        if torch.distributed.get_rank() != 0:
-            return None
-            
-        weights = {}
+        weights = {} if torch.distributed.get_rank() == 0 else None
         model = self.model.model.module
-        
+
+        # ALL ranks must participate in the parameter loop for ZeRO-3
         for name, param in model.named_parameters():
-            # For ZeRO-3, gather sharded parameters
+            # For ZeRO-3, gather sharded parameters - ALL ranks must participate
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                # Only rank 0 has the gathered parameters
+                # Only rank 0 extracts the weights
                 if torch.distributed.get_rank() == 0:
                     # Copy to CPU to avoid GPU memory issues during transfer
-                    weights[name] = param.clone().cpu()
-        
+                    weights[name] = param.detach().cpu().contiguous().clone()
+
+        torch.distributed.barrier()
         return weights
 
 class CriticRayActorBase(RayActor):
