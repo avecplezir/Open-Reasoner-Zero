@@ -82,6 +82,11 @@ class RayPPOTrainer:
             await self._backload_vllm_engines()
 
         await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+
+        # Initialize teacher model's own process group with same vLLM engines if separate teacher is enabled
+        if self.cfg.separate_teacher_model:
+            async with Timer("teacher init vllm engines actor group"):
+                await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
         
         logger.info("Create vllm engine gourps done.")
 
@@ -158,8 +163,6 @@ class RayPPOTrainer:
                     await self.teacher_model.async_run_method("empty_cache")
                     await self.policy_model.async_run_method("empty_cache")
                     torch.cuda.empty_cache()
-                    # torch.distributed.barrier()
-
 
                 for replay_buffer, prefix in train_set:
                     model = self.teacher_model if self.cfg.separate_teacher_model and prefix == "teacher" else self.policy_model
@@ -370,10 +373,9 @@ class RayPPOTrainer:
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
-                    # await self.teacher_model.backload_to_gpu()
-                    # await self._sync_policy_weights_to_vllm(model=self.teacher_model)
+                    await self.teacher_model.backload_to_gpu()
                     await self._sync_teacher_weights_to_vllm()
-                    # await self.teacher_model.offload_to_cpu()
+                    await self.teacher_model.offload_to_cpu()
 
             # create the oposite teacher prompt and collect data with it
             all_teacher_prompts = []
@@ -1972,19 +1974,15 @@ class RayPPOTrainer:
         await asyncio.gather(*backload_tasks)
 
     async def _sync_policy_weights_to_vllm(self):
-        # if self.cfg.colocate_all:
-        #     await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
-        # else:
-        #     await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
-        await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        if self.cfg.colocate_all:
+            await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+        else:
+            await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        # await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+
 
     async def _sync_teacher_weights_to_vllm(self):
-        async with Timer("teacher _extract_model_weights"):
-            # Extract teacher weights and use policy model's broadcast infrastructure
-            teacher_weights = await self.teacher_model.async_run_method("_extract_model_weights")
-            # Get weights from rank 0 actor (only rank 0 has the weights)
-            teacher_weights = teacher_weights[0] if teacher_weights and teacher_weights[0] is not None else None
-
-        async with Timer("teacher _broadcast_to_vllm_w_external_weights"):
-            if teacher_weights is not None:
-                await self.policy_model.async_run_method("_broadcast_to_vllm_w_external_weights", self.vllm_engines, teacher_weights)
+        if self.cfg.colocate_all:
+            await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+        else:
+            await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)

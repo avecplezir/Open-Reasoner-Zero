@@ -694,43 +694,51 @@ class PolicyRayActorBase(RayActor):
             ray.get(refs)
         torch.distributed.barrier()
 
-    def _broadcast_to_vllm_w_external_weights(self, vllm_engines, external_weights):
-        # avoid OOM
-        torch.cuda.empty_cache()
-
-        if external_weights is not None and torch.distributed.get_rank() == 0:
-            count, num_params = 0, len(external_weights)
-            for name, param in external_weights.items():
-                count += 1  # empty_cache at last param
-
-                # Fire all vllm engines for broadcast (only rank 0)
-                refs = [
-                    engine.update_weight.remote(name, dtype=param.dtype, shape=param.shape, empty_cache=count == num_params)
-                    for engine in vllm_engines
-                ]
-
-                # Transfer to GPU if param is on CPU
-                if param.device.type == "cpu":
-                    param = param.to(torch.cuda.current_device())
-                
-                # ALL ranks must participate in broadcast
-                torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
-                ray.get(refs)
-                
-                # Clear GPU memory immediately after each parameter
-                del param
-                torch.cuda.empty_cache()
-        else:
-            # Non-rank-0 actors: participate in broadcasts but don't do Ray calls
-            if external_weights is not None:
-                # We need to know how many parameters to broadcast
-                # This is a limitation - we need rank 0 to send this info first
-                pass
+    def _init_teacher_vllm_engines_actor_group(self, vllm_engines=None):
+        # Create torch group with deepspeed rank 0 and all vllm ranks for teacher model
+        # Uses a different group name to avoid conflicts with policy model
         
-        # All ranks must reach this barrier
-        del external_weights
-        torch.cuda.empty_cache()
-        self.strategy.print("Broadcast external weights to vllm engines done")
+        if vllm_engines is not None and torch.distributed.get_rank() == 0:
+            master_address = ray._private.services.get_node_ip_address()
+            with socket.socket() as sock:
+                sock.bind(("", 0))
+                master_port = sock.getsockname()[1]
+
+            vllm_num_engines, vllm_tensor_parallel_size = (
+                self.strategy.args.vllm_num_engines,
+                self.strategy.args.vllm_tensor_parallel_size,
+            )
+            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+
+            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            import vllm
+
+            if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
+                backend = "gloo"
+                self.strategy.print(
+                    "WARNING:using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
+                )
+
+            refs = [
+                engine.init_process_group.remote(
+                    master_address,
+                    master_port,
+                    i * vllm_tensor_parallel_size + 1,
+                    world_size,
+                    "teacher_openrlhf",  # Different group name for teacher
+                    backend=backend,
+                )
+                for i, engine in enumerate(vllm_engines)
+            ]
+            self._model_update_group = orz_init_process_group(
+                backend=backend,
+                init_method=f"tcp://{master_address}:{master_port}",
+                world_size=world_size,
+                rank=0,
+                group_name="teacher_openrlhf",  # Different group name for teacher
+            )
+
+            ray.get(refs)
         torch.distributed.barrier()
 
     def _broadcast_to_vllm(self, vllm_engines):
@@ -799,22 +807,6 @@ class PolicyRayActorBase(RayActor):
 
         return stats
 
-    def _extract_model_weights(self):
-        """Extract model weights for cross-actor transfer"""
-        weights = {} if torch.distributed.get_rank() == 0 else None
-        model = self.model.model.module
-
-        # ALL ranks must participate in the parameter loop for ZeRO-3
-        for name, param in model.named_parameters():
-            # For ZeRO-3, gather sharded parameters - ALL ranks must participate
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                # Only rank 0 extracts the weights
-                if torch.distributed.get_rank() == 0:
-                    # Copy to CPU to avoid GPU memory issues during transfer
-                    weights[name] = param.detach().cpu().contiguous().clone()
-
-        torch.distributed.barrier()
-        return weights
 
 class CriticRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
