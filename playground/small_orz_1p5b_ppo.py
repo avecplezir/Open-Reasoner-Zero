@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-stf2-aug-data-v0-{randint}'
+    e_name = f'topr-stf2-aug-data-separate-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -165,6 +165,8 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_teacher: bool = False
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
+
+    separate_teacher_model: bool = False
 
 
 if __name__ == "__main__":

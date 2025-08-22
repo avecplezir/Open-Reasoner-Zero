@@ -82,6 +82,12 @@ class RayPPOTrainer:
             await self._backload_vllm_engines()
 
         await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+
+        # Initialize teacher model's own process group with same vLLM engines if separate teacher is enabled
+        if self.cfg.separate_teacher_model:
+            async with Timer("teacher init vllm engines actor group"):
+                await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
+        
         logger.info("Create vllm engine gourps done.")
 
         async with Timer("Sync actor weights to vllm engines"):
@@ -104,6 +110,7 @@ class RayPPOTrainer:
         self.global_step = consumed_samples // self.cfg.rollout_batch_size
         start_episode = consumed_samples // self.cfg.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * self.cfg.rollout_batch_size)
+
         for episode in range(start_episode, self.cfg.num_episodes):
             pbar = tqdm(
                 range(self.prompts_dataloader.__len__()), desc=f"Episode [{episode + 1}/{self.cfg.num_episodes}]"
@@ -127,6 +134,8 @@ class RayPPOTrainer:
                         await self._backload_vllm_engines()
                         await self._sync_policy_weights_to_vllm()
                         await self.policy_model.offload_to_cpu()
+                        if self.cfg.separate_teacher_model:
+                            await self.teacher_model.offload_to_cpu()
                     continue
 
                 if self.cfg.advantage_normalize:
@@ -144,11 +153,21 @@ class RayPPOTrainer:
                         self.student_replay_buffer.clear()
                 else:
                     if self.cfg.student_teacher_order:
-                        train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'], [False, True])
+                        train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'])
                     else:
-                        train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''], [False, True])
+                        train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''])
 
-                for replay_buffer, prefix, backlog in train_set:
+                if self.cfg.colocate_all:
+                    await self.teacher_model.offload_to_cpu()
+                    await self.policy_model.offload_to_cpu()
+                    await self.teacher_model.async_run_method("empty_cache")
+                    await self.policy_model.async_run_method("empty_cache")
+                    torch.cuda.empty_cache()
+
+                for replay_buffer, prefix in train_set:
+                    model = self.teacher_model if self.cfg.separate_teacher_model and prefix == "teacher" else self.policy_model
+                    await model.backload_to_gpu()
+
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     # serialize replay buffer to jsonl
                     async with Timer("Dumping replay buffer"):
@@ -177,31 +196,35 @@ class RayPPOTrainer:
                                 await self.ppo_local_train_critic(critic_buffers, self.global_step, prefix)
                                 await self.critic_model.offload_to_cpu()
                         async with Timer("Actor model training"):
-                            await self.policy_model.backload_to_gpu()
-                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
-                            await self.policy_model.offload_to_cpu()
+                            await model.backload_to_gpu()
+                            status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                            await model.offload_to_cpu()
 
                     else:
                         if self.critic_model is not None:
                             async with Timer("Actor and Critic model training"):
                                 status = await asyncio.gather(
-                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog),
+                                    self.ppo_local_train_policy(policy_buffers, self.global_step, prefix),
                                     self.ppo_local_train_critic(critic_buffers, self.global_step, prefix),
                                 )
                                 await asyncio.gather(
-                                    self.policy_model.async_run_method("empty_cache"),
+                                    model.async_run_method("empty_cache"),
                                     self.critic_model.async_run_method("empty_cache"),
                                 )
                                 status = status[0]
                         else:
                             async with Timer("Actor model training"):
-                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix, backlog)
-                                await self.policy_model.async_run_method("empty_cache")
+                                status = await self.ppo_local_train_policy(policy_buffers, self.global_step, prefix)
+                                await model.async_run_method("empty_cache")
 
                     replay_buffer.clear()
 
                     # 5. set logs
                     logger.info(f'{prefix} {status}')
+
+                if self.cfg.colocate_all:
+                    async with Timer("Backload vllm engines to gpu"):
+                        await self._backload_vllm_engines()
 
                 pbar.update()
                 # log epoch info
@@ -225,6 +248,9 @@ class RayPPOTrainer:
                 logger.info("Successfully update ref model with policy model, training continue.")
 
         await self.policy_model.async_save_model(self.tokenizer, self.cfg.num_episodes * len(self.prompts_dataloader))
+        if self.cfg.separate_teacher_model:
+            await self.teacher_model.async_save_model(self.tokenizer, f'teacher-{self.cfg.num_episodes * len(self.prompts_dataloader)}')
+
         logger.info("Successfully save model weights, training done.")
 
 
@@ -235,89 +261,6 @@ class RayPPOTrainer:
 
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
         teacher_generated = []
-
-        if self.cfg.generate_with_teacher:
-            # Create paired data (positive/negative for each prompt)
-            paired_data = []
-            for prompt in all_inputs:
-                for _ in range(self.cfg.n_samples_per_prompt):
-                    # Create a pair: (student, teacher_yes, teacher_no, extra)
-                    paired_data.append((
-                        prompt[0],                          # student prompt
-                        prompt[1]["teacher_prompt_yes"],    # teacher with "yes"
-                        prompt[1]["teacher_prompt_no"],     # teacher with "no"
-                        prompt[1]                           # extra info
-                    ))
-
-            # Shuffle the pairs to randomize order, but keep pairs together
-            # rng = random.Random(42)
-            # rng.shuffle(paired_data)
-
-            # Flatten into separate lists, ensuring each pair stays together
-            all_student_prompts = []
-            all_teacher_prompts = []
-            all_extras = []
-            for student, teacher_yes, teacher_no, extra in paired_data:
-                # Add both positive and negative examples
-                extra_yes = extra.copy()
-                extra_no = extra.copy()
-                extra_yes["teacher_answer"] = 'yes'
-                extra_no["teacher_answer"] = 'no'
-                all_student_prompts.extend([student, student])
-                all_teacher_prompts.extend([teacher_yes, teacher_no])
-                all_extras.extend([extra_yes, extra_no])
-
-            # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
-            # 1.1 generate sequences via vllm engines
-            outputs = []
-            num_vllm_dp_gruops = len(self.vllm_engines)
-
-            async with Timer("Generate teacher sequences via vllm engines"):
-                dp_prompt_size = (len(all_teacher_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
-                dp_tasks = []
-                for dp_rank in range(num_vllm_dp_gruops):
-                    # Use teacher prompts for generation (they have the ground truth answer)
-                    dp_teacher_inputs = all_teacher_prompts[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
-                    dp_extras = all_extras[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
-                    # handle last batch has no enough data
-                    if len(dp_teacher_inputs) <= 0:
-                        continue
-                    gen_func = self._get_generate_function(dp_rank)
-                    dp_tasks.append(self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, **generate_kwargs))
-
-                logger.info("start generation from teacher prompts")
-                local_responses = await asyncio.gather(*dp_tasks)
-                outputs.extend(sum(local_responses, []))
-                logger.info("generate local rollout batch done")
-
-            # skip when data is not enough
-            if len(outputs) <= 0:
-                return
-
-            assert len(all_teacher_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
-
-            # 1.2 calculate custom rewards if has custom reward function
-            if self.cfg.use_compute_reward_fn:
-                async with Timer("Calculate custom rewards"):
-                    dp_tasks = []
-                    reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
-                    # Use student prompts for reward calculation since that's what the model will be trained on
-                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(all_student_prompts, outputs, all_extras)
-                    assert len(all_student_prompts) == len(outputs) == len(all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
-            else:
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
-
-            teacher_generated.extend([True] * len(all_student_prompts))
-
-            combined_all_student_prompts.extend(all_student_prompts)
-            combined_all_teacher_prompts.extend(all_teacher_prompts)
-            combined_outputs.extend(outputs)
-            combined_custom_rewards.extend(custom_rewards)
-            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
-            combined_answer_indices.extend(answer_indices)
-            combined_initial_scores.extend(initial_scores)
-            combined_initial_teacher_scores.extend(initial_teacher_scores)
-            combined_final_answers.extend(final_answers)
 
         if self.cfg.generate_with_student:
             # the same, but now generate data with student prompts
@@ -332,8 +275,8 @@ class RayPPOTrainer:
                     ))
 
             # Shuffle the pairs to randomize order, but keep pairs together
-            # rng = random.Random(42)
-            # rng.shuffle(paired_data)
+            rng = random.Random(42)
+            rng.shuffle(paired_data)
 
             # Flatten into separate lists, ensuring each pair stays together
             all_student_prompts = []
@@ -347,6 +290,13 @@ class RayPPOTrainer:
             # 1.1 generate sequences via vllm engines
             outputs = []
             num_vllm_dp_gruops = len(self.vllm_engines)
+
+            # Sync student (policy) model weights to VLLM engines before generation
+            async with Timer("Sync policy weights to VLLM engines for student generation"):
+                # await self._sync_teacher_weights_to_vllm()
+                await self.policy_model.backload_to_gpu()
+                await self._sync_policy_weights_to_vllm()
+                await self.policy_model.offload_to_cpu()
 
             async with Timer("Generate student sequences via vllm engines"):
                 dp_prompt_size = (len(all_student_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
@@ -419,6 +369,14 @@ class RayPPOTrainer:
             combined_final_answers.extend(final_answers)
 
         if self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student and not self.cfg.generate_with_teacher:
+
+            # Sync teacher model weights to VLLM engines before generation
+            if self.cfg.separate_teacher_model:
+                async with Timer("Sync teacher weights to VLLM engines"):
+                    await self.teacher_model.backload_to_gpu()
+                    await self._sync_teacher_weights_to_vllm()
+                    await self.teacher_model.offload_to_cpu()
+
             # create the oposite teacher prompt and collect data with it
             all_teacher_prompts = []
             aug_all_student_prompts = []
@@ -565,7 +523,6 @@ class RayPPOTrainer:
                 ret_custom_rewards,
             )
             logger.info(f"student experiences size: {len(student_experiences)} {len(ret_num_actions)}")
-            # logger.info(f"student log proba size: {student_experiences[0].action_log_probs.shape} {student_experiences[1].action_log_probs.shape} {student_experiences[0].sequences.shape}")
 
         # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
         async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
@@ -578,7 +535,6 @@ class RayPPOTrainer:
                 ret_teacher_custom_rewards,
             )
             logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
-            # logger.info(f"teacher log proba size: {teacher_experiences[0].action_log_probs.shape} {teacher_experiences[1].action_log_probs.shape} {teacher_experiences[0].sequences.shape}")
 
         # Compute teacher reward
         async with Timer("Calculate teacher reward, replace student or teacher log probs w/ the correct one, compute torp ratio"):
@@ -690,8 +646,8 @@ class RayPPOTrainer:
                     teacher_prompt_idx += 1
                     seq_offset += seq_len
 
-                    # if not self.cfg.use_grpo:
-                    #     teacher_exp.info['custom_rewards'][i][-1] = teacher_exp.info['custom_rewards'][i][-1] + final_reward_list[-1]
+                    if not self.cfg.use_grpo:
+                        teacher_exp.info['custom_rewards'][i][-1] = final_reward_list[-1]
 
                 assert kl_div_all.shape[1] == end, "number of action should be the same in kl and num_actions"
                 assert len(student_exp.sequences[0]) == seq_offset, "student_exp.sequences must be equal to seq_offset at the end"
@@ -1129,6 +1085,19 @@ class RayPPOTrainer:
                 pg=pg,
                 num_gpus_per_actor=0.2,
             )
+            
+            # Create separate teacher model if flag is enabled
+            if cfg.separate_teacher_model:
+                teacher_model = PPORayActorGroup(
+                    cfg.actor_num_nodes,
+                    cfg.actor_num_gpus_per_node,
+                    PolicyRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.2,
+                )
+            else:
+                teacher_model = policy_model  # Share the same model
+            
             ref_model = PPORayActorGroup(
                 cfg.ref_num_nodes,
                 cfg.ref_num_gpus_per_node,
@@ -1185,6 +1154,19 @@ class RayPPOTrainer:
                 pg=pg,
                 num_gpus_per_actor=0.75 if pg else 1,
             )
+            
+            # Create separate teacher model if flag is enabled
+            if cfg.separate_teacher_model:
+                teacher_model = PPORayActorGroup(
+                    cfg.actor_num_nodes,
+                    cfg.actor_num_gpus_per_node,
+                    PolicyRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.75 if pg else 1,
+                )
+            else:
+                teacher_model = policy_model  # Share the same model
+            
             ref_model = PPORayActorGroup(
                 cfg.ref_num_nodes,
                 cfg.ref_num_gpus_per_node,
@@ -1240,6 +1222,8 @@ class RayPPOTrainer:
             refs = []
             refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             refs.extend(policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            if cfg.separate_teacher_model:
+                refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             if cfg.critic_pretrain:
                 refs.extend(critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))
             if cfg.reward_pretrain:
@@ -1247,11 +1231,17 @@ class RayPPOTrainer:
                     refs.extend(reward_model.async_init_model_from_pretrained(self.strategy, reward_pretrain))
             await asyncio.gather(*refs)
             await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+            if cfg.separate_teacher_model:
+                await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
         else:
             await asyncio.gather(*ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             await asyncio.gather(*policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
             await policy_model.offload_to_cpu()
+            if cfg.separate_teacher_model:
+                await asyncio.gather(*teacher_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+                await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+                await teacher_model.offload_to_cpu()
             if cfg.critic_pretrain:
                 await asyncio.gather(*critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))
                 await critic_model.offload_to_cpu()
@@ -1260,33 +1250,25 @@ class RayPPOTrainer:
                     await asyncio.gather(*reward_model.async_init_model_from_pretrained(self.strategy, reward_pretrain))
 
         self.policy_model = policy_model
+        self.teacher_model = teacher_model
         self.critic_model = critic_model
         self.ref_model = ref_model
         self.reward_model = reward_models
 
-        logger.info("init policy/ref/critic/reward models done")
+        logger.info("init policy/teacher/ref/critic/reward models done")
 
     async def ppo_local_train_policy(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = "", backlog: bool = False):
         if global_steps > self.cfg.freezing_actor_steps:
             async with Timer(f"{prefix.capitalize()} Policy model training"):
-                status = await self.policy_model.async_ppo_train(global_steps, replay_buffers)
+                model = self.teacher_model if "teacher" in prefix.lower() else self.policy_model
+                status = await model.async_ppo_train(global_steps, replay_buffers)
+
             # Log with prefix for separate tracking
             metric_prefix = f"{prefix}_" if prefix else ""
             self.writer.add_scalar(f"{metric_prefix}ppo_clip_count", status[0]["clip_ratio"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
-            await self.policy_model.async_run_method("empty_cache")
-
-        # get_accelerator().empty_cache()
-        if backlog:
-            # get_accelerator().empty_cache()
-            if self.cfg.colocate_all:
-                async with Timer("Backload vllm engines to gpu"):
-                    await self._backload_vllm_engines()
-                # get_accelerator().empty_cache()
-            async with Timer("Broadcast actor weights to vllm engines"):
-                await self._sync_policy_weights_to_vllm()
-                # get_accelerator().empty_cache()
+            await model.async_run_method("empty_cache")
 
         if global_steps > self.cfg.freezing_actor_steps:
             return status[0]
@@ -1996,3 +1978,11 @@ class RayPPOTrainer:
             await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+        # await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+
+
+    async def _sync_teacher_weights_to_vllm(self):
+        if self.cfg.colocate_all:
+            await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
+        else:
+            await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
