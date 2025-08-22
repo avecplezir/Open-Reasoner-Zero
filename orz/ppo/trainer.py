@@ -158,7 +158,7 @@ class RayPPOTrainer:
                     await self.teacher_model.async_run_method("empty_cache")
                     await self.policy_model.async_run_method("empty_cache")
                     torch.cuda.empty_cache()
-                    torch.distributed.barrier()
+                    # torch.distributed.barrier()
 
 
                 for replay_buffer, prefix in train_set:

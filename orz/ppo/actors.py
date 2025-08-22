@@ -749,7 +749,7 @@ class PolicyRayActorBase(RayActor):
                     for engine in vllm_engines
                 ]
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+            with deepspeed.zero.GatheredParameters([param], modifier_rank=0, enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)
