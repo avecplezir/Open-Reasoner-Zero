@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-upd-t-every-False-kl01-v0-{randint}'
+    e_name = f'topr-aug-data-separate-freq20-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -100,7 +100,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    update_teacher_every_epoch: bool = False
+    update_teacher_freq: int = 20 # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
@@ -138,7 +138,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.3
+    gpu_memory_utilization: float = 0.25
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -146,8 +146,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 1
     kl_mean_coef: float = 0.0
-    reward_kl_coef: float = 0.1
-    kl_reward_clamp: float = 3
+    reward_kl_coef: float = 0.
+    kl_reward_clamp: float = 5
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = True

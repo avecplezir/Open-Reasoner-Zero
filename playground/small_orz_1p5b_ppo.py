@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-check-v0-{randint}'
+    e_name = f'topr-student-data-check-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -154,7 +154,7 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     use_topr: bool = True
-    train_teacher: bool = True
+    train_teacher: bool = False
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
@@ -164,7 +164,7 @@ class PPOExpConfig(BasePPOExpConfig):
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = True
+    augment_student_generation_with_teacher: bool = False
 
     separate_teacher_model: bool = False
 
