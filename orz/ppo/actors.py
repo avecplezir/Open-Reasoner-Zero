@@ -347,6 +347,15 @@ class PPORayActorGroup:
         save_tasks = [actor.save_model.remote(tokenizer, iteration) for actor in self._actor_handlers]
         return await asyncio.gather(*save_tasks)
 
+    async def async_load_checkpoint(self, strategy, ckpt_path):
+        """Load checkpoint weights into existing models without reinitializing.
+
+        Returns:
+            List: list of remote object refs.
+        """
+        load_tasks = [actor.load_checkpoint.remote(strategy, ckpt_path) for actor in self._actor_handlers]
+        return await asyncio.gather(*load_tasks)
+
     async def async_ppo_train(self, global_steps, replay_buffers):
         return await asyncio.gather(
             *[actor.ppo_train.remote(global_steps, replay_buffers[i]) for i, actor in enumerate(self._actor_handlers)]
@@ -407,6 +416,15 @@ class PolicyRayActorBase(RayActor):
 
         # set ppo/topr loss function
         self.actor_loss_fn = PolicyLoss(self.args.eps_clip)
+
+    def load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
+        """Load checkpoint weights into existing model without reinitializing everything."""
+        _, states = strategy.load_ckpt(
+            self.model.model,
+            ckpt_path,
+            load_module_only=True  # Only load model weights, not optimizer states
+        )
+        self.strategy.print(f"Loaded checkpoint weights from: {ckpt_path}")
 
     def save_model(self, tokenizer, iteration):
         args = self.strategy.args
