@@ -145,11 +145,11 @@ class RayPPOTrainer:
                 if self.cfg.student_training_frequency > 0:
                     if (episode + 1) % self.cfg.student_training_frequency == 0:
                         logger.info(f'training student model, {episode + 1} episode')
-                        train_set = zip([self.student_replay_buffer], ["",], [True])
+                        train_set = zip([self.student_replay_buffer], ["",])
                         self.teacher_replay_buffer.clear()
                     else:
                         logger.info(f'training teacher model, {episode + 1} episode')
-                        train_set = zip([self.teacher_replay_buffer], ["teacher",], [True])
+                        train_set = zip([self.teacher_replay_buffer], ["teacher",])
                         self.student_replay_buffer.clear()
                 else:
                     if self.cfg.student_teacher_order:
@@ -215,8 +215,11 @@ class RayPPOTrainer:
                     logger.info(f'{prefix} {status}')
 
                 if self.cfg.colocate_all:
-                    async with Timer("Backload vllm engines to gpu"):
+                    async with Timer("Backload vllm engines to gpu and sync policy weights"):
+                        await self.policy_model.backload_to_gpu()
                         await self._backload_vllm_engines()
+                        await self._sync_policy_weights_to_vllm()
+                        await self.policy_model.offload_to_cpu()
 
                 pbar.update()
                 # log epoch info
@@ -368,7 +371,7 @@ class RayPPOTrainer:
             combined_initial_teacher_scores.extend(initial_teacher_scores)
             combined_final_answers.extend(final_answers)
 
-        if self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student and not self.cfg.generate_with_teacher:
+        if self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student:
 
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
