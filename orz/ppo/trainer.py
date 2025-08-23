@@ -214,13 +214,6 @@ class RayPPOTrainer:
                     # 5. set logs
                     logger.info(f'{prefix} {status}')
 
-                if self.cfg.colocate_all:
-                    async with Timer("Backload vllm engines to gpu and sync policy weights"):
-                        await self.policy_model.backload_to_gpu()
-                        await self._backload_vllm_engines()
-                        await self._sync_policy_weights_to_vllm()
-                        await self.policy_model.offload_to_cpu()
-
                 pbar.update()
                 # log epoch info
                 self.writer.add_scalar("episode_idx", episode, self.global_step)
@@ -236,14 +229,24 @@ class RayPPOTrainer:
                     # update teacher model with policy model
                     logger.info(f"Update teacher model with policy model at step {self.global_step}")
                     await self.policy_model.backload_to_gpu()
-                    await self.policy_model.async_save_model(self.tokenizer, -1)
+                    await self.policy_model.async_save_model(self.tokenizer, '_current')
                     await self.policy_model.offload_to_cpu()
+                    await self.teacher_model.backload_to_gpu()
                     await asyncio.gather(
                         *self.teacher_model.async_init_model_from_pretrained(
-                        self.strategy, os.path.join(self.cfg.save_path, f"iter{-1}", "policy")
+                        self.strategy, os.path.join(self.cfg.save_path, f"iter_current", "policy")
                         )
                     )
+                    await self.teacher_model.offload_to_cpu()
+
                     logger.info("Successfully update teacher model with policy model, training continue.")
+
+                if self.cfg.colocate_all:
+                    async with Timer("Backload vllm engines to gpu and sync policy weights"):
+                        await self.policy_model.backload_to_gpu()
+                        await self._backload_vllm_engines()
+                        await self._sync_policy_weights_to_vllm()
+                        await self.policy_model.offload_to_cpu()
 
             if self.cfg.update_ref_every_epoch:
                 await self.policy_model.backload_to_gpu()
