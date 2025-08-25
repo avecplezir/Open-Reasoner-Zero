@@ -427,17 +427,17 @@ class PolicyRayActorBase(RayActor):
 
     def export_params(self):
         refs = {}
-        for name, p in self.model.named_parameters():
-            with deepspeed.zero.GatheredParameters(p, modifier_rank=0, to_cpu=True):
+        for name, param in self.model.named_parameters():
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:  # only rank 0 holds the full param
-                    refs[name] = ray.put(p.cpu().clone())  # store in Ray object store
+                    refs[name] = ray.put(param.cpu().clone())  # store in Ray object store
         return refs
 
     def load_params(self, refs):
-        for name, p in self.model.named_parameters():
-            with deepspeed.zero.GatheredParameters(p, modifier_rank=0, to_cpu=True):
-                if dist.get_rank() == 0:
-                    p.data.copy_(ray.get(refs[name]))
+        for name, param in self.model.named_parameters():
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                if torch.distributed.get_rank() == 0:
+                    param.data.copy_(ray.get(refs[name]))
 
     def load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
         """Load checkpoint weights into existing model without reinitializing everything."""

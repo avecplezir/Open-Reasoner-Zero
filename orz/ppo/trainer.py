@@ -226,21 +226,11 @@ class RayPPOTrainer:
 
                 if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
                         self.global_step % self.cfg.update_teacher_freq == 0:
-                    # update teacher model with policy model
-                    # logger.info(f"Saving current policy model at step {self.global_step}")
-                    # await self.policy_model.backload_to_gpu()
-                    # await self.policy_model.async_save_model(self.tokenizer, '_current')
-                    # await self.policy_model.offload_to_cpu()
-
-                    # logger.info(f"Update teacher model with policy model at step {self.global_step}")
-                    # await self.teacher_model.backload_to_gpu()
-                    # await self.teacher_model.async_load_checkpoint(self.strategy, '/home/a/anokhin/links/scratch/iter104') #os.path.join(self.cfg.save_path, f"iter_current", "policy"))
-                    # await self.teacher_model.offload_to_cpu()
-                    # logger.info("Successfully update teacher model with policy model, training continue.")
-                    logger.info(f"Exporting policy params {self.global_step}")
-                    ref = await self.policy.async_export_params()
-                    logger.info(f"Loading policy params to teacher {self.global_step}")
-                    await self.teacher_model.async_load_params(ref)
+                    async with Timer("Loading policy weights to teacher model"):
+                        logger.info(f"Exporting policy params {self.global_step}")
+                        ref = await self.policy_model.async_export_params()
+                        logger.info(f"Loading policy params to teacher {self.global_step}")
+                        await self.teacher_model.async_load_params(ref[0])
 
                 if self.cfg.colocate_all:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):

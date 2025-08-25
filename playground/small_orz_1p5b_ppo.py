@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-student-data-check-v0-{randint}'
+    e_name = f'topr-aug-data-separate-freq2-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -100,12 +100,12 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    update_teacher_every_epoch: bool = True
+    update_teacher_freq: int = 2 # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     max_epochs: int = 1
@@ -138,7 +138,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.2
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -147,14 +147,14 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_max_coef: float = 1
     kl_mean_coef: float = 0.0
     reward_kl_coef: float = 0.
-    kl_reward_clamp: float = 3
+    kl_reward_clamp: float = 5
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
     use_topr: bool = True
-    train_teacher: bool = False
+    train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
@@ -164,9 +164,9 @@ class PPOExpConfig(BasePPOExpConfig):
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
+    augment_student_generation_with_teacher: bool = True
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = True
 
 
 if __name__ == "__main__":
