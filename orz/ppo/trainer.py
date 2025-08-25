@@ -1999,3 +1999,15 @@ class RayPPOTrainer:
             await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+
+    async def _sync_teacher_weights_to_policy(self):
+        """Synchronize teacher weights into policy model using a temporary process group."""
+        addr_port = await self.policy_model.async_run_method("_init_teacher_policy_group")
+        master_addr, master_port = addr_port[0]
+        await self.teacher_model.async_run_method(
+            "_init_teacher_policy_group", master_addr, master_port, True
+        )
+        await asyncio.gather(
+            self.teacher_model.async_run_method("_sync_weights_with_teacher"),
+            self.policy_model.async_run_method("_sync_weights_with_teacher"),
+        )
