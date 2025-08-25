@@ -227,10 +227,11 @@ class RayPPOTrainer:
                 if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
                         self.global_step % self.cfg.update_teacher_freq == 0:
                     async with Timer("Loading policy weights to teacher model"):
-                        logger.info(f"Exporting policy params {self.global_step}")
-                        ref = await self.policy_model.async_export_params()
-                        logger.info(f"Loading policy params to teacher {self.global_step}")
-                        await self.teacher_model.async_load_params(ref[0])
+                        # logger.info(f"Exporting policy params {self.global_step}")
+                        # ref = await self.policy_model.async_export_params()
+                        # logger.info(f"Loading policy params to teacher {self.global_step}")
+                        # await self.teacher_model.async_load_params(ref[0])
+                        await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
                         logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
 
                 if self.cfg.colocate_all:

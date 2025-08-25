@@ -833,6 +833,32 @@ class PolicyRayActorBase(RayActor):
 
         self.strategy.print("Broadcast actor weights to vllm engines done")
 
+    def _broadcast_to_ref(self, ref_actors):
+        """Broadcast policy model weights to reference model."""
+        torch.cuda.empty_cache()
+        model = self.model.model.module
+        count, num_params = 0, len(list(model.named_parameters()))
+        for name, param in model.named_parameters():
+            count += 1
+            # For ZeRO-3, allgather sharded parameter to rank 0
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                if torch.distributed.get_rank() == 0:
+                    weight = param.data.cpu()
+                    refs = [
+                        actor.update_weight.remote(name, weight, empty_cache=count == num_params)
+                        for actor in ref_actors
+                    ]
+                    ray.get(refs)
+        self.strategy.print("Broadcast actor weights to ref model done")
+
+    def update_weight(self, name, weight, empty_cache=False):
+        model = self.model.module
+        param = dict(model.named_parameters())[name]
+        with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+            param.data.copy_(weight.to(dtype=param.dtype, device=param.device))
+        if empty_cache:
+            torch.cuda.empty_cache()
+
     def get_weight_statistics(self):
         """Compute lightweight statistics for model weights"""
         stats = {}
