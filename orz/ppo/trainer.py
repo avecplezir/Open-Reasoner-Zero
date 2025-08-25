@@ -87,6 +87,12 @@ class RayPPOTrainer:
         if self.cfg.separate_teacher_model:
             async with Timer("teacher init vllm engines actor group"):
                 await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
+
+            if self.cfg.policy_to_teacher_broadcast == 2:
+                async with Timer("init teacher student broadcast group"):
+                    addr_port = await self.policy_model.async_run_method("_init_teacher_policy_group")
+                    master_addr, master_port = addr_port[0]
+                    await self.teacher_model.async_run_method("_init_teacher_policy_group", master_addr, master_port, True)
         
         logger.info("Create vllm engine gourps done.")
 
@@ -227,11 +233,16 @@ class RayPPOTrainer:
                 if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
                         self.global_step % self.cfg.update_teacher_freq == 0:
                     async with Timer("Loading policy weights to teacher model"):
+                        await self._sync_policy_weights_to_teacher()
                         # logger.info(f"Exporting policy params {self.global_step}")
                         # ref = await self.policy_model.async_export_params()
                         # logger.info(f"Loading policy params to teacher {self.global_step}")
                         # await self.teacher_model.async_load_params(ref[0])
-                        await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
+                        # await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
+                        # await asyncio.gather(
+                        #     self.teacher_model.async_run_method("_sync_weights_with_teacher"),
+                        #     self.policy_model.async_run_method("_sync_weights_with_teacher"),
+                        # )
                         logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
 
                 if self.cfg.colocate_all:
@@ -1999,3 +2010,20 @@ class RayPPOTrainer:
             await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+
+    async def _sync_policy_weights_to_teacher(self):
+        if self.cfg.policy_to_teacher_broadcast == 0:
+            logger.info(f"Exporting policy params, step {self.global_step}")
+            ref = await self.policy_model.async_export_params()
+            logger.info(f"Loading policy params to teacher, step {self.global_step}")
+            await self.teacher_model.async_load_params(ref[0])
+        elif self.cfg.policy_to_teacher_broadcast == 1:
+            logger.info(f"Broadcasting policy params with _actor_handlers, step {self.global_step}")
+            await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
+        elif self.cfg.policy_to_teacher_broadcast == 2:
+            logger.info(f"Broadcasting policy params with torch.distributed.broadcast, step {self.global_step}")
+            await asyncio.gather(
+                self.teacher_model.async_run_method("_sync_weights_with_teacher"),
+                self.policy_model.async_run_method("_sync_weights_with_teacher"),
+            )
+        logger.info(f"Successfully loaded policy into teacher model, step {self.global_step}")

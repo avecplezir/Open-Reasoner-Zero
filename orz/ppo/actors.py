@@ -859,6 +859,37 @@ class PolicyRayActorBase(RayActor):
         if empty_cache:
             torch.cuda.empty_cache()
 
+    def _init_teacher_policy_group(self, master_address=None, master_port=None, is_teacher=False):
+        """Create a temporary process group between teacher rank0 and policy rank0."""
+        if torch.distributed.get_rank() == 0:
+            if master_address is None and master_port is None:
+                master_address = ray._private.services.get_node_ip_address()
+                with socket.socket() as sock:
+                    sock.bind(("", 0))
+                    master_port = sock.getsockname()[1]
+            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            self._teacher_policy_group = orz_init_process_group(
+                backend=backend,
+                init_method=f"tcp://{master_address}:{master_port}",
+                world_size=2,
+                rank=1 if is_teacher else 0,
+                group_name="teacher_policy_sync",
+            )
+            result = (master_address, master_port)
+        else:
+            result = (None, None)
+        torch.distributed.barrier()
+        return result
+
+    def _sync_weights_with_teacher(self):
+        """Broadcast teacher weights to policy through previously created group."""
+        torch.cuda.empty_cache()
+        model = self.model.model.module
+        for _, param in model.named_parameters():
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                if torch.distributed.get_rank() == 0:
+                    torch.distributed.broadcast(param.data, src=0, group=self._teacher_policy_group)
+
     def get_weight_statistics(self):
         """Compute lightweight statistics for model weights"""
         stats = {}
