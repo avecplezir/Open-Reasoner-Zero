@@ -356,6 +356,14 @@ class PPORayActorGroup:
         load_tasks = [actor.load_checkpoint.remote(strategy, ckpt_path) for actor in self._actor_handlers]
         return await asyncio.gather(*load_tasks)
 
+    async def async_export_params(self):
+        export_tasks = [actor.export_params.remote() for actor in self._actor_handlers]
+        return await asyncio.gather(*export_tasks)
+
+    async def async_load_params(self, refs):
+        load_tasks = [actor.load_params.remote(refs) for actor in self._actor_handlers]
+        return await asyncio.gather(*load_tasks)
+
     async def async_ppo_train(self, global_steps, replay_buffers):
         return await asyncio.gather(
             *[actor.ppo_train.remote(global_steps, replay_buffers[i]) for i, actor in enumerate(self._actor_handlers)]
@@ -416,6 +424,20 @@ class PolicyRayActorBase(RayActor):
 
         # set ppo/topr loss function
         self.actor_loss_fn = PolicyLoss(self.args.eps_clip)
+
+    def export_params(self):
+        refs = {}
+        for name, p in self.model.named_parameters():
+            with deepspeed.zero.GatheredParameters(p, modifier_rank=0, to_cpu=True):
+                if torch.distributed.get_rank() == 0:  # only rank 0 holds the full param
+                    refs[name] = ray.put(p.cpu().clone())  # store in Ray object store
+        return refs
+
+    def load_params(self, refs):
+        for name, p in self.model.named_parameters():
+            with deepspeed.zero.GatheredParameters(p, modifier_rank=0, to_cpu=True):
+                if dist.get_rank() == 0:
+                    p.data.copy_(ray.get(refs[name]))
 
     def load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
         """Load checkpoint weights into existing model without reinitializing everything."""
