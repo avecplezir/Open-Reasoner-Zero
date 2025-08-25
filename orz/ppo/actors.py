@@ -430,8 +430,8 @@ class PolicyRayActorBase(RayActor):
         for name, param in self.model.named_parameters():
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:  # only rank 0 holds the full param
-                    refs[name] = ray.put(param.data.detach().cpu().clone())  # store in Ray object store
-                    # refs[name] = param.data.detach().cpu().clone()  # store in Ray object store
+                    # Use _internal_kv_put to ensure object persists beyond process lifetime
+                    refs[name] = ray.put(param.data.detach().cpu().clone())
         torch.distributed.barrier()
         return refs
 
@@ -439,9 +439,8 @@ class PolicyRayActorBase(RayActor):
         for name, param in self.model.named_parameters():
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
+                    # param.data.copy_(ray.get(refs[name]))
                     param.data.copy_(ray.get(refs[name]))
-                    # del refs[name]  # free memory
-                    # torch.cuda.empty_cache()
 
         torch.distributed.barrier()
         del refs  # free memory
