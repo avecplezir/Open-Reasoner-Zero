@@ -422,6 +422,7 @@ class PolicyRayActorBase(RayActor):
         _, states = strategy.load_ckpt(
             self.model.model,
             ckpt_path,
+            tag="policy",  # Load only the policy weights
             load_module_only=True  # Only load model weights, not optimizer states
         )
         self.strategy.print(f"Loaded checkpoint weights from: {ckpt_path}")

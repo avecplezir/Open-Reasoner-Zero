@@ -228,18 +228,16 @@ class RayPPOTrainer:
                         self.global_step % self.cfg.update_teacher_freq == 0:
                     # update teacher model with policy model
                     logger.info(f"Saving current policy model at step {self.global_step}")
-                    await self.policy_model.backload_to_gpu()
-                    await self.policy_model.async_save_model(self.tokenizer, '_current')
-                    await self.policy_model.offload_to_cpu()
+                    # await self.policy_model.backload_to_gpu()
+                    # await self.policy_model.async_save_model(self.tokenizer, '_current')
+                    # await self.policy_model.offload_to_cpu()
 
                 if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
-                    (self.global_step + 1) % self.cfg.update_teacher_freq == 0:
+                    self.global_step % self.cfg.update_teacher_freq == 0:
 
                     logger.info(f"Update teacher model with policy model at step {self.global_step}")
                     await self.teacher_model.backload_to_gpu()
-                    await self.teacher_model.async_load_checkpoint(
-                        self.strategy, os.path.join(self.cfg.save_path, f"iter_current", "policy")
-                    )
+                    await self.teacher_model.async_load_checkpoint(self.strategy, '/home/a/anokhin/links/scratch/iter104') #os.path.join(self.cfg.save_path, f"iter_current", "policy"))
                     await self.teacher_model.offload_to_cpu()
                     logger.info("Successfully update teacher model with policy model, training continue.")
 
