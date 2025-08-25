@@ -183,13 +183,9 @@ class RayPPOTrainer:
 
             if self.cfg.update_ref_every_epoch:
                 await self.policy_model.backload_to_gpu()
+                await self.policy_model.async_run_method("_broadcast_to_ref", self.ref_model._actor_handlers)
                 await self.policy_model.async_save_model(self.tokenizer, self.global_step)
                 await self.policy_model.offload_to_cpu()
-                await asyncio.gather(
-                    *self.ref_model.async_init_model_from_pretrained(
-                        self.strategy, os.path.join(self.cfg.save_path, f"iter{self.global_step}", "policy")
-                    )
-                )
                 logger.info("Successfully update ref model with policy model, training continue.")
 
         await self.policy_model.async_save_model(self.tokenizer, self.cfg.num_episodes * len(self.prompts_dataloader))
