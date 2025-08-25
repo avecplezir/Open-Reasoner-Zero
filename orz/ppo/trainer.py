@@ -232,9 +232,6 @@ class RayPPOTrainer:
                     # await self.policy_model.async_save_model(self.tokenizer, '_current')
                     # await self.policy_model.offload_to_cpu()
 
-                if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
-                    self.global_step % self.cfg.update_teacher_freq == 0:
-
                     logger.info(f"Update teacher model with policy model at step {self.global_step}")
                     await self.teacher_model.backload_to_gpu()
                     await self.teacher_model.async_load_checkpoint(self.strategy, '/home/a/anokhin/links/scratch/iter104') #os.path.join(self.cfg.save_path, f"iter_current", "policy"))
@@ -242,7 +239,7 @@ class RayPPOTrainer:
                     logger.info("Successfully update teacher model with policy model, training continue.")
 
                 if self.cfg.colocate_all:
-                    async with Timer("Backload vllm engines to gpu and sync policy weights"):
+                    async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
                         await self.policy_model.backload_to_gpu()
                         await self._backload_vllm_engines()
                         await self._sync_policy_weights_to_vllm()
