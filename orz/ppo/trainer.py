@@ -231,6 +231,7 @@ class RayPPOTrainer:
                         ref = await self.policy_model.async_export_params()
                         logger.info(f"Loading policy params to teacher {self.global_step}")
                         await self.teacher_model.async_load_params(ref[0])
+                        logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
 
                 if self.cfg.colocate_all:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
@@ -297,7 +298,6 @@ class RayPPOTrainer:
 
             # Sync student (policy) model weights to VLLM engines before generation
             async with Timer("Sync policy weights to VLLM engines for student generation"):
-                # await self._sync_teacher_weights_to_vllm()
                 await self.policy_model.backload_to_gpu()
                 await self._sync_policy_weights_to_vllm()
                 await self.policy_model.offload_to_cpu()

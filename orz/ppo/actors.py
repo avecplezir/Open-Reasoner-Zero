@@ -439,6 +439,9 @@ class PolicyRayActorBase(RayActor):
                 if torch.distributed.get_rank() == 0:
                     param.data.copy_(ray.get(refs[name]))
 
+                del refs[name]  # free memory
+
+
     def load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
         """Load checkpoint weights into existing model without reinitializing everything."""
         _, states = strategy.load_ckpt(

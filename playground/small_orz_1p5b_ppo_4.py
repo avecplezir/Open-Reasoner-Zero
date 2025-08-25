@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-freq20-v0-{randint}'
+    e_name = f'topr-aug-data-separate-freq10-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -100,12 +100,12 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    update_teacher_freq: int = 20 # -1 means never update teacher with student model
+    update_teacher_freq: int = 10 # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     max_epochs: int = 1
@@ -138,7 +138,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.25
+    gpu_memory_utilization: float = 0.2
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
