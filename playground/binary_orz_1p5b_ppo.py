@@ -36,8 +36,8 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 
 executor = ThreadPoolExecutor(max_workers=64)
 
-prefix = '/home/a/anokhin/links/scratch'
-# prefix = '/home/anokhin/scratch'
+# prefix = '/home/a/anokhin/links/scratch'
+prefix = '/home/anokhin/scratch'
 
 @dataclass
 class PPOExpConfig(BasePPOExpConfig):
