@@ -167,7 +167,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_student_generation_with_teacher: bool = True
 
     separate_teacher_model: bool = True
-    policy_to_teacher_broadcast: int = 2
+    policy_to_teacher_broadcast: int = 3
 
 
 if __name__ == "__main__":

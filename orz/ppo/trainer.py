@@ -235,15 +235,6 @@ class RayPPOTrainer:
                         self.global_step % self.cfg.update_teacher_freq == 0:
                     async with Timer("Loading policy weights to teacher model"):
                         await self._sync_policy_weights_to_teacher()
-                        # logger.info(f"Exporting policy params {self.global_step}")
-                        # ref = await self.policy_model.async_export_params()
-                        # logger.info(f"Loading policy params to teacher {self.global_step}")
-                        # await self.teacher_model.async_load_params(ref[0])
-                        # await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
-                        # await asyncio.gather(
-                        #     self.teacher_model.async_run_method("_sync_weights_with_teacher"),
-                        #     self.policy_model.async_run_method("_sync_weights_with_teacher"),
-                        # )
                         logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
 
                 if self.cfg.colocate_all:
@@ -2032,5 +2023,12 @@ class RayPPOTrainer:
             #     self.policy_model.async_run_method("_sync_weights_to_teacher"),
             #     self.teacher_model.async_run_method("_sync_weights_to_teacher"),
             # )
+        elif self.cfg.policy_to_teacher_broadcast == 3:
+            await self.policy_model.backload_to_gpu()
+            await self.policy_model.async_save_model(self.tokenizer, "_current")
+            await self.policy_model.offload_to_cpu()
+            await self.teacher_model.async_load_checkpoint(self.strategy, os.path.join(self.cfg.save_path, f"iter{self.global_step}"))
+
+
 
         logger.info(f"Successfully loaded policy into teacher model, step {self.global_step}")

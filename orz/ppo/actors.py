@@ -448,6 +448,7 @@ class PolicyRayActorBase(RayActor):
 
     def load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
         """Load checkpoint weights into existing model without reinitializing everything."""
+        logger.info(f"Loading checkpoint weights from: {ckpt_path}")
         _, states = strategy.load_ckpt(
             self.model.model,
             ckpt_path,
@@ -818,7 +819,7 @@ class PolicyRayActorBase(RayActor):
                     sock.bind(("", 0))
                     master_port = sock.getsockname()[1]
             logger.info(f"Init teacher-policy group at {master_address}:{master_port}, is_teacher: {is_teacher}")
-            backend = "gloo" #getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
             if actor_handlers:
                 logger.info(f"Init on the teacher size on {len(actor_handlers)} actors")
                 refs = [
