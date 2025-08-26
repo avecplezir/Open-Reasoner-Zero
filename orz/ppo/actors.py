@@ -849,10 +849,11 @@ class PolicyRayActorBase(RayActor):
                         for actor in ref_actors
                     ]
                     ray.get(refs)
+                    del weight
         self.strategy.print("Broadcast actor weights to ref model done")
 
     def update_weight(self, name, weight, empty_cache=False):
-        model = self.model.module
+        model = self.model.model.module
         param = dict(model.named_parameters())[name]
         with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
             param.data.copy_(weight.to(dtype=param.dtype, device=param.device))

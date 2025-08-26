@@ -100,7 +100,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    update_teacher_freq: int = 5 # -1 means never update teacher with student model
+    update_teacher_freq: int = 1 # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
@@ -167,6 +167,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_student_generation_with_teacher: bool = True
 
     separate_teacher_model: bool = True
+    policy_to_teacher_broadcast: int = 2
 
 
 if __name__ == "__main__":
