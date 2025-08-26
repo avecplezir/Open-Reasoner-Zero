@@ -40,7 +40,7 @@ class LLMActor:
 
         kwargs["enforce_eager"] = True
         self.llm = vllm.LLM(*args, **kwargs)
-        vconf = getattr(engine, "vllm_config", None)
+        vconf = getattr(self.llm.llm_engine, "vllm_config", None)
         if vconf is not None:
             self.scheduler_config = vconf.scheduler_config
             self.model_config = vconf.model_config
