@@ -90,10 +90,11 @@ class RayPPOTrainer:
 
             if self.cfg.policy_to_teacher_broadcast == 2:
                 async with Timer("init teacher student broadcast group"):
-                    addr_port = await self.policy_model.async_run_method("_init_teacher_policy_group")
-                    master_addr, master_port = addr_port[0]
-                    await self.teacher_model.async_run_method("_init_teacher_policy_group", master_addr, master_port, True)
-        
+                    # addr_port = await self.policy_model.async_run_method("_init_teacher_policy_group")
+                    # master_addr, master_port = addr_port[0]
+                    # await self.teacher_model.async_run_method("_init_teacher_policy_group", master_addr, master_port, True)
+                    await self.policy_model.async_run_method("_init_teacher_policy_group", None, None, False, self.teacher_model._actor_handlers)
+
         logger.info("Create vllm engine gourps done.")
 
         async with Timer("Sync actor weights to vllm engines"):
