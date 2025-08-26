@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/iter104/policy" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
@@ -121,7 +121,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_estimator_k3: bool = True
 
     enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    eval_interval: int = 2
 
     # generate related settings
     generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -160,7 +160,8 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_frequency: int = 2  # -1 means no student training
+    student_training_rounds: int = 100  # number teacher student rounds, -1 means no student training
+    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True

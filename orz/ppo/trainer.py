@@ -108,6 +108,8 @@ class RayPPOTrainer:
         )
 
         self.global_step = consumed_samples // self.cfg.rollout_batch_size
+        self.student_training_step = 0
+        self.teacher_training_step = 0
         start_episode = consumed_samples // self.cfg.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * self.cfg.rollout_batch_size)
         for episode in range(start_episode, self.cfg.num_episodes):
@@ -141,15 +143,23 @@ class RayPPOTrainer:
                     self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                if self.cfg.student_training_frequency > 0:
-                    if (episode + 1) % self.cfg.student_training_frequency == 0:
+                self.student_training_step = 0
+                self.teacher_training_step = 0
+
+                if self.cfg.student_training_rounds > 0:
+                    if self.teacher_training_step < self.cfg.teacher_training_rounds:
+                        logger.info(f'training teacher model, {self.global_step} global step')
+                        train_set = zip([self.teacher_replay_buffer], ["teacher"])
+                        self.student_replay_buffer.clear()
+                        self.teacher_training_step += 1
+                    elif self.student_training_step < self.cfg.student_training_rounds:
                         logger.info(f'training student model, {episode + 1} episode')
                         train_set = zip([self.student_replay_buffer], [""])
                         self.teacher_replay_buffer.clear()
+                        self.student_training_step += 1
                     else:
-                        logger.info(f'training teacher model, {episode + 1} episode')
-                        train_set = zip([self.teacher_replay_buffer], ["teacher"])
-                        self.student_replay_buffer.clear()
+                        self.student_training_step = 0
+                        self.teacher_training_step = 0
                 else:
                     if self.cfg.student_teacher_order:
                         train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'])
