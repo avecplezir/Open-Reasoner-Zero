@@ -209,48 +209,6 @@ class BasePPOExp(BaseExp):
             self.get_colocate_pg,
         )
 
-    # async def run(self):
-    #     # validate the arguments
-    #     _validate_args(self.cfg)
-    #
-    #     # initialize the ray cluster
-    #     _temp_dir = os.environ.get("RAY_TEMP_DIR", None)
-    #     print(f"Using ray _temp_dir: {_temp_dir}")
-    #
-    #     use_ib0 = os.environ.get("USE_IB0", "").lower() == "true"
-    #     env_vars = {
-    #         "NCCL_DEBUG": "WARN",
-    #         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
-    #     }
-    #     if use_ib0:
-    #         env_vars.update({
-    #             "NCCL_NET_GDR_LEVEL": "2",
-    #             "NCCL_SOCKET_IFNAME": "ib0",
-    #             "NCCL_IB_DISABLE": "0",
-    #             # "NCCL_IB_HCA": "mlx5_3",
-    #         })
-    #         print(f"Using ib0 for ray")
-    #
-    #     ray_port = os.environ.get("RAY_PORT")
-    #     if ray_port:
-    #         address = f"localhost:{ray_port}"
-    #         print(f"Connecting to Ray using custom port: {address}")
-    #     else:
-    #         address = "auto"
-    #
-    #     ray.init(
-    #         runtime_env=RuntimeEnv(
-    #             address=address,
-    #             env_vars=env_vars,
-    #         ),
-    #         _temp_dir=_temp_dir,
-    #     )
-    #
-    #     await self.trainer.build_models(self.PolicyRayActor, self.CriticRayActor, self.RefRayActor, self.RewardRayActor)
-    #
-    #     # initialize the trainer and enter the training loop
-    #     await self.trainer.train()
-
     async def run(self):
         # validate the arguments
         _validate_args(self.cfg)

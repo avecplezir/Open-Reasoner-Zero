@@ -691,6 +691,53 @@ class PolicyRayActorBase(RayActor):
             ray.get(refs)
         torch.distributed.barrier()
 
+    def _init_teacher_vllm_engines_actor_group(self, vllm_engines=None):
+        # Create torch group with deepspeed rank 0 and all vllm ranks for teacher model
+        # Uses a different group name to avoid conflicts with policy model
+
+        if vllm_engines is not None and torch.distributed.get_rank() == 0:
+            master_address = ray._private.services.get_node_ip_address()
+            with socket.socket() as sock:
+                sock.bind(("", 0))
+                master_port = sock.getsockname()[1]
+
+            vllm_num_engines, vllm_tensor_parallel_size = (
+                self.strategy.args.vllm_num_engines,
+                self.strategy.args.vllm_tensor_parallel_size,
+            )
+            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+
+            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            import vllm
+
+            if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
+                backend = "gloo"
+                self.strategy.print(
+                    "WARNING:using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
+                )
+
+            refs = [
+                engine.init_process_group.remote(
+                    master_address,
+                    master_port,
+                    i * vllm_tensor_parallel_size + 1,
+                    world_size,
+                    "teacher_openrlhf",  # Different group name for teacher
+                    backend=backend,
+                )
+                for i, engine in enumerate(vllm_engines)
+            ]
+            self._model_update_group = orz_init_process_group(
+                backend=backend,
+                init_method=f"tcp://{master_address}:{master_port}",
+                world_size=world_size,
+                rank=0,
+                group_name="teacher_openrlhf",  # Different group name for teacher
+            )
+
+            ray.get(refs)
+        torch.distributed.barrier()
+        
     def _broadcast_to_vllm(self, vllm_engines):
         # avoid OOM
         torch.cuda.empty_cache()
