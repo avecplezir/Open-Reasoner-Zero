@@ -818,7 +818,7 @@ class PolicyRayActorBase(RayActor):
                     sock.bind(("", 0))
                     master_port = sock.getsockname()[1]
             logger.info(f"Init teacher-policy group at {master_address}:{master_port}, is_teacher: {is_teacher}")
-            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            backend = "gloo" #getattr(self.strategy.args, "vllm_sync_backend", "nccl")
             if actor_handlers:
                 logger.info(f"Init on the teacher size on {len(actor_handlers)} actors")
                 refs = [
@@ -978,6 +978,26 @@ class PolicyRayActorBase(RayActor):
                 stats[name] = tensor_stats
 
         return stats
+
+    # def strategy_save_model(self, tokenizer, iteration):
+    #     args = self.strategy.args
+    #
+    #     # save model checkpoint after fitting on only rank0
+    #     self.strategy.save_model(
+    #         self.model,
+    #         tokenizer,
+    #         os.path.join(args.save_path, f"iter{iteration}", "policy"),
+    #     )
+    #
+    # def strategy_load_checkpoint(self, strategy: DeepspeedStrategy, ckpt_path):
+    #     """Load checkpoint weights into existing model without reinitializing everything."""
+    #     _, states = strategy.load_ckpt(
+    #         self.model.model,
+    #         ckpt_path,
+    #         tag="policy",  # Load only the policy weights
+    #         load_module_only=True  # Only load model weights, not optimizer states
+    #     )
+    #     self.strategy.print(f"Loaded checkpoint weights from: {ckpt_path}")
 
 
 class CriticRayActorBase(RayActor):
