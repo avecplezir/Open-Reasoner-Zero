@@ -137,7 +137,6 @@ class PolicyLoss(nn.Module):
             # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
-            logger.info(f'advantages {advantages}')
             per_example_loss = -(alpha * advantages * log_probs)
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
 
@@ -737,7 +736,7 @@ class PolicyRayActorBase(RayActor):
 
             ray.get(refs)
         torch.distributed.barrier()
-        
+
     def _broadcast_to_vllm(self, vllm_engines):
         # avoid OOM
         torch.cuda.empty_cache()
