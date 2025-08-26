@@ -64,7 +64,7 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/iter104/policy" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/iter104/policy" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
