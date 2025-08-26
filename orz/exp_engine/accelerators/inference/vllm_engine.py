@@ -40,11 +40,19 @@ class LLMActor:
 
         kwargs["enforce_eager"] = True
         self.llm = vllm.LLM(*args, **kwargs)
-        self.scheduler_config = self.llm.llm_engine.scheduler_config
-        self.model_config = self.llm.llm_engine.model_config
-        self.cache_config = self.llm.llm_engine.cache_config
-        self.lora_config = self.llm.llm_engine.lora_config
-        self.parallel_config = self.llm.llm_engine.parallel_config
+        vconf = getattr(engine, "vllm_config", None)
+        if vconf is not None:
+            self.scheduler_config = vconf.scheduler_config
+            self.model_config = vconf.model_config
+            self.cache_config = vconf.cache_config
+            self.lora_config = vconf.lora_config
+            self.parallel_config = vconf.parallel_config
+        else:
+            self.scheduler_config = self.llm.llm_engine.scheduler_config
+            self.model_config = self.llm.llm_engine.model_config
+            self.cache_config = self.llm.llm_engine.cache_config
+            self.lora_config = self.llm.llm_engine.lora_config
+            self.parallel_config = self.llm.llm_engine.parallel_config
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
