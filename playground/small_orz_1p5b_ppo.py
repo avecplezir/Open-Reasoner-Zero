@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-freq2-v0-{randint}'
+    e_name = f'topr-aug-data-separate-tr10-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -99,7 +99,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
-    update_ref_every_epoch: bool = True
+    update_ref_every_epoch: bool = False
     update_teacher_freq: int = -1  # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
@@ -120,12 +120,13 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 2
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 1
+    eval_teacher: bool = True
 
     # generate related settings
-    generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -138,7 +139,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.2
+    gpu_memory_utilization: float = 0.3
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -160,7 +161,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_rounds: int = 100  # number teacher student rounds, -1 means no student training
+    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 

@@ -122,7 +122,16 @@ class RayPPOTrainer:
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
-                    await self.eval()
+                    await self.policy_model.backload_to_gpu()
+                    await self._sync_policy_weights_to_vllm()
+                    await self.policy_model.offload_to_cpu()
+                    await self.eval(prefix="")
+
+                if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
+                    await self.teacher_model.backload_to_gpu()
+                    await self._sync_teacher_weights_to_vllm()
+                    await self.teacher_model.offload_to_cpu()
+                    await self.eval(prefix="teacher")
 
                 # 3. make experiences, calculate advantages and returns
                 await self.make_experience(rand_prompts)
@@ -143,9 +152,6 @@ class RayPPOTrainer:
                     self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                self.student_training_step = 0
-                self.teacher_training_step = 0
-
                 if self.cfg.student_training_rounds > 0:
                     if self.teacher_training_step < self.cfg.teacher_training_rounds:
                         logger.info(f'training teacher model, {self.global_step} global step')
@@ -153,7 +159,7 @@ class RayPPOTrainer:
                         self.student_replay_buffer.clear()
                         self.teacher_training_step += 1
                     elif self.student_training_step < self.cfg.student_training_rounds:
-                        logger.info(f'training student model, {episode + 1} episode')
+                        logger.info(f'training student model, {self.global_step} global step')
                         train_set = zip([self.student_replay_buffer], [""])
                         self.teacher_replay_buffer.clear()
                         self.student_training_step += 1
@@ -240,10 +246,10 @@ class RayPPOTrainer:
 
                 if self.cfg.colocate_all:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
-                        await self.policy_model.backload_to_gpu()
+                        # await self.policy_model.backload_to_gpu()
                         await self._backload_vllm_engines()
-                        await self._sync_policy_weights_to_vllm()
-                        await self.policy_model.offload_to_cpu()
+                        # await self._sync_policy_weights_to_vllm()
+                        # await self.policy_model.offload_to_cpu()
 
             if self.cfg.update_ref_every_epoch:
                 await self.policy_model.backload_to_gpu()
@@ -528,7 +534,6 @@ class RayPPOTrainer:
                 ret_packed_seq_lens,
                 ret_custom_rewards,
             )
-            logger.info(f"student experiences size: {len(student_experiences)} {len(ret_num_actions)}")
 
         # 1.5 inference and calculate values, log probs, rewards, kl divergence for teacher sequences
         async with Timer("Inference and calculate values, log probs, rewards, kl divergence for teacher"):
@@ -541,7 +546,6 @@ class RayPPOTrainer:
                 ret_teacher_custom_rewards,
                 use_teacher_model=self.cfg.separate_teacher_model,
             )
-            logger.info(f"teacher experiences size: {len(teacher_experiences)} {len(ret_teacher_num_actions)}")
 
         # Compute teacher reward
         async with Timer("Calculate teacher reward, replace student or teacher log probs w/ the correct one, compute torp ratio"):
@@ -918,7 +922,6 @@ class RayPPOTrainer:
 
         # calculate rewards
         reward_refs = []
-        logger.info(f"self.cfg.use_orm_score {self.cfg.use_orm_score} self.reward_model {self.reward_model}")
         if self.cfg.use_orm_score and self.reward_model:
             reward_refs.append(
                 micro_infer_model(

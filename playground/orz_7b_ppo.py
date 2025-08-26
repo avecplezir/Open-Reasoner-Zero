@@ -518,7 +518,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         return results
 
     @override
-    async def eval(self):
+    async def eval(self, prefix=""):
         logger.info("Start evaluating on val set")
         from vllm import SamplingParams
 
@@ -621,7 +621,10 @@ class CustomRewardTrainer(RayPPOTrainer):
         logging_str = ",".join([f"{k}: {v:.4f}" for k, v in log_dict.items()])
         logger.info(logging_str)
         for k, v in log_dict.items():
-            self.writer.add_scalar(f"evals/{k}", v, self.global_step)
+            if len(prefix) > 0:
+                self.writer.add_scalar(f"evals/{prefix}/{k}", v, self.global_step)
+            else:
+                self.writer.add_scalar(f"evals/{k}", v, self.global_step)
 
         # Log evaluation results to wandb
         if wandb.run is not None:
@@ -635,9 +638,10 @@ class CustomRewardTrainer(RayPPOTrainer):
                     "true_answer": item["answer"], 
                     "is_correct": item["iscorrect"]
                 })
-            
+
+            name = "eval_reasoning_examples" if prefix == "" else f"eval_reasoning_examples/{prefix}"
             wandb.log({
-                "eval_reasoning_examples": wandb.Table(
+                name: wandb.Table(
                     columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct"],
                     data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"]] for ex in eval_examples]
                 )

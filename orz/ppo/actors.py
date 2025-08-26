@@ -215,6 +215,8 @@ class RayActor(BasePPORole):
                 non_blocking=non_blocking,
             )
             torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
@@ -228,6 +230,8 @@ class RayActor(BasePPORole):
         if model.zero_optimization_stage() == 3:
             model.reload_states(non_blocking=non_blocking)
             torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
