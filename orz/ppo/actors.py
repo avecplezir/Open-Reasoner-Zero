@@ -818,7 +818,7 @@ class PolicyRayActorBase(RayActor):
                     sock.bind(("", 0))
                     master_port = sock.getsockname()[1]
             logger.info(f"Init teacher-policy group at {master_address}:{master_port}, is_teacher: {is_teacher}")
-            backend = "nccl" #getattr(self.strategy.args, "vllm_sync_backend", "nccl")
+            backend = getattr(self.strategy.args, "vllm_sync_backend", "nccl")
             if actor_handlers:
                 logger.info(f"Init on the teacher size on {len(actor_handlers)} actors")
                 refs = [
@@ -842,9 +842,49 @@ class PolicyRayActorBase(RayActor):
                 ray.get(refs)
 
         torch.distributed.barrier()
-        # torch.distributed.barrier(group=self._teacher_policy_group)
 
-        return result
+    # def _sync_weights_to_teacher(self, actor_handlers=None):
+    #     """Broadcast policy weights to teacher through previously created group."""
+    #     torch.cuda.empty_cache()
+    #     model = self.model.model.module
+    #     for _, param in model.named_parameters():
+    #         with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+    #             if torch.distributed.get_rank() == 0:
+    #                 torch.distributed.broadcast(param.data, src=0, group=self._teacher_policy_group)
+    # if actor_handlers:
+    #     refs = [engine._sync_weights_to_teacher.remote() for engine in actor_handlers]
+
+    # def _sync_weights_to_teacher(self):
+    #     """Broadcast policy weights to teacher through previously created group."""
+    #     torch.cuda.empty_cache()
+    #     model = self.model.model.module
+    #     for _, param in model.named_parameters():
+    #         if torch.distributed.get_rank() == 0:
+    #             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+    #                 if torch.distributed.get_rank() == 0:
+    #                     torch.distributed.broadcast(param.data, src=0, group=self._teacher_policy_group)
+    #
+    #         torch.distributed.barrier()
+    #         torch.distributed.barrier(group=self._teacher_policy_group)
+
+    def _sync_weights_to_teacher(self, actor_handlers=None):
+        """Broadcast policy weights to teacher through previously created group."""
+        torch.cuda.empty_cache()
+        model = self.model.model.module
+
+        if torch.distributed.get_rank() == 0:
+            if actor_handlers:
+                refs = [engine._sync_weights_to_teacher.remote() for engine in actor_handlers]
+
+        for _, param in model.named_parameters():
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                if torch.distributed.get_rank() == 0:
+                    torch.distributed.broadcast(param.data, src=0, group=self._teacher_policy_group)
+                    if actor_handlers:
+                        ray.get(refs)
+
+            # torch.distributed.barrier()
+            # torch.distributed.barrier(group=self._teacher_policy_group)
 
     def _broadcast_to_vllm(self, vllm_engines):
         # avoid OOM
@@ -918,15 +958,6 @@ class PolicyRayActorBase(RayActor):
             param.data.copy_(weight.to(dtype=param.dtype, device=param.device))
         if empty_cache:
             torch.cuda.empty_cache()
-
-    def _sync_weights_with_teacher(self):
-        """Broadcast teacher weights to policy through previously created group."""
-        torch.cuda.empty_cache()
-        model = self.model.model.module
-        for _, param in model.named_parameters():
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                if torch.distributed.get_rank() == 0:
-                    torch.distributed.broadcast(param.data, src=0, group=self._teacher_policy_group)
 
     def get_weight_statistics(self):
         """Compute lightweight statistics for model weights"""

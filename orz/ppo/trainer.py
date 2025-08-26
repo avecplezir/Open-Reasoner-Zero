@@ -2023,8 +2023,10 @@ class RayPPOTrainer:
             await self.policy_model.async_run_method("_broadcast_to_ref", self.teacher_model._actor_handlers)
         elif self.cfg.policy_to_teacher_broadcast == 2:
             logger.info(f"Broadcasting policy params with torch.distributed.broadcast, step {self.global_step}")
-            await asyncio.gather(
-                self.teacher_model.async_run_method("_sync_weights_with_teacher"),
-                self.policy_model.async_run_method("_sync_weights_with_teacher"),
-            )
+            await self.policy_model.async_run_method("_sync_weights_to_teacher", actor_handlers=self.teacher_model._actor_handlers)
+            # await asyncio.gather(
+            #     self.policy_model.async_run_method("_sync_weights_to_teacher"),
+            #     self.teacher_model.async_run_method("_sync_weights_to_teacher"),
+            # )
+
         logger.info(f"Successfully loaded policy into teacher model, step {self.global_step}")
