@@ -1152,7 +1152,7 @@ class RayPPOTrainer:
                 pg = placement_group(bundles, strategy="PACK")
                 ray.get(pg.ready())
                 if cfg.separate_teacher_model:
-                    num_gpus_per_actors = [0.4, 0.4, 0.2]
+                    num_gpus_per_actors = [0.4, 0.4, 0.15]
                 else:
                     num_gpus_per_actors = [0.5, 0.25]
 
