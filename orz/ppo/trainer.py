@@ -1180,47 +1180,51 @@ class RayPPOTrainer:
             )
 
             # if colocated, create placement group for critic and reward model explicitly.
-            pg = None
-            if cfg.colocate_critic_reward:
-                assert (
-                    cfg.critic_num_nodes == cfg.reward_num_nodes
-                    and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
-                ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
-
-                bundles = [
-                    {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
-                    for _ in range(cfg.critic_num_nodes)
-                ]
-                pg = placement_group(bundles, strategy="PACK")
-                ray.get(pg.ready())
-
             if cfg.critic_pretrain:
-                critic_model = PPORayActorGroup(
-                    cfg.critic_num_nodes,
-                    cfg.critic_num_gpus_per_node,
-                    CriticRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=0.75 if pg else 1,
-                )
-            else:
-                critic_model = None
+                pg = None
+                if cfg.colocate_critic_reward:
+                    assert (
+                        cfg.critic_num_nodes == cfg.reward_num_nodes
+                        and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
+                    ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
 
-            # multiple reward models
-            if RewardRayActor is not None and cfg.reward_pretrain:
-                reward_pretrains = cfg.reward_pretrain.split(",")
-                reward_models = []
-                for _ in reward_pretrains:
-                    reward_models.append(
-                        PPORayActorGroup(
-                            cfg.reward_num_nodes,
-                            cfg.reward_num_gpus_per_node,
-                            RewardRayActor,
-                            pg=pg,
-                            num_gpus_per_actor=0.25 if pg else 1,
-                        )
+                    bundles = [
+                        {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
+                        for _ in range(cfg.critic_num_nodes)
+                    ]
+                    pg = placement_group(bundles, strategy="PACK")
+                    ray.get(pg.ready())
+
+                if cfg.critic_pretrain:
+                    critic_model = PPORayActorGroup(
+                        cfg.critic_num_nodes,
+                        cfg.critic_num_gpus_per_node,
+                        CriticRayActor,
+                        pg=pg,
+                        num_gpus_per_actor=0.75 if pg else 1,
                     )
+                else:
+                    critic_model = None
+
+                # multiple reward models
+                if RewardRayActor is not None and cfg.reward_pretrain:
+                    reward_pretrains = cfg.reward_pretrain.split(",")
+                    reward_models = []
+                    for _ in reward_pretrains:
+                        reward_models.append(
+                            PPORayActorGroup(
+                                cfg.reward_num_nodes,
+                                cfg.reward_num_gpus_per_node,
+                                RewardRayActor,
+                                pg=pg,
+                                num_gpus_per_actor=0.25 if pg else 1,
+                            )
+                        )
+                else:
+                    reward_models = None
             else:
                 reward_models = None
+                critic_model = None
 
         if not cfg.colocate_all:
             refs = []

@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 2
+    actor_num = 1
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -57,10 +57,11 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
     reward_num_nodes: int = actor_num
+    reward_num_gpus_per_node: int = 1
     colocate_all: bool = False
-    colocate_critic_reward: bool = False
+    colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
+    vllm_num_engines: int = 1 #total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
     zero_stage: int = 3
@@ -141,7 +142,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.7
+    gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -170,7 +171,7 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
 
-    separate_teacher_model: bool = True
+    separate_teacher_model: bool = False
 
 
 if __name__ == "__main__":
