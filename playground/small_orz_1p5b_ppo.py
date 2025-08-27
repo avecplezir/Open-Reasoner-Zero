@@ -93,7 +93,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # ppo related settings
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 20
+    num_warmup_steps: int = 10
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
