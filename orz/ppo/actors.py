@@ -692,6 +692,7 @@ class PolicyRayActorBase(RayActor):
                 rank=0,
                 group_name="openrlhf",
             )
+            self._model_update_group_name = "openrlhf"
 
             ray.get(refs)
         torch.distributed.barrier()
@@ -742,6 +743,7 @@ class PolicyRayActorBase(RayActor):
                 rank=0,
                 group_name="teacher_openrlhf",  # Different group name for teacher
             )
+            self._model_update_group_name = "teacher_openrlhf"
 
             ray.get(refs)
         torch.distributed.barrier()
@@ -758,7 +760,13 @@ class PolicyRayActorBase(RayActor):
             if torch.distributed.get_rank() == 0:
                 shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
                 refs = [
-                    engine.update_weight.remote(name, dtype=param.dtype, shape=shape, empty_cache=count == num_params)
+                    engine.update_weight.remote(
+                        name,
+                        dtype=param.dtype,
+                        shape=shape,
+                        group_name=getattr(self, "_model_update_group_name", "openrlhf"),
+                        empty_cache=count == num_params,
+                    )
                     for engine in vllm_engines
                 ]
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0

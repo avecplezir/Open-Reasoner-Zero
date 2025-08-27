@@ -109,13 +109,17 @@ class LLMActor:
             for v_id in range(self.parallel_config.pipeline_parallel_size)
         ]
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def update_weight(self, name, dtype, shape, group_name, empty_cache=False):
         self.stop_remote_worker_execution_loop()
 
         if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.update_weight(name, dtype, shape, empty_cache)
+            return self.llm.llm_engine.model_executor.driver_worker.update_weight(
+                name, dtype, shape, group_name, empty_cache
+            )
         else:
-            return self.llm.llm_engine.model_executor._run_workers("update_weight", name, dtype, shape, empty_cache)
+            return self.llm.llm_engine.model_executor._run_workers(
+                "update_weight", name, dtype, shape, group_name, empty_cache
+            )
 
     def update_weight_internal_with_cuda_ipc(self, name, dtype, shape, cudaipc_handler, empty_cache=False):
         if self.use_gpu_executor:

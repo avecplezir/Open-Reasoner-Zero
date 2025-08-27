@@ -14,26 +14,35 @@ class WorkerWrap(Worker):
         assert group_name != "", "group name must not be empty"
 
         rank = torch.distributed.get_rank() + rank_offset
-        self._model_update_group = orz_init_process_group(
+        # Maintain multiple groups keyed by name to avoid overwriting
+        if not hasattr(self, "_model_update_groups"):
+            self._model_update_groups = {}
+
+        group = orz_init_process_group(
             backend=backend,
             init_method=f"tcp://{master_address}:{master_port}",
             world_size=world_size,
             rank=rank,
             group_name=group_name,
         )
+        self._model_update_groups[group_name] = group
         print(
             f"init_process_group: master_address={master_address}, master_port={master_port}, ",
             f"rank={rank}, world_size={world_size}, group_name={group_name}",
         )
 
-    def update_weight(self, name, dtype, shape, empty_cache=False):
+    def update_weight(self, name, dtype, shape, group_name, empty_cache=False):
         """Broadcast weight to all vllm workers from source rank 0 (actor model)"""
         # if torch.distributed.get_rank() == 0:
         #     print(f"update weight: {name}, dtype: {dtype}, shape: {shape}")
 
         assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
         weight = torch.empty(shape, dtype=dtype, device="cuda")
-        torch.distributed.broadcast(weight, 0, group=self._model_update_group)
+        group = None
+        if hasattr(self, "_model_update_groups"):
+            group = self._model_update_groups.get(group_name)
+        assert group is not None, f"Unknown process group '{group_name}'. Did you initialize it on the worker?"
+        torch.distributed.broadcast(weight, 0, group=group)
 
         self.model_runner.model.load_weights(weights=[(name, weight)])
 
