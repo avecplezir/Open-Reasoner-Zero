@@ -33,7 +33,7 @@ class BasePPOExpConfig(BaseConfig):
     colocate_all: bool = False
     vllm_num_engines: int = 4
     vllm_tensor_parallel_size: int = 1
-    vllm_sync_backend: str = "nccl"
+    vllm_sync_backend: str = "nccl" #"gloo" #"nccl"
     local_rank: int = -1
 
     # path related settings

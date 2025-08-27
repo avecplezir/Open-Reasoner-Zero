@@ -17,15 +17,20 @@ class LLMActor:
             vllm.worker.worker.Worker = OffloadableVLLMWorker
         else:
             # RayGPUExecutor
-            # See the patch https://github.com/vllm-project/vllm/commit/479d69fad0538f04cb22bf13e76ff91cfeb8a4e5
-            kwargs["worker_use_ray"] = True
-
+            # For newer vLLM, the Ray backend is enabled via
+            # distributed_executor_backend="ray" and worker_cls.
+            # Older versions used worker_use_ray + RayWorkerWrapper.
             if vllm.__version__ > "0.6.4.post1":
                 # https://github.com/vllm-project/vllm/pull/10555
+                kwargs["distributed_executor_backend"] = "ray"
                 kwargs[
                     "worker_cls"
                 ] = "orz.exp_engine.accelerators.inference.vllm_worker_wrap.OffloadableVLLMWorker"
             else:
+                # Legacy path for <= 0.6.4.post1
+                # See the patch https://github.com/vllm-project/vllm/commit/479d69fad0538f04cb22bf13e76ff91cfeb8a4e5
+                kwargs["worker_use_ray"] = True
+
                 RayWorkerWrapperPath = vllm.executor.ray_utils
 
                 class RayWorkerWrapper(RayWorkerWrapperPath.RayWorkerWrapper):
@@ -39,7 +44,16 @@ class LLMActor:
                 RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
 
         kwargs["enforce_eager"] = True
-        self.llm = vllm.LLM(*args, **kwargs)
+        # Wrap vLLM init to surface clear, picklable errors to Ray driver
+        try:
+            self.llm = vllm.LLM(*args, **kwargs)
+        except Exception as e:
+            import traceback
+
+            tb = traceback.format_exc()
+            raise RuntimeError(
+                f"vLLM LLM init failed with {type(e).__name__}: {e}\n{tb}"
+            )
         self.scheduler_config = self.llm.llm_engine.scheduler_config
         self.model_config = self.llm.llm_engine.model_config
         self.cache_config = self.llm.llm_engine.cache_config

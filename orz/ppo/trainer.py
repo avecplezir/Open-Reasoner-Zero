@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
 import wandb
 import numpy as np
 from collections import defaultdict
+import gc
 from deepspeed.accelerator import get_accelerator
 
 import ray
@@ -122,17 +123,15 @@ class RayPPOTrainer:
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
-                    if self.cfg.colocate_all:
-                        await self.policy_model.backload_to_gpu()
-                        await self._sync_policy_weights_to_vllm()
-                        await self.policy_model.offload_to_cpu()
+                    await self.policy_model.backload_to_gpu()
+                    await self._sync_policy_weights_to_vllm()
+                    await self.policy_model.offload_to_cpu()
                     await self.eval(prefix="")
 
                 if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
-                    if self.cfg.colocate_all:
-                        await self.teacher_model.backload_to_gpu()
-                        await self._sync_teacher_weights_to_vllm()
-                        await self.teacher_model.offload_to_cpu()
+                    await self.teacher_model.backload_to_gpu()
+                    await self._sync_teacher_weights_to_vllm()
+                    await self.teacher_model.offload_to_cpu()
                     await self.eval(prefix="teacher")
 
                 # 3. make experiences, calculate advantages and returns
@@ -226,6 +225,7 @@ class RayPPOTrainer:
                                 await model.async_run_method("empty_cache")
 
                     replay_buffer.clear()
+                    gc.collect()
 
                     # 5. set logs
                     logger.info(f'{prefix} {status}')
@@ -248,10 +248,7 @@ class RayPPOTrainer:
 
                 if self.cfg.colocate_all:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
-                        # await self.policy_model.backload_to_gpu()
                         await self._backload_vllm_engines()
-                        # await self._sync_policy_weights_to_vllm()
-                        # await self.policy_model.offload_to_cpu()
 
             if self.cfg.update_ref_every_epoch:
                 await self.policy_model.backload_to_gpu()
@@ -1095,7 +1092,7 @@ class RayPPOTrainer:
                 cfg.actor_num_gpus_per_node,
                 PolicyRayActor,
                 pg=pg,
-                num_gpus_per_actor=0.2,
+                num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
             )
             # Create separate teacher model if flag is enabled
             if cfg.separate_teacher_model:
@@ -1104,14 +1101,14 @@ class RayPPOTrainer:
                     cfg.actor_num_gpus_per_node,
                     PolicyRayActor,
                     pg=pg,
-                    num_gpus_per_actor=0.2,
+                    num_gpus_per_actor=0.1,
                 )
             ref_model = PPORayActorGroup(
                 cfg.ref_num_nodes,
                 cfg.ref_num_gpus_per_node,
                 RefRayActor,
                 pg=pg,
-                num_gpus_per_actor=0.2,
+                num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
             )
             if cfg.critic_pretrain:
                 critic_model = PPORayActorGroup(
@@ -1154,28 +1151,32 @@ class RayPPOTrainer:
                 ]
                 pg = placement_group(bundles, strategy="PACK")
                 ray.get(pg.ready())
+                if cfg.separate_teacher_model:
+                    num_gpus_per_actors = [0.4, 0.4, 0.2]
+                else:
+                    num_gpus_per_actors = [0.5, 0.25]
 
             policy_model = PPORayActorGroup(
                 cfg.actor_num_nodes,
                 cfg.actor_num_gpus_per_node,
                 PolicyRayActor,
                 pg=pg,
-                num_gpus_per_actor=0.75 if pg else 1,
+                num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
             )
-            if cfg.separate_teacher_model:
+            if self.cfg.separate_teacher_model:
                 teacher_model = PPORayActorGroup(
                     cfg.actor_num_nodes,
                     cfg.actor_num_gpus_per_node,
                     PolicyRayActor,
                     pg=pg,
-                    num_gpus_per_actor=0.75 if pg else 1,
+                    num_gpus_per_actor=num_gpus_per_actors[1] if pg else 1,
                 )
             ref_model = PPORayActorGroup(
                 cfg.ref_num_nodes,
                 cfg.ref_num_gpus_per_node,
                 RefRayActor,
                 pg=pg,
-                num_gpus_per_actor=0.25 if pg else 1,
+                num_gpus_per_actor=num_gpus_per_actors[-1] if pg else 1,
             )
 
             # if colocated, create placement group for critic and reward model explicitly.

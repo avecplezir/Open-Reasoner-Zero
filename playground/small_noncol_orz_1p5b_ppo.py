@@ -48,17 +48,19 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
+    actor_num = 2
     # resource related settings
-    ref_num_nodes: int = total_num_nodes
+    ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = total_num_nodes
+    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = total_num_nodes
+    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
-    colocate_all: bool = True
-    colocate_critic_reward: bool = True
+    reward_num_nodes: int = actor_num
+    colocate_all: bool = False
+    colocate_critic_reward: bool = False
     colocate_actor_ref: bool = True
-    vllm_num_engines: int = total_num_nodes
+    vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
     zero_stage: int = 3
@@ -121,8 +123,8 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_estimator_k3: bool = True
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 10
-    eval_teacher: bool = False
+    eval_interval: int = 1
+    eval_teacher: bool = True
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -139,7 +141,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.3
+    gpu_memory_utilization: float = 0.7
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0

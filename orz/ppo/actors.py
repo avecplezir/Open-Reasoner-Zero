@@ -215,8 +215,8 @@ class RayActor(BasePPORole):
                 non_blocking=non_blocking,
             )
             torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            # torch.cuda.empty_cache()
+            # torch.cuda.ipc_collect()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
@@ -230,8 +230,8 @@ class RayActor(BasePPORole):
         if model.zero_optimization_stage() == 3:
             model.reload_states(non_blocking=non_blocking)
             torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            # torch.cuda.empty_cache()
+            # torch.cuda.ipc_collect()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
@@ -761,6 +761,10 @@ class PolicyRayActorBase(RayActor):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)
+                # Force cleanup after each parameter broadcast
+                # torch.cuda.empty_cache()
+                # torch.cuda.ipc_collect()
+
         self.strategy.print("Broadcast actor weights to vllm engines done")
 
     def _broadcast_to_vllm_cudaipc(self, vllm_engines):
