@@ -122,15 +122,17 @@ class RayPPOTrainer:
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
-                    await self.policy_model.backload_to_gpu()
-                    await self._sync_policy_weights_to_vllm()
-                    await self.policy_model.offload_to_cpu()
+                    if self.cfg.colocate_all:
+                        await self.policy_model.backload_to_gpu()
+                        await self._sync_policy_weights_to_vllm()
+                        await self.policy_model.offload_to_cpu()
                     await self.eval(prefix="")
 
                 if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
-                    await self.teacher_model.backload_to_gpu()
-                    await self._sync_teacher_weights_to_vllm()
-                    await self.teacher_model.offload_to_cpu()
+                    if self.cfg.colocate_all:
+                        await self.teacher_model.backload_to_gpu()
+                        await self._sync_teacher_weights_to_vllm()
+                        await self.teacher_model.offload_to_cpu()
                     await self.eval(prefix="teacher")
 
                 # 3. make experiences, calculate advantages and returns
@@ -736,19 +738,12 @@ class RayPPOTrainer:
                             prompt = all_teacher_prompts[teacher_prompt_idx]
                             teacher_score = final_reward_list[teacher_prompt_idx].item()
 
-                            # logger.info(f"teacher_score {teacher_score}")
                             teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
-                            # logger.info(f"np.mean(teacher_pass_at_n_dict[prompt]) {np.mean(teacher_pass_at_n_dict[prompt])} {len(teacher_pass_at_n_dict[prompt])}")
                             if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
                                 teacher_score /= teacher_std
 
                             teacher_score_sum += teacher_score
-
-                            # logger.info(f"2 teacher_score {teacher_score}")
-                            # logger.info(f"teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
-
-                            # logger.info(f"2 teacher_exp.info['custom_rewards'][i][-1] {teacher_exp.info['custom_rewards'][i][-1]}")
                             teacher_prompt_idx += 1
 
                     assert teacher_prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
