@@ -422,6 +422,58 @@ class PolicyRayActorBase(RayActor):
             os.path.join(args.save_path, f"iter{iteration}", "policy"),
         )
 
+    def load_policy_from_dir(self, path: str, strict: bool = False):
+        """Load policy weights from a HuggingFace-style directory.
+
+        This loads into the underlying HF module (`self.model.model`) and is
+        ZeRO-3 safe via the strategy helper.
+        """
+        # Ensure weights are loaded onto the model module (not the DS engine wrapper)
+        self.strategy.load_model(self.model.model, path, map_location="cpu", strict=strict)
+
+    def _reset_optimizer_state(self, reset_scheduler: bool = True):
+        """Reset optimizer moments/state (and optionally scheduler) for the policy.
+
+        This clears momentum/EMA buffers so the teacher's optimizer does not
+        carry stale state after copying student weights. It also resets the LR
+        scheduler if requested.
+        """
+        # Access the DeepSpeed engine
+        engine = self.model.model if isinstance(self.model, Actor) else self.model
+
+        # Clear optimizer state safely
+        optim = getattr(engine, "optimizer", None)
+        if optim is not None:
+            try:
+                optim.state.clear()
+            except Exception:
+                # Fallback: reassign empty dict
+                try:
+                    optim.state = {}
+                except Exception:
+                    pass
+            try:
+                optim.zero_grad(set_to_none=True)
+            except Exception:
+                pass
+
+        # Reset scheduler if requested
+        if reset_scheduler:
+            try:
+                new_scheduler = get_scheduler(
+                    "constant_with_warmup",
+                    optim,
+                    num_warmup_steps=self.args.num_warmup_steps,
+                )
+                # Attach to both engine and local reference if present
+                if hasattr(engine, "lr_scheduler"):
+                    engine.lr_scheduler = new_scheduler
+                if hasattr(engine, "_lr_scheduler"):
+                    engine._lr_scheduler = new_scheduler
+                self.scheduler = new_scheduler
+            except Exception:
+                pass
+
     def forward(
         self, sequences, num_actions, attention_mask, return_output=False, ring_attn_group=None, packed_seq_lens=None
     ):
@@ -759,12 +811,14 @@ class PolicyRayActorBase(RayActor):
             # Fire all vllm engines for broadcast
             if torch.distributed.get_rank() == 0:
                 shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
+                group_name = getattr(self, "_model_update_group_name", "openrlhf")
+                logger.info(f"Broadcasting group_name {group_name}")
                 refs = [
                     engine.update_weight.remote(
                         name,
                         dtype=param.dtype,
                         shape=shape,
-                        group_name=getattr(self, "_model_update_group_name", "openrlhf"),
+                        group_name=group_name,
                         empty_cache=count == num_params,
                     )
                     for engine in vllm_engines
@@ -774,6 +828,8 @@ class PolicyRayActorBase(RayActor):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)
+
+                torch.cuda.synchronize()
                 # Force cleanup after each parameter broadcast
                 # torch.cuda.empty_cache()
                 # torch.cuda.ipc_collect()

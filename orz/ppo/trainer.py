@@ -242,7 +242,7 @@ class RayPPOTrainer:
 
                 if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
                         self.global_step % self.cfg.update_teacher_freq == 0:
-                    async with Timer("Loading policy weights to teacher model"):
+                    async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
 
@@ -2003,3 +2003,16 @@ class RayPPOTrainer:
             await self.teacher_model.offload_to_cpu()
         else:
             await self._sync_teacher_weights_to_vllm()
+
+    async def _sync_policy_weights_to_teacher(self):
+        async with Timer("Saving current policy"):
+            await self.policy_model.async_save_model(self.tokenizer, '_current')
+        model_dir = os.path.join(self.cfg.save_path, f"iter_current", "policy")
+        if self.cfg.colocate_all:
+            await self.teacher_model.backload_to_gpu()
+        async with Timer("Loading policy weights to teacher model"):
+            await self.teacher_model.async_run_method("load_policy_from_dir", model_dir)
+            # Reset optimizer/scheduler state on teacher to avoid stale momentum
+            await self.teacher_model.async_run_method("_reset_optimizer_state", True)
+        if self.cfg.colocate_all:
+            await self.teacher_model.offload_to_cpu()

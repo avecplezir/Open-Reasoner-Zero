@@ -1,4 +1,5 @@
 import socket
+from loguru import logger
 
 import ray
 import torch
@@ -39,6 +40,7 @@ class WorkerWrap(Worker):
         assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
         weight = torch.empty(shape, dtype=dtype, device="cuda")
         group = None
+        logger.info(f'group_name: {group_name}')
         if hasattr(self, "_model_update_groups"):
             group = self._model_update_groups.get(group_name)
         assert group is not None, f"Unknown process group '{group_name}'. Did you initialize it on the worker?"
