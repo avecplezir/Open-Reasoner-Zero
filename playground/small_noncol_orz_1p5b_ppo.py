@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 1
+    actor_num = 2
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -61,10 +61,11 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
-    vllm_num_engines: int = 1 #total_num_nodes - actor_num
+    vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
     zero_stage: int = 3
+    vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/iter104/policy" # TODO: or put your downloaded model path here!
@@ -142,7 +143,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.95
+    gpu_memory_utilization: float = 0.9
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0

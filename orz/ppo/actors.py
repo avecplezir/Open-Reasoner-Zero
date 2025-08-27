@@ -352,12 +352,14 @@ class PPORayActorGroup:
         return await asyncio.gather(*save_tasks)
 
     async def async_ppo_train(self, global_steps, replay_buffers):
+        logger.info(f"Start async ppo training for {len(self._actor_handlers)} actors")
         return await asyncio.gather(
             *[actor.ppo_train.remote(global_steps, replay_buffers[i]) for i, actor in enumerate(self._actor_handlers)]
         )
 
     async def async_run_method(self, method_name, *args, **kwargs):
         refs = []
+        logger.info(f"Run {method_name} for {len(self._actor_handlers)} actors")
         for actor in self._actor_handlers:
             method = getattr(actor, method_name)
             refs.append(method.remote(*args, **kwargs))
@@ -697,6 +699,7 @@ class PolicyRayActorBase(RayActor):
     def _init_teacher_vllm_engines_actor_group(self, vllm_engines=None):
         # Create torch group with deepspeed rank 0 and all vllm ranks for teacher model
         # Uses a different group name to avoid conflicts with policy model
+        logger.info("Initializing teacher vLLM engines actor group")
 
         if vllm_engines is not None and torch.distributed.get_rank() == 0:
             master_address = ray._private.services.get_node_ip_address()
@@ -718,6 +721,8 @@ class PolicyRayActorBase(RayActor):
                 self.strategy.print(
                     "WARNING:using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
                 )
+            else:
+                self.strategy.print(f"Using default {backend} for vLLM synchronization")
 
             refs = [
                 engine.init_process_group.remote(

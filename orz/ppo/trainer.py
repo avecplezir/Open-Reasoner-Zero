@@ -10,6 +10,7 @@ import wandb
 import numpy as np
 from collections import defaultdict
 import gc
+import time
 from deepspeed.accelerator import get_accelerator
 
 import ray
@@ -82,10 +83,13 @@ class RayPPOTrainer:
             await self.policy_model.backload_to_gpu()
             await self._backload_vllm_engines()
 
-        await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+        async with Timer("Policy init vllm engines actor group"):
+            await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
 
         # Initialize teacher model's own process group with same vLLM engines if separate teacher is enabled
         if self.cfg.separate_teacher_model:
+            logger.info(f'self.teacher_model {self.teacher_model}')
+            # time.sleep(2.5)  # wait for vllm engines to be ready
             async with Timer("teacher init vllm engines actor group"):
                 await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
 
@@ -123,15 +127,11 @@ class RayPPOTrainer:
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
-                    await self.policy_model.backload_to_gpu()
-                    await self._sync_policy_weights_to_vllm()
-                    await self.policy_model.offload_to_cpu()
+                    await self._major_sync_policy_weights_to_vllm()
                     await self.eval(prefix="")
 
                 if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
-                    await self.teacher_model.backload_to_gpu()
-                    await self._sync_teacher_weights_to_vllm()
-                    await self.teacher_model.offload_to_cpu()
+                    await self._major_sync_teacher_weights_to_vllm()
                     await self.eval(prefix="teacher")
 
                 # 3. make experiences, calculate advantages and returns
@@ -306,9 +306,7 @@ class RayPPOTrainer:
 
             # Sync student (policy) model weights to VLLM engines before generation
             async with Timer("Sync policy weights to VLLM engines for student generation"):
-                await self.policy_model.backload_to_gpu()
-                await self._sync_policy_weights_to_vllm()
-                await self.policy_model.offload_to_cpu()
+                await self._major_sync_policy_weights_to_vllm()
 
             async with Timer("Generate student sequences via vllm engines"):
                 dp_prompt_size = (len(all_student_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
@@ -384,9 +382,7 @@ class RayPPOTrainer:
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
-                    await self.teacher_model.backload_to_gpu()
-                    await self._sync_teacher_weights_to_vllm()
-                    await self.teacher_model.offload_to_cpu()
+                    await self._major_sync_teacher_weights_to_vllm()
 
             # create the oposite teacher prompt and collect data with it
             all_teacher_prompts = []
@@ -1152,9 +1148,9 @@ class RayPPOTrainer:
                 pg = placement_group(bundles, strategy="PACK")
                 ray.get(pg.ready())
                 if cfg.separate_teacher_model:
-                    num_gpus_per_actors = [0.4, 0.4, 0.15]
+                    num_gpus_per_actors = [0.4, 0.4, 0.2]
                 else:
-                    num_gpus_per_actors = [0.5, 0.25]
+                    num_gpus_per_actors = [0.75, 0.25]
 
             policy_model = PPORayActorGroup(
                 cfg.actor_num_nodes,
@@ -1991,3 +1987,19 @@ class RayPPOTrainer:
             await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
+
+    async def _major_sync_policy_weights_to_vllm(self):
+        if self.cfg.colocate_all:
+            await self.policy_model.backload_to_gpu()
+            await self._sync_policy_weights_to_vllm()
+            await self.policy_model.offload_to_cpu()
+        else:
+            await self._sync_policy_weights_to_vllm()
+
+    async def _major_sync_teacher_weights_to_vllm(self):
+        if self.cfg.colocate_all:
+            await self.teacher_model.backload_to_gpu()
+            await self._sync_teacher_weights_to_vllm()
+            await self.teacher_model.offload_to_cpu()
+        else:
+            await self._sync_teacher_weights_to_vllm()

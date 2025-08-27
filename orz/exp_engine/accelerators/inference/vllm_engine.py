@@ -64,6 +64,13 @@ class LLMActor:
         return self.llm.generate(*args, **kwargs)
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
+        # Ensure remote worker execution loop is paused before creating a new comm group.
+        # This avoids deadlocks when attaching multiple process groups (policy + teacher).
+        try:
+            self.stop_remote_worker_execution_loop()
+        except Exception:
+            pass
+
         if self.use_gpu_executor:
             return self.llm.llm_engine.model_executor.driver_worker.init_process_group(
                 master_address, master_port, rank_offset, world_size, group_name, backend
