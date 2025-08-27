@@ -17,6 +17,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel
+from safetensors.torch import load_file as safe_load
 
 # from openrlhf.models import Actor
 from transformers.trainer import get_scheduler
@@ -422,14 +423,37 @@ class PolicyRayActorBase(RayActor):
             os.path.join(args.save_path, f"iter{iteration}", "policy"),
         )
 
-    def load_policy_from_dir(self, path: str, strict: bool = False):
-        """Load policy weights from a HuggingFace-style directory.
+    def _load_policy_from_dir(self, path: str, strict: bool = True):
+        """Load policy weights from a directory containing model.safetensors only.
 
-        This loads into the underlying HF module (`self.model.model`) and is
-        ZeRO-3 safe via the strategy helper.
+        The function locates `<path>/model.safetensors`, loads it on CPU and
+        applies the state dict to the unwrapped module under the current
+        DeepSpeed engine. This avoids re-instantiating a fresh HF model and
+        keeps ZeRO partitioning intact.
         """
-        # Ensure weights are loaded onto the model module (not the DS engine wrapper)
-        self.strategy.load_model(self.model.model, path, map_location="cpu", strict=strict)
+        weight_file = os.path.join(path, "model.safetensors")
+        if not os.path.isfile(weight_file):
+            raise FileNotFoundError(f"Expected 'model.safetensors' under {path}, but not found.")
+
+        logger.info(f"Loading policy weights from '{weight_file}' (safetensors)")
+        state_dict = safe_load(weight_file, device="cpu")
+
+        # Load into the underlying HF module (unwrap DS engine if present)
+        unwrapped = self.strategy._unwrap_model(self.model.model)
+        incompatible = unwrapped.load_state_dict(state_dict, strict=strict)
+
+        # Log any missing/unexpected keys when not strict
+        try:
+            missing, unexpected = incompatible.missing_keys, incompatible.unexpected_keys
+        except Exception:
+            missing, unexpected = [], []
+        if not strict:
+            if missing:
+                logger.warning(f"Missing keys while loading policy: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+            if unexpected:
+                logger.warning(
+                    f"Unexpected keys while loading policy: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}"
+                )
 
     def _reset_optimizer_state(self, reset_scheduler: bool = True):
         """Reset optimizer moments/state (and optionally scheduler) for the policy.
@@ -805,14 +829,16 @@ class PolicyRayActorBase(RayActor):
         torch.cuda.empty_cache()
         model = self.model.model.module
         count, num_params = 0, len(list(model.named_parameters()))
+        if torch.distributed.get_rank() == 0:
+            group_name = getattr(self, "_model_update_group_name", None)
+            logger.info(f"Broadcasting group_name {group_name}")
+
         for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
 
             # Fire all vllm engines for broadcast
             if torch.distributed.get_rank() == 0:
                 shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
-                group_name = getattr(self, "_model_update_group_name", "openrlhf")
-                logger.info(f"Broadcasting group_name {group_name}")
                 refs = [
                     engine.update_weight.remote(
                         name,
@@ -824,7 +850,7 @@ class PolicyRayActorBase(RayActor):
                     for engine in vllm_engines
                 ]
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+            with deepspeed.zero.GatheredParameters([param], modifier_rank=0, enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)

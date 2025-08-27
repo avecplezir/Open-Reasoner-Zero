@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    update_teacher_freq: int = 1  # -1 means never update teacher with student model
+    update_teacher_freq: int = -1  # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5

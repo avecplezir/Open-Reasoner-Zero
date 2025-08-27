@@ -2007,11 +2007,11 @@ class RayPPOTrainer:
     async def _sync_policy_weights_to_teacher(self):
         async with Timer("Saving current policy"):
             await self.policy_model.async_save_model(self.tokenizer, '_current')
-        model_dir = os.path.join(self.cfg.save_path, f"iter_current", "policy")
+        model_dir = os.path.join(self.cfg.save_path, f"iter_current", "policy") #"model.safetensors"
         if self.cfg.colocate_all:
             await self.teacher_model.backload_to_gpu()
         async with Timer("Loading policy weights to teacher model"):
-            await self.teacher_model.async_run_method("load_policy_from_dir", model_dir)
+            await self.teacher_model.async_run_method("_load_policy_from_dir", model_dir)
             # Reset optimizer/scheduler state on teacher to avoid stale momentum
             await self.teacher_model.async_run_method("_reset_optimizer_state", True)
         if self.cfg.colocate_all:
