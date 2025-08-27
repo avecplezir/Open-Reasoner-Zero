@@ -48,17 +48,20 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
+    actor_num = 1
     # resource related settings
-    ref_num_nodes: int = total_num_nodes
+    ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = total_num_nodes
+    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = total_num_nodes
+    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
-    colocate_all: bool = True
+    reward_num_nodes: int = actor_num
+    reward_num_gpus_per_node: int = 1
+    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
-    vllm_num_engines: int = total_num_nodes
+    vllm_num_engines: int = 1 #total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
     zero_stage: int = 3
@@ -69,7 +72,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-v0-{randint}'
+    e_name = f'topr-aug-data-separate-tr10-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -93,18 +96,19 @@ class PPOExpConfig(BasePPOExpConfig):
     # ppo related settings
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 20
+    num_warmup_steps: int = 10
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
-    update_ref_every_epoch: bool = True
+    update_ref_every_epoch: bool = False
+    update_teacher_freq: int = -1  # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     max_epochs: int = 1
@@ -119,12 +123,13 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 1
+    eval_teacher: bool = True
 
     # generate related settings
-    generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     top_p: float = 1.0
@@ -137,18 +142,17 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.3
+    gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.01
-    kl_mean_coef: float = 0.01
-    kl_mean_coef: float = 1.
-    kl_reward_clamp: float = 5
+    kl_max_coef: float = 1
+    kl_mean_coef: float = 0.0
     reward_kl_coef: float = 0.
-    reward_kl_reduction: str = "sum"  # "mean" or "sum"
+    kl_reward_clamp: float = 5
+    reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
@@ -160,12 +164,14 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_frequency: int = -1  # -1 means no student training
+    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
-    generate_with_teacher: bool = False
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
+
+    separate_teacher_model: bool = False
 
 
 if __name__ == "__main__":
