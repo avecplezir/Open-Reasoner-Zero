@@ -73,7 +73,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-tr10-v0-{randint}'
+    e_name = f'topr-aug-data-separate-tr5-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -95,16 +95,15 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    actor_learning_rate: float = 1e-9 #1e-6
+    actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 20
+    num_warmup_steps: int = 0
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    update_teacher_freq: int = 1  # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
@@ -165,8 +164,8 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True

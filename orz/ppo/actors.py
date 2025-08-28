@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import socket
+import hashlib
+import random
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from typing import Dict, Optional, Type, Union
 from loguru import logger
@@ -151,6 +153,65 @@ class RayActor(BasePPORole):
 
     def empty_cache(self) -> None:
         torch.cuda.empty_cache()
+
+    def _weight_fingerprint(
+        self,
+        sample_params: int = 4,
+        seed: int = 0,
+        return_samples: int = 8,
+    ) -> Optional[dict]:
+        """Compute a lightweight fingerprint of model weights.
+
+        - Samples up to `sample_params` tensors deterministically.
+        - For each, gathers the full tensor only on rank 0 (ZeRO‑3 aware),
+          computes mean/std/norm and a tiny subset of values.
+        - Returns a digest and per‑tensor stats on rank 0; returns None on others.
+        """
+        # Resolve the underlying deepspeed engine and wrapped module
+        model = self.model.model if isinstance(self.model, Actor) else self.model
+        module = model.module
+
+        # Build a deterministic list of names
+        param_names = [n for n, _ in module.named_parameters()]
+        rng = random.Random(seed)
+        rng.shuffle(param_names)
+        names = param_names[: sample_params]
+        logger.info(f"Fingerprinting names: {names}")
+
+        # Index helpers
+        param_dict = dict(module.named_parameters())
+
+        out = {}
+        for name in names:
+            param = param_dict.get(name, None)
+            if param is None:
+                continue
+
+            # Gather full tensor only on rank 0 when ZeRO‑3
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                if torch.distributed.get_rank() == 0:
+                    data = param.data.detach()
+                    if data.numel() == 0:
+                        continue
+                    flat = data.view(-1).float()
+                    k = min(return_samples, flat.numel())
+                    out[name] = {
+                        "mean": flat.mean().item(),
+                        "std": flat.std(unbiased=False).item(),
+                        "norm": flat.norm().item(),
+                        "sample": flat[:k].tolist(),
+                    }
+
+        if torch.distributed.get_rank() == 0:
+            # Stable digest over key order and stats
+            h = hashlib.sha256()
+            for k in sorted(out.keys()):
+                v = out[k]
+                h.update(k.encode())
+                h.update(f'{v["mean"]:.8e}{v["std"]:.8e}{v["norm"]:.8e}'.encode())
+                h.update(str(v["sample"]).encode())
+            return {"digest": h.hexdigest(), "stats": out}
+        return None
 
     def _set_numa_affinity(self, rank):
         def local_rank_to_real_gpu_id(local_rank):
@@ -435,69 +496,30 @@ class PolicyRayActorBase(RayActor):
         logger.info(f"Loading policy weights from '{weight_file}' (safetensors)")
         weights = safe_load(weight_file, device="cpu")
 
-        module = self.strategy._unwrap_model(self.model.model)
+        model = self.model.model.module
 
-        model_state_keys = set(module.state_dict().keys())
+        model_state_keys = set(model.state_dict().keys())
         weight_keys = set(weights.keys())
+        logger.info(f'model_state_keys {model_state_keys}')
+        logger.info(f'weight_keys {weight_keys}')
 
         missing = []
         unexpected = list(weight_keys - model_state_keys)
         shape_mismatch = []
 
         # Load parameters
-        for name, param in module.named_parameters():
-            if name not in weights:
-                missing.append(name)
-                continue
-            tensor = weights[name]
-            # Determine target shape (handle ZeRO-3 where param.ds_shape is the full shape)
-            target_shape = getattr(param, "ds_shape", param.shape)
-            if tuple(tensor.shape) != tuple(target_shape):
-                shape_mismatch.append((name, tuple(tensor.shape), tuple(target_shape)))
-                continue
+        for name, param in model.named_parameters():
             # Copy under ZeRO-3 gathered context
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                try:
-                    param.data.copy_(tensor.to(dtype=param.dtype))
-                except Exception as e:
-                    shape_mismatch.append((name, tuple(tensor.shape), tuple(param.shape)))
+                tensor = weights[name]
+                file_mean = tensor.mean().item()
+                param.data.copy_(tensor.to(dtype=param.dtype))
+                model_mean = param.data.mean().item()
+                logger.info(f"Param '{name}': file mean {file_mean:.8e}, model mean {model_mean:.8e}")
 
         # Load persistent buffers when present
-        for name, buf in module.named_buffers():
-            if name not in weights:
-                continue
-            tensor = weights[name]
-            if tuple(tensor.shape) != tuple(buf.shape):
-                shape_mismatch.append((name, tuple(tensor.shape), tuple(buf.shape)))
-                continue
-            try:
-                buf.data.copy_(tensor.to(dtype=buf.dtype))
-            except Exception:
-                pass
-
+        logger.info(f'module.named_buffers() {model.named_buffers()}')
         logger.info(f"missing {missing} unexpected {unexpected} shape_mismatch {shape_mismatch}")
-        # Report
-        if strict and (missing or unexpected or shape_mismatch):
-            msgs = []
-            if missing:
-                msgs.append(f"missing: {missing[:10]}{'...' if len(missing) > 10 else ''}")
-            if unexpected:
-                msgs.append(f"unexpected: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
-            if shape_mismatch:
-                detail = [(n, s, t) for n, s, t in shape_mismatch[:5]]
-                msgs.append(f"shape_mismatch(sample): {detail}{'...' if len(shape_mismatch) > 5 else ''}")
-            raise RuntimeError("state_dict load issues: " + "; ".join(msgs))
-
-        if missing:
-            logger.warning(f"Missing keys while loading policy: {missing[:10]}{'...' if len(missing) > 10 else ''}")
-        if unexpected:
-            logger.warning(
-                f"Unexpected keys while loading policy: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}"
-            )
-        if shape_mismatch:
-            logger.warning(
-                f"Shape mismatches: {[(n, s, t) for n, s, t in shape_mismatch[:5]]}{'...' if len(shape_mismatch) > 5 else ''}"
-            )
 
     def _reset_optimizer_state(self, reset_scheduler: bool = True):
         """Reset optimizer moments/state (and optionally scheduler) for the policy.
@@ -871,6 +893,7 @@ class PolicyRayActorBase(RayActor):
     def _broadcast_to_vllm(self, vllm_engines):
         # avoid OOM
         torch.cuda.empty_cache()
+        torch.distributed.barrier()
         model = self.model.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         if torch.distributed.get_rank() == 0:
@@ -893,19 +916,11 @@ class PolicyRayActorBase(RayActor):
                     )
                     for engine in vllm_engines
                 ]
-            # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            if self.strategy.args.zero_stage == 3:
-                # Ensure parameter is not in INFLIGHT status before gathering with timeout
-                timeout_count = 0
-                max_timeout = 1000  # Max iterations to prevent infinite loop
-                while hasattr(param, 'ds_status') and param.ds_status == ZeroParamStatus.INFLIGHT:
-                    torch.cuda.synchronize()
-                    timeout_count += 1
-                    if timeout_count >= max_timeout:
-                        logger.warning(f"Parameter {name} stuck in INFLIGHT status, forcing continue")
-                        break
+            # if self.strategy.args.zero_stage == 3:
+            #     while hasattr(param, 'ds_status') and param.ds_status == ZeroParamStatus.INFLIGHT:
+            #         torch.cuda.synchronize()
+            #     torch.distributed.barrier()
 
-            # Only rank 0 should gather parameters to avoid deadlock
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
@@ -916,6 +931,7 @@ class PolicyRayActorBase(RayActor):
                 # torch.cuda.empty_cache()
                 # torch.cuda.ipc_collect()
 
+        torch.distributed.barrier()
         self.strategy.print("Broadcast actor weights to vllm engines done")
 
     def _broadcast_to_vllm_cudaipc(self, vllm_engines):
@@ -941,6 +957,14 @@ class PolicyRayActorBase(RayActor):
                 ray.get(refs)
 
         self.strategy.print("Broadcast actor weights to vllm engines done")
+
+    def _is_model_on_gpu(self):
+        """Check if model parameters are on GPU"""
+        if hasattr(self.model, 'model') and hasattr(self.model.model, 'module'):
+            # Get first parameter to check device
+            first_param = next(self.model.model.module.parameters())
+            return first_param.device.type == 'cuda'
+        return False
 
     def get_weight_statistics(self):
         """Compute lightweight statistics for model weights"""
