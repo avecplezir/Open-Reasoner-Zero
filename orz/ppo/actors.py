@@ -8,6 +8,7 @@ from loguru import logger
 
 from deepspeed.accelerator import get_accelerator
 import deepspeed
+from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 import ray
 import torch
 import torch.distributed
@@ -353,14 +354,12 @@ class PPORayActorGroup:
         return await asyncio.gather(*save_tasks)
 
     async def async_ppo_train(self, global_steps, replay_buffers):
-        logger.info(f"Start async ppo training for {len(self._actor_handlers)} actors")
         return await asyncio.gather(
             *[actor.ppo_train.remote(global_steps, replay_buffers[i]) for i, actor in enumerate(self._actor_handlers)]
         )
 
     async def async_run_method(self, method_name, *args, **kwargs):
         refs = []
-        logger.info(f"Run {method_name} for {len(self._actor_handlers)} actors")
         for actor in self._actor_handlers:
             method = getattr(actor, method_name)
             refs.append(method.remote(*args, **kwargs))
@@ -423,37 +422,82 @@ class PolicyRayActorBase(RayActor):
             os.path.join(args.save_path, f"iter{iteration}", "policy"),
         )
 
-    def _load_policy_from_dir(self, path: str, strict: bool = True):
-        """Load policy weights from a directory containing model.safetensors only.
+    def _load_policy_from_dir(self, path: str, strict: bool = False):
+        """Load policy weights from `<path>/model.safetensors` into the current engine.
 
-        The function locates `<path>/model.safetensors`, loads it on CPU and
-        applies the state dict to the unwrapped module under the current
-        DeepSpeed engine. This avoids re-instantiating a fresh HF model and
-        keeps ZeRO partitioning intact.
+        Copies tensors parameter-by-parameter under a ZeRO-3 gather context to
+        avoid meta/empty-shape issues and keep partitioning intact.
         """
         weight_file = os.path.join(path, "model.safetensors")
         if not os.path.isfile(weight_file):
             raise FileNotFoundError(f"Expected 'model.safetensors' under {path}, but not found.")
 
         logger.info(f"Loading policy weights from '{weight_file}' (safetensors)")
-        state_dict = safe_load(weight_file, device="cpu")
+        weights = safe_load(weight_file, device="cpu")
 
-        # Load into the underlying HF module (unwrap DS engine if present)
-        unwrapped = self.strategy._unwrap_model(self.model.model)
-        incompatible = unwrapped.load_state_dict(state_dict, strict=strict)
+        module = self.strategy._unwrap_model(self.model.model)
 
-        # Log any missing/unexpected keys when not strict
-        try:
-            missing, unexpected = incompatible.missing_keys, incompatible.unexpected_keys
-        except Exception:
-            missing, unexpected = [], []
-        if not strict:
+        model_state_keys = set(module.state_dict().keys())
+        weight_keys = set(weights.keys())
+
+        missing = []
+        unexpected = list(weight_keys - model_state_keys)
+        shape_mismatch = []
+
+        # Load parameters
+        for name, param in module.named_parameters():
+            if name not in weights:
+                missing.append(name)
+                continue
+            tensor = weights[name]
+            # Determine target shape (handle ZeRO-3 where param.ds_shape is the full shape)
+            target_shape = getattr(param, "ds_shape", param.shape)
+            if tuple(tensor.shape) != tuple(target_shape):
+                shape_mismatch.append((name, tuple(tensor.shape), tuple(target_shape)))
+                continue
+            # Copy under ZeRO-3 gathered context
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                try:
+                    param.data.copy_(tensor.to(dtype=param.dtype))
+                except Exception as e:
+                    shape_mismatch.append((name, tuple(tensor.shape), tuple(param.shape)))
+
+        # Load persistent buffers when present
+        for name, buf in module.named_buffers():
+            if name not in weights:
+                continue
+            tensor = weights[name]
+            if tuple(tensor.shape) != tuple(buf.shape):
+                shape_mismatch.append((name, tuple(tensor.shape), tuple(buf.shape)))
+                continue
+            try:
+                buf.data.copy_(tensor.to(dtype=buf.dtype))
+            except Exception:
+                pass
+
+        logger.info(f"missing {missing} unexpected {unexpected} shape_mismatch {shape_mismatch}")
+        # Report
+        if strict and (missing or unexpected or shape_mismatch):
+            msgs = []
             if missing:
-                logger.warning(f"Missing keys while loading policy: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+                msgs.append(f"missing: {missing[:10]}{'...' if len(missing) > 10 else ''}")
             if unexpected:
-                logger.warning(
-                    f"Unexpected keys while loading policy: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}"
-                )
+                msgs.append(f"unexpected: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+            if shape_mismatch:
+                detail = [(n, s, t) for n, s, t in shape_mismatch[:5]]
+                msgs.append(f"shape_mismatch(sample): {detail}{'...' if len(shape_mismatch) > 5 else ''}")
+            raise RuntimeError("state_dict load issues: " + "; ".join(msgs))
+
+        if missing:
+            logger.warning(f"Missing keys while loading policy: {missing[:10]}{'...' if len(missing) > 10 else ''}")
+        if unexpected:
+            logger.warning(
+                f"Unexpected keys while loading policy: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}"
+            )
+        if shape_mismatch:
+            logger.warning(
+                f"Shape mismatches: {[(n, s, t) for n, s, t in shape_mismatch[:5]]}{'...' if len(shape_mismatch) > 5 else ''}"
+            )
 
     def _reset_optimizer_state(self, reset_scheduler: bool = True):
         """Reset optimizer moments/state (and optionally scheduler) for the policy.
@@ -850,7 +894,19 @@ class PolicyRayActorBase(RayActor):
                     for engine in vllm_engines
                 ]
             # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-            with deepspeed.zero.GatheredParameters([param], modifier_rank=0, enabled=self.strategy.args.zero_stage == 3):
+            if self.strategy.args.zero_stage == 3:
+                # Ensure parameter is not in INFLIGHT status before gathering with timeout
+                timeout_count = 0
+                max_timeout = 1000  # Max iterations to prevent infinite loop
+                while hasattr(param, 'ds_status') and param.ds_status == ZeroParamStatus.INFLIGHT:
+                    torch.cuda.synchronize()
+                    timeout_count += 1
+                    if timeout_count >= max_timeout:
+                        logger.warning(f"Parameter {name} stuck in INFLIGHT status, forcing continue")
+                        break
+
+            # Only rank 0 should gather parameters to avoid deadlock
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
                     torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
                     ray.get(refs)

@@ -95,16 +95,16 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    actor_learning_rate: float = 1e-6
+    actor_learning_rate: float = 1e-9 #1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 10
+    num_warmup_steps: int = 20
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    update_teacher_freq: int = -1  # -1 means never update teacher with student model
+    update_teacher_freq: int = 1  # -1 means never update teacher with student model
     advantage_normalize: bool = False
 
     num_episodes: int = 5
@@ -125,7 +125,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_estimator_k3: bool = True
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 1
+    eval_interval: int = 5
     eval_teacher: bool = True
 
     # generate related settings
@@ -149,14 +149,14 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 1
-    kl_mean_coef: float = 0.0
-    reward_kl_coef: float = 0.
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1
+    reward_kl_coef: float = 1
     kl_reward_clamp: float = 5
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = True
-    ss_reward_coef: float = 0.
+    ss_reward_coef: float = 0.3
 
     use_topr: bool = True
     train_teacher: bool = True

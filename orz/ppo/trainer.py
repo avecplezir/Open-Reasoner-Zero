@@ -127,26 +127,30 @@ class RayPPOTrainer:
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
-                    await self._major_sync_policy_weights_to_vllm()
-                    await self.eval(prefix="")
 
-                if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
-                    await self._major_sync_teacher_weights_to_vllm()
-                    await self.eval(prefix="teacher")
+                    async with Timer("Eval of the student model"):
+                        await self._major_sync_policy_weights_to_vllm()
+                        await self.eval(prefix="")
+
+                    if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
+                        async with Timer("Eval of the teacher model"):
+                            await self._major_sync_teacher_weights_to_vllm()
+                            await self.eval(prefix="teacher")
 
                 # 3. make experiences, calculate advantages and returns
                 await self.make_experience(rand_prompts)
 
                 # check if has enough data
                 if len(self.student_replay_buffer) <= 0 or len(self.teacher_replay_buffer) <= 0:
-                    if self.cfg.colocate_all:
+                    await self._major_sync_policy_weights_to_vllm()
+                    # if self.cfg.colocate_all:
                         # skip, but transfer weight
-                        await self.policy_model.backload_to_gpu()
-                        await self._backload_vllm_engines()
-                        await self._sync_policy_weights_to_vllm()
-                        await self.policy_model.offload_to_cpu()
-                        if self.cfg.separate_teacher_model:
-                            await self.teacher_model.offload_to_cpu()
+                        # await self.policy_model.backload_to_gpu()
+                        # await self._backload_vllm_engines()
+                        # await self._sync_policy_weights_to_vllm()
+                        # await self.policy_model.offload_to_cpu()
+                        # if self.cfg.separate_teacher_model:
+                        #     await self.teacher_model.offload_to_cpu()
                     continue
 
                 if self.cfg.advantage_normalize:
@@ -240,8 +244,9 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
-                        self.global_step % self.cfg.update_teacher_freq == 0:
+                # if self.cfg.separate_teacher_model and self.cfg.update_teacher_freq > 0 and \
+                #         self.global_step % self.cfg.update_teacher_freq == 0:
+                if (self.student_training_step == self.cfg.student_training_rounds) and self.cfg.separate_teacher_model:
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
