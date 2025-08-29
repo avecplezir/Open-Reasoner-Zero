@@ -156,6 +156,7 @@ class RayActor(BasePPORole):
 
     def _weight_fingerprint(
         self,
+        checkpoint_path: Optional[str] = None,
         sample_params: int = 4,
         seed: int = 0,
         return_samples: int = 8,
@@ -168,24 +169,26 @@ class RayActor(BasePPORole):
         - Returns a digest and per‑tensor stats on rank 0; returns None on others.
         """
         # Resolve the underlying deepspeed engine and wrapped module
-        model = self.model.model if isinstance(self.model, Actor) else self.model
-        module = model.module
+        model = self.model.model.module
 
         # Build a deterministic list of names
-        param_names = [n for n, _ in module.named_parameters()]
+        param_names = [n for n, _ in model.named_parameters()]
         rng = random.Random(seed)
         rng.shuffle(param_names)
         names = param_names[: sample_params]
         logger.info(f"Fingerprinting names: {names}")
 
         # Index helpers
-        param_dict = dict(module.named_parameters())
+        if checkpoint_path:
+            param_dict = safe_load(checkpoint_path, device="cpu")
+        else:
+            param_dict = dict(model.named_parameters())
 
         out = {}
         for name in names:
             param = param_dict.get(name, None)
-            if param is None:
-                continue
+            # if param is None:
+            #     continue
 
             # Gather full tensor only on rank 0 when ZeRO‑3
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
@@ -475,33 +478,33 @@ class PolicyRayActorBase(RayActor):
 
     def save_model(self, tokenizer, iteration):
         args = self.strategy.args
-
+        logger.info(f"Saving model checkpoint to {args.save_path}/iter{iteration}/policy")
         # save model checkpoint after fitting on only rank0
         self.strategy.save_model(
             self.model,
             tokenizer,
             os.path.join(args.save_path, f"iter{iteration}", "policy"),
+            save_latest=True,
         )
 
-    def _load_policy_from_dir(self, path: str, strict: bool = False):
+    def _load_policy_from_dir(self, path: str, strict: bool = True):
         """Load policy weights from `<path>/model.safetensors` into the current engine.
 
         Copies tensors parameter-by-parameter under a ZeRO-3 gather context to
         avoid meta/empty-shape issues and keep partitioning intact.
         """
-        weight_file = os.path.join(path, "model.safetensors")
-        if not os.path.isfile(weight_file):
+        if not os.path.isfile(path):
             raise FileNotFoundError(f"Expected 'model.safetensors' under {path}, but not found.")
 
-        logger.info(f"Loading policy weights from '{weight_file}' (safetensors)")
-        weights = safe_load(weight_file, device="cpu")
+        logger.info(f"Loading policy weights from '{path}'")
+        # self.strategy.load_model(self.model, path, strict=strict)
+        # return
+
+        weights = safe_load(path, device="cpu")
+        weight_keys = set(weights.keys())
 
         model = self.model.model.module
-
         model_state_keys = set(model.state_dict().keys())
-        weight_keys = set(weights.keys())
-        logger.info(f'model_state_keys {model_state_keys}')
-        logger.info(f'weight_keys {weight_keys}')
 
         missing = []
         unexpected = list(weight_keys - model_state_keys)
@@ -510,15 +513,13 @@ class PolicyRayActorBase(RayActor):
         # Load parameters
         for name, param in model.named_parameters():
             # Copy under ZeRO-3 gathered context
-            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                tensor = weights[name]
-                file_mean = tensor.mean().item()
-                param.data.copy_(tensor.to(dtype=param.dtype))
-                model_mean = param.data.mean().item()
-                logger.info(f"Param '{name}': file mean {file_mean:.8e}, model mean {model_mean:.8e}")
+            with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3, modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    tensor = weights[name]
+                    param.data.copy_(tensor.to(dtype=param.dtype))
 
         # Load persistent buffers when present
-        logger.info(f'module.named_buffers() {model.named_buffers()}')
+        logger.info(f'module.named_buffers() {len(list(model.named_buffers()))}')
         logger.info(f"missing {missing} unexpected {unexpected} shape_mismatch {shape_mismatch}")
 
     def _reset_optimizer_state(self, reset_scheduler: bool = True):

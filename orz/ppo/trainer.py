@@ -150,8 +150,8 @@ class RayPPOTrainer:
                     self.student_replay_buffer = normalize_advantages(self.student_replay_buffer)
                     self.teacher_replay_buffer = normalize_advantages(self.teacher_replay_buffer)
 
-                sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                 if self.cfg.separate_teacher_model:
+                    sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
                 train_teacher = False
@@ -245,32 +245,14 @@ class RayPPOTrainer:
                 await self.policy_model.offload_to_cpu()
                 await self.policy_model.backload_to_gpu()
 
-                sfp2 = await self.policy_model.async_run_method("_weight_fingerprint")
-                logger.info(f"Global step {self.global_step}, student_training_step {self.student_training_step}, teacher_training_step {self.teacher_training_step}, sync teacher weigts {sync_teacher_weigts}")
                 if self.cfg.separate_teacher_model:
+                    logger.info(f"Global step {self.global_step}, student_training_step {self.student_training_step}, teacher_training_step {self.teacher_training_step}, sync teacher weigts {sync_teacher_weigts}")
+                    sfp2 = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp2 = await self.teacher_model.async_run_method("_weight_fingerprint")
-                    # logger.info(f"policy model weight fingerprin before training {sfp[0]}")
-                    # logger.info(f"policy model weight fingerprint after training {sfp2[0]}")
-                    # logger.info(f"teacher model weight fingerprint before training {tfp[0]}")
-                    # logger.info(f"teacher model weight fingerprint after training {tfp2[0]}")
                     logger.info(f"policy model weights changed: {sfp[0]['digest'] != sfp2[0]['digest']}")
                     logger.info(f"teacher model weights changed: {tfp[0]['digest'] != tfp2[0]['digest']}")
                     logger.info(f"policy and teacher model weights before training equal: {sfp[0]['digest'] == tfp[0]['digest']}")
                     logger.info(f"policy and teacher model weights after training equal: {sfp2[0]['digest'] == tfp2[0]['digest']}")
-
-                # if train_teacher and self.cfg.separate_teacher_model:
-                #     await self.policy_model.offload_to_cpu()
-                #     await self.policy_model.backload_to_gpu()
-
-                # await self.policy_model.async_run_method("empty_cache")
-                # if self.cfg.separate_teacher_model:
-                #     await self.teacher_model.async_run_method("empty_cache")
-                # await self.policy_model.offload_to_cpu()
-                # if self.cfg.separate_teacher_model:
-                #     await self.teacher_model.offload_to_cpu()
-                # await self.policy_model.backload_to_gpu()
-                # if self.cfg.separate_teacher_model:
-                #     await self.teacher_model.backload_to_gpu()
 
                 pbar.update()
                 # log epoch info
@@ -287,20 +269,29 @@ class RayPPOTrainer:
                 if (self.student_training_step == self.cfg.student_training_rounds) and self.cfg.separate_teacher_model:
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
-                        logger.info(f"Successfully loaded policy params to teacher {self.global_step}")
-                        await self.teacher_model.async_run_method("empty_cache")
-                        torch.distributed.barrier()  # If accessible in trainer
+                        logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
+                        # await self.teacher_model.async_run_method("empty_cache")
                     sync_teacher_weigts = True
                     logger.info(f"syncing teacher weigts checking")
+                    checkpoint_path = os.path.join(self.cfg.save_path, f"iter_current", "policy", 'model.safetensors')
+                    chfp = await self.policy_model.async_run_method("_weight_fingerprint", checkpoint_path)
                     sfp3 = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp3 = await self.teacher_model.async_run_method("_weight_fingerprint")
                     logger.info(f"policy and teacher model weights are the same after syncing: {sfp3[0]['digest'] == tfp3[0]['digest']}")
                     logger.info(f"teacher and previous teacher model weights are the same after syncing: {tfp2[0]['digest'] == tfp3[0]['digest']}")
-                    # logger.info(f"sfp3[0] {sfp3[0]}")
-                    # logger.info(f"tfp3[0] {tfp3[0]}")
-                    # logger.info(f"tfp2[0] {tfp2[0]}")
+                    logger.info(f"policy and previous policy model weights are the same after syncing: {sfp2[0]['digest'] == sfp3[0]['digest']}")
+                    logger.info(f"checkpoint and current teacher model: {chfp[0]['digest'] == tfp3[0]['digest']}")
+                    logger.info(f"checkpoint and previous teacher model: {chfp[0]['digest'] == tfp2[0]['digest']}")
+                    logger.info(f"checkpoint and previous policy model: {chfp[0]['digest'] == sfp2[0]['digest']}")
+                    logger.info(f"checkpoint and current policy model: {chfp[0]['digest'] == sfp3[0]['digest']}")
+                    logger.info(f"sfp3[0] {sfp3[0]}")
+                    logger.info(f"tfp3[0] {tfp3[0]}")
+                    logger.info(f"tfp2[0] {chfp[0]}")
+                    logger.info(f"sfp[0] {sfp[0]}")
                 else:
                     sync_teacher_weigts = False
+
+                self.writer.add_scalar("sync_teacher_weigts", sync_teacher_weigts, self.global_step)
 
                 if self.cfg.colocate_all:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
@@ -2063,7 +2054,7 @@ class RayPPOTrainer:
     async def _sync_policy_weights_to_teacher(self):
         async with Timer("Saving current policy"):
             await self.policy_model.async_save_model(self.tokenizer, '_current')
-        model_dir = os.path.join(self.cfg.save_path, f"iter_current", "policy") #"model.safetensors"
+        model_dir = os.path.join(self.cfg.save_path, f"iter_current", "policy", 'model.safetensors')
         if self.cfg.colocate_all:
             await self.teacher_model.backload_to_gpu()
         async with Timer("Loading policy weights to teacher model"):
