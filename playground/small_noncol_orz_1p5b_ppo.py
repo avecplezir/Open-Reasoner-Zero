@@ -97,7 +97,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # ppo related settings
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 0
+    num_warmup_steps: int = 5 if not DEBUG_MODE else 0
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
@@ -137,7 +137,7 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True #False
+    use_grpo: bool = True
     remove_student_grpo_normalization: bool = True
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
@@ -164,8 +164,8 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 3  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 5  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True

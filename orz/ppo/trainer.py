@@ -284,10 +284,10 @@ class RayPPOTrainer:
                     logger.info(f"checkpoint and previous teacher model: {chfp[0]['digest'] == tfp2[0]['digest']}")
                     logger.info(f"checkpoint and previous policy model: {chfp[0]['digest'] == sfp2[0]['digest']}")
                     logger.info(f"checkpoint and current policy model: {chfp[0]['digest'] == sfp3[0]['digest']}")
-                    logger.info(f"sfp3[0] {sfp3[0]}")
-                    logger.info(f"tfp3[0] {tfp3[0]}")
-                    logger.info(f"tfp2[0] {chfp[0]}")
-                    logger.info(f"sfp[0] {sfp[0]}")
+                    # logger.info(f"sfp3[0] {sfp3[0]}")
+                    # logger.info(f"tfp3[0] {tfp3[0]}")
+                    # logger.info(f"chfp[0] {chfp[0]}")
+                    # logger.info(f"sfp[0] {sfp[0]}")
                 else:
                     sync_teacher_weigts = False
 
@@ -533,14 +533,10 @@ class RayPPOTrainer:
         final_answers = [final_answers[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
 
-        initial_scores, initial_teacher_scores = np.array(initial_scores), np.array(initial_teacher_scores)
+        initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
 
         logger.info(f"all_student_prompts: {len(all_student_prompts)}, all_teacher_prompts: {len(all_teacher_prompts)}")
-        assert len(all_student_prompts) == len(all_teacher_prompts), logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}")
-
-        ic = np.logical_and(initial_scores == 0, initial_teacher_scores == 1)
-        cc = np.logical_and(initial_scores == 1, initial_teacher_scores == 1)
-        ii = np.logical_and(initial_scores == 0, initial_teacher_scores == 0)
+        assert len(all_student_prompts) == len(all_teacher_prompts) == len(teacher_generated), logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}")
 
         # empty data
         if len(all_student_prompts) == 0:
@@ -684,10 +680,10 @@ class RayPPOTrainer:
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
                         student_ratio_clipped_0_1_list.append(student_ratio_clipped_0_1_scalar.item())
 
-                    if not teacher_generated[i]:
+                    if not teacher_generated[teacher_prompt_idx]:
                         if self.cfg.replace_teacher_logprops_w_student:
                             teacher_exp.action_log_probs[:, start:end] = student_exp.action_log_probs[:, start:end]
-                        if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[i]:
+                        if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[teacher_prompt_idx]:
                             teacher_exp.base_action_log_probs[:, start:end] = student_exp.base_action_log_probs[:, start:end]
                     else:
                         if self.cfg.replace_student_logprops_w_teacher:
@@ -716,26 +712,12 @@ class RayPPOTrainer:
             match_reward_list = np.array(match_reward_list)
             teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
             student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
+
             avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
             avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
             avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
-
             correct_match_reward_trainer = np.array([]) if np.all(initial_scores == 0) else np.array(match_reward_list[initial_scores == 1])
             incorrect_match_reward_trainer = np.array([]) if np.all(initial_scores == 1) else np.array(match_reward_list[initial_scores == 0])
-            correct_kl_sum_list = np.array([]) if np.all(ic) else np.array(kl_sum_list[cc])
-            incorrect_kl_sum_list = np.array([]) if np.all(cc) else np.array(kl_sum_list[ic])
-            correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
-            incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
-            correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
-            incorrect_kl_max_list = np.array([]) if np.all(cc) else np.array(kl_max_list[ic])
-            correct_ss_reward_mean_list = np.array([]) if np.all(ic) else np.array(ss_reward_mean_list[cc])
-            incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
-            correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
-            incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
-            teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[cc])
-            teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[ic])
-            student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[cc])
-            student_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[ic])
 
             log_dict = {
                 "avg_student_teacher_kl": avg_student_teacher_kl,
@@ -743,25 +725,58 @@ class RayPPOTrainer:
                 "avg_match_reward": avg_match_reward,
                 "avg_correct_match_reward": 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item(),
                 "avg_incorrect_match_reward": 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item(),
-                "avg_ss_reward_mean": 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item(),
-                "avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
-                "avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
-                "avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
-                "avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
-                "avg_correct_kl_sum": 0 if len(correct_kl_sum_list) == 0 else np.mean(correct_kl_sum_list).item(),
-                "avg_incorrect_kl_sum": 0 if len(incorrect_kl_sum_list) == 0 else np.mean(incorrect_kl_sum_list).item(),
-                "avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
-                "avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
-                "avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(correct_ss_reward_mean_list).item(),
-                "avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.mean(incorrect_ss_reward_mean_list).item(),
-                "avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
-                "avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
-                "avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
-                "avg_teacher_correct_alpha": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
-                "avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
-                "avg_student_correct_alpha": 0 if len(student_correct_ratio_clipped_0_1_list) == 0 else np.mean(student_correct_ratio_clipped_0_1_list).item(),
-                "avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(student_incorrect_ratio_clipped_0_1_list).item(),
             }
+
+            for prefix in ["", "teacher", "student"]:
+                if prefix == "teacher":
+                    slice = teacher_generated == 1
+                elif prefix == "student":
+                    slice = teacher_generated == 0
+                else:
+                    slice = np.array([True] * len(teacher_generated))
+
+                ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), slice)
+                cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), slice)
+                ii = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 0), slice)
+
+                correct_kl_sum_list = np.array([]) if np.all(ic) else np.array(kl_sum_list[cc])
+                incorrect_kl_sum_list = np.array([]) if np.all(cc) else np.array(kl_sum_list[ic])
+                correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
+                incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
+                correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
+                incorrect_kl_max_list = np.array([]) if np.all(cc) else np.array(kl_max_list[ic])
+                correct_ss_reward_mean_list = np.array([]) if np.all(ic) else np.array(ss_reward_mean_list[cc])
+                incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
+                correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
+                incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
+                teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[cc])
+                teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[ic])
+                student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[cc])
+                student_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[ic])
+
+                prefix = f"{prefix}/" if prefix != "" else prefix
+                log_dict.update(
+                    {
+                    f"{prefix}avg_ss_reward_mean": 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item(),
+                    f"{prefix}avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
+                    f"{prefix}avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
+                    f"{prefix}avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
+                    f"{prefix}avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
+                    f"{prefix}avg_correct_kl_sum": 0 if len(correct_kl_sum_list) == 0 else np.mean(correct_kl_sum_list).item(),
+                    f"{prefix}avg_incorrect_kl_sum": 0 if len(incorrect_kl_sum_list) == 0 else np.mean(incorrect_kl_sum_list).item(),
+                    f"{prefix}avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
+                    f"{prefix}avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
+                    f"{prefix}avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(correct_ss_reward_mean_list).item(),
+                    f"{prefix}avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.mean(incorrect_ss_reward_mean_list).item(),
+                    f"{prefix}avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
+                    f"{prefix}avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
+                    f"{prefix}avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
+                    f"{prefix}avg_teacher_correct_alpha": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
+                    f"{prefix}avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
+                    f"{prefix}avg_student_correct_alpha": 0 if len(student_correct_ratio_clipped_0_1_list) == 0 else np.mean(student_correct_ratio_clipped_0_1_list).item(),
+                    f"{prefix}avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(student_incorrect_ratio_clipped_0_1_list).item(),
+                    }
+                )
 
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
