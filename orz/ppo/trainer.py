@@ -284,10 +284,6 @@ class RayPPOTrainer:
                     logger.info(f"checkpoint and previous teacher model: {chfp[0]['digest'] == tfp2[0]['digest']}")
                     logger.info(f"checkpoint and previous policy model: {chfp[0]['digest'] == sfp2[0]['digest']}")
                     logger.info(f"checkpoint and current policy model: {chfp[0]['digest'] == sfp3[0]['digest']}")
-                    # logger.info(f"sfp3[0] {sfp3[0]}")
-                    # logger.info(f"tfp3[0] {tfp3[0]}")
-                    # logger.info(f"chfp[0] {chfp[0]}")
-                    # logger.info(f"sfp[0] {sfp[0]}")
                 else:
                     sync_teacher_weigts = False
 
