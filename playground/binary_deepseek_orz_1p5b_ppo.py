@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-student-data-v0-{randint}'
+    e_name = f'ppo-student-data-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -100,7 +100,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = False
+    advantage_normalize: bool = True
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -132,9 +132,9 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True #False
-    remove_student_grpo_normalization: bool = True
-    remove_teacher_grpo_normalization: bool = True
+    use_grpo: bool = False #False
+    remove_student_grpo_normalization: bool = False
+    remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
     gpu_memory_utilization: float = 0.3
@@ -152,7 +152,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_toward_ref_model: bool = False
     ss_reward_coef: float = 0.3
 
-    use_topr: bool = True
+    use_topr: bool = False
     train_teacher: bool = False
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
