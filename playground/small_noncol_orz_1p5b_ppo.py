@@ -73,7 +73,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-tr10-st5-v0-{randint}'
+    e_name = f'topr-aug-data-separate-normalized-tr10-st5-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -103,8 +103,8 @@ class PPOExpConfig(BasePPOExpConfig):
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
-    update_ref_every_epoch: bool = True
-    advantage_normalize: bool = False
+    update_ref_every_epoch: bool = False
+    advantage_normalize: bool = True
 
     num_episodes: int = 5
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -138,7 +138,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # grpo related settings
     use_grpo: bool = True
-    remove_student_grpo_normalization: bool = True
+    remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
@@ -150,8 +150,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.02
     kl_mean_coef: float = 1
-    reward_kl_coef: float = 1
-    kl_reward_clamp: float = 7
+    reward_kl_coef: float = 0.1
+    kl_reward_clamp: float = 5
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = False

@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-tr10-v0-{randint}'
+    e_name = f'topr-aug-data-separate-tr50-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -138,7 +138,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.3
+    gpu_memory_utilization: float = 0.2
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -161,7 +161,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
 
     student_training_rounds: int = 100  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 50  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
