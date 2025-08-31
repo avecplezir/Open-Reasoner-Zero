@@ -70,7 +70,7 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time

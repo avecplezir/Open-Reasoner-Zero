@@ -180,6 +180,10 @@ class RayPPOTrainer:
                     train_teacher = True
                     train_student = True
 
+                if self.cfg.critic_pretrain and self.cfg.colocate_critic_policy and self.cfg.offload_critic_policy_colocation:
+                    await self.critic_model.offload_to_cpu()
+                    await self.critic_model.backload_to_gpu()
+
                 for replay_buffer, prefix in train_set:
                     logger.info(f"Start training {prefix} model, replay buffer size: {len(replay_buffer)}")
                     model = self.teacher_model if self.cfg.separate_teacher_model and prefix == "teacher" else self.policy_model
@@ -213,7 +217,16 @@ class RayPPOTrainer:
                             await model.backload_to_gpu()
                             status = await self.ppo_local_train_policy(model, policy_buffers, self.global_step, prefix)
                             await model.offload_to_cpu()
-
+                    elif self.cfg.critic_pretrain and self.cfg.colocate_critic_policy and self.cfg.offload_critic_policy_colocation:
+                        if self.critic_model is not None:
+                            async with Timer(f"Critic {prefix} model training"):
+                                await model.offload_to_cpu()
+                                await self.ppo_local_train_critic(critic_buffers, self.global_step, prefix)
+                                await model.backload_to_gpu()
+                        async with Timer(f"Actor {prefix} model training"):
+                            await self.critic_model.offload_to_cpu()
+                            status = await self.ppo_local_train_policy(model, policy_buffers, self.global_step, prefix)
+                            await self.critic_model.backload_to_gpu()
                     else:
                         if self.critic_model is not None:
                             async with Timer(f"Actor and Critic {prefix} model training"):
@@ -245,6 +258,10 @@ class RayPPOTrainer:
                 await self.policy_model.offload_to_cpu()
                 await self.policy_model.backload_to_gpu()
 
+                if self.critic_pretrain:
+                    await self.critic_model.offload_to_cpu()
+                    await self.critic_model.backload_to_gpu()
+
                 if self.cfg.separate_teacher_model:
                     logger.info(f"Global step {self.global_step}, student_training_step {self.student_training_step}, teacher_training_step {self.teacher_training_step}, sync teacher weigts {sync_teacher_weigts}")
                     sfp2 = await self.policy_model.async_run_method("_weight_fingerprint")
@@ -266,7 +283,7 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                if (self.student_training_step == self.cfg.student_training_rounds) and self.cfg.separate_teacher_model:
+                if self.cfg.separate_teacher_model and (self.student_training_step == self.cfg.student_training_rounds):
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
@@ -1206,9 +1223,15 @@ class RayPPOTrainer:
                 pg = placement_group(bundles, strategy="PACK")
                 ray.get(pg.ready())
                 if cfg.separate_teacher_model:
-                    num_gpus_per_actors = [0.4, 0.4, 0.2]
+                    if cfg.critic_pretrain:
+                        num_gpus_per_actors = [0.25]
+                    else:
+                        num_gpus_per_actors = [0.4, 0.2]
                 else:
-                    num_gpus_per_actors = [0.75, 0.25]
+                    if cfg.critic_pretrain:
+                        num_gpus_per_actors = [0.3]
+                    else:
+                        num_gpus_per_actors = [0.75, 0.25]
 
             policy_model = PPORayActorGroup(
                 cfg.actor_num_nodes,
@@ -1223,7 +1246,7 @@ class RayPPOTrainer:
                     cfg.actor_num_gpus_per_node,
                     PolicyRayActor,
                     pg=pg,
-                    num_gpus_per_actor=num_gpus_per_actors[1] if pg else 1,
+                    num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
                 )
             ref_model = PPORayActorGroup(
                 cfg.ref_num_nodes,
@@ -1235,47 +1258,57 @@ class RayPPOTrainer:
 
             # if colocated, create placement group for critic and reward model explicitly.
             if cfg.critic_pretrain:
-                pg = None
-                if cfg.colocate_critic_reward:
-                    assert (
-                        cfg.critic_num_nodes == cfg.reward_num_nodes
-                        and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
-                    ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
-
-                    bundles = [
-                        {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
-                        for _ in range(cfg.critic_num_nodes)
-                    ]
-                    pg = placement_group(bundles, strategy="PACK")
-                    ray.get(pg.ready())
-
-                if cfg.critic_pretrain:
+                if self.cfg.colocate_critic_policy:
                     critic_model = PPORayActorGroup(
                         cfg.critic_num_nodes,
                         cfg.critic_num_gpus_per_node,
                         CriticRayActor,
                         pg=pg,
-                        num_gpus_per_actor=0.75 if pg else 1,
+                        num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
                     )
-                else:
-                    critic_model = None
-
-                # multiple reward models
-                if RewardRayActor is not None and cfg.reward_pretrain:
-                    reward_pretrains = cfg.reward_pretrain.split(",")
-                    reward_models = []
-                    for _ in reward_pretrains:
-                        reward_models.append(
-                            PPORayActorGroup(
-                                cfg.reward_num_nodes,
-                                cfg.reward_num_gpus_per_node,
-                                RewardRayActor,
-                                pg=pg,
-                                num_gpus_per_actor=0.25 if pg else 1,
-                            )
-                        )
-                else:
                     reward_models = None
+                else:
+                    pg = None
+                    if cfg.colocate_critic_reward:
+                        assert (
+                            cfg.critic_num_nodes == cfg.reward_num_nodes
+                            and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
+                        ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
+
+                        bundles = [
+                            {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
+                            for _ in range(cfg.critic_num_nodes)
+                        ]
+                        pg = placement_group(bundles, strategy="PACK")
+                        ray.get(pg.ready())
+
+                    if cfg.critic_pretrain:
+                        critic_model = PPORayActorGroup(
+                            cfg.critic_num_nodes,
+                            cfg.critic_num_gpus_per_node,
+                            CriticRayActor,
+                            pg=pg,
+                            num_gpus_per_actor=0.75 if pg else 1,
+                        )
+                    else:
+                        critic_model = None
+
+                    # multiple reward models
+                    if RewardRayActor is not None and cfg.reward_pretrain:
+                        reward_pretrains = cfg.reward_pretrain.split(",")
+                        reward_models = []
+                        for _ in reward_pretrains:
+                            reward_models.append(
+                                PPORayActorGroup(
+                                    cfg.reward_num_nodes,
+                                    cfg.reward_num_gpus_per_node,
+                                    RewardRayActor,
+                                    pg=pg,
+                                    num_gpus_per_actor=0.25 if pg else 1,
+                                )
+                            )
+                    else:
+                        reward_models = None
             else:
                 reward_models = None
                 critic_model = None
