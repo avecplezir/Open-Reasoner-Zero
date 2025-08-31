@@ -449,14 +449,25 @@ class RayPPOTrainer:
             aug_all_student_prompts = []
             aug_all_extras = []
             logger.info(f"initial_teacher_scores {len(initial_teacher_scores)}, all_extras {len(all_extras)} all_student_prompts {len(all_student_prompts)}")
-            for i, (teacher_score, extra, student_prompt) in enumerate(zip(initial_teacher_scores, all_extras, all_student_prompts)):
+            for i, (teacher_score, student_score, extra, student_prompt) in enumerate(zip(initial_teacher_scores, initial_scores, all_extras, all_student_prompts)):
                 if teacher_score:
-                    if 'yes' in final_answer.lower():
-                        opposite_answer = 'no'
-                    elif 'no' in final_answer.lower():
-                        opposite_answer = 'yes'
+                    if self.cfg.augment_only_wrong:
+                        if not student_score:
+                            if 'yes' in final_answer.lower():
+                                opposite_answer = 'no'
+                            elif 'no' in final_answer.lower():
+                                opposite_answer = 'yes'
+                            else:
+                                assert False, f"final_answer {final_answer} must be yes or no"
+                        else:
+                            continue
                     else:
-                        assert False, f"final_answer {final_answer} must be yes or no"
+                        if 'yes' in final_answer.lower():
+                            opposite_answer = 'no'
+                        elif 'no' in final_answer.lower():
+                            opposite_answer = 'yes'
+                        else:
+                            assert False, f"final_answer {final_answer} must be yes or no"
 
                     teacher_prompt = create_teacher_prompt_from_answer(extra["dialogue"], opposite_answer, bos_token)
                     # logger.info(f"teacher_score {teacher_score}, final_answer {final_answer}, opposite_answer {opposite_answer}")

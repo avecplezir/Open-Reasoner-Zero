@@ -61,6 +61,8 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
+    colocate_critic_policy: bool = True
+    offload_critic_policy_colocation: bool = True
     vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
@@ -170,6 +172,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
+    augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
 
