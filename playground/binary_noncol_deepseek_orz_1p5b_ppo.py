@@ -62,7 +62,7 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
-    offload_critic_policy_colocation: bool = True
+    offload_critic_policy_colocation: bool = False
     vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False

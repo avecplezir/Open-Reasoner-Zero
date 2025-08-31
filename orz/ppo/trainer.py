@@ -258,7 +258,7 @@ class RayPPOTrainer:
                 await self.policy_model.offload_to_cpu()
                 await self.policy_model.backload_to_gpu()
 
-                if self.critic_pretrain:
+                if self.cfg.critic_pretrain:
                     await self.critic_model.offload_to_cpu()
                     await self.critic_model.backload_to_gpu()
 

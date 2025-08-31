@@ -416,8 +416,10 @@ class CustomRewardTrainer(RayPPOTrainer):
         @ray.remote(num_cpus=1)
         def extract_final_answers_batch(responses: List[str], tokenizer) -> List[dict]:
             # pattern = re.compile(r"(\\boxed{.*})")
-            # pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
-            pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
+            if self.cfg.boxed_pattern:
+                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            else:
+                pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             results = []
             for response in responses:
                 matches = re.findall(pattern, response)
@@ -554,8 +556,10 @@ class CustomRewardTrainer(RayPPOTrainer):
             outputs = sum(outputs, [])
 
             final_answers = []
-            # pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
-            pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
+            if self.cfg.boxed_pattern:
+                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+            else:
+                pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             for output in outputs:
                 matches = re.findall(pattern, output.outputs[0].text)
                 if len(matches) > 0:
