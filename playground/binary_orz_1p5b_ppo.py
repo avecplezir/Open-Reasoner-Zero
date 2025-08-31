@@ -102,14 +102,14 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = True
-    advantage_normalize: bool = False
+    advantage_normalize: bool = True
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
-    max_epochs: int = 2
+    max_epochs: int = 1
     policy_update_steps: int = 1
     critic_update_steps: int = 12 if not DEBUG_MODE else 1
     micro_train_batch_size: int = 1
@@ -135,8 +135,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # grpo related settings
     use_grpo: bool = True #False
-    remove_student_grpo_normalization: bool = True
-    remove_teacher_grpo_normalization: bool = True
+    remove_student_grpo_normalization: bool = False
+    remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
     gpu_memory_utilization: float = 0.3
