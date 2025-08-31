@@ -5,11 +5,18 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 
-PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
+# PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
+# This is the problem:
+# {{prompt}}
+# """
+
+PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED = """\
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'yes' or 'no', your final answer must be '\\boxed{yes}' or '\\boxed{no}'.
 This is the problem:
 {{prompt}}
 """
+PROMPT_INSTRUCTION_TEMPLATE_JNJA = PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED
 
 TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
 {{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs the reasoning process in the mind that leads to this asnwer, and then recstate the User's final answer. \
@@ -22,6 +29,17 @@ STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
 The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
 Assistant: <think>\
 """
+
+# prompt_template_jinja = """\
+# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
+# The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
+# Assistant: <think>\
+# """
+#         prompt_instruction_template_jinja = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
+# This is the problem:
+# {{prompt}}
+# """
 
 def create_teacher_prompt_from_answer(dialogue: List, answer: str = "", bos_token: str = ""):
     """Create teacher prompt with student answer."""

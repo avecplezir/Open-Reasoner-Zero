@@ -48,22 +48,28 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
+    actor_num = 2
     # resource related settings
-    ref_num_nodes: int = total_num_nodes
+    ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = total_num_nodes
+    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = total_num_nodes
+    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
-    colocate_all: bool = True
+    reward_num_nodes: int = actor_num
+    reward_num_gpus_per_node: int = 1
+    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
-    vllm_num_engines: int = total_num_nodes
+    colocate_critic_policy: bool = True
+    offload_critic_policy_colocation: bool = True
+    vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
     zero_stage: int = 3
+    vllm_sync_backend: str = "gloo"  # nccl or gloo
 
-    boxed_pattern: bool = True
+    boxed_pattern: bool = False
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
@@ -71,7 +77,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-student-data-normalized-nomix-v0-{randint}'
+    e_name = f'ppo-student-data-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -101,7 +107,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
-    update_ref_every_epoch: bool = True
+    update_ref_every_epoch: bool = False
     advantage_normalize: bool = True
 
     num_episodes: int = 20
@@ -134,12 +140,12 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True #False
+    use_grpo: bool = False #False
     remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.3
+    gpu_memory_utilization: float = 0.9
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0

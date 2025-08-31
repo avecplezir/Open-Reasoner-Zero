@@ -63,6 +63,8 @@ class PPOExpConfig(BasePPOExpConfig):
     adam_offload: bool = False
     zero_stage: int = 3
 
+    boxed_pattern: bool = True
+
     # path related settings
     pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None

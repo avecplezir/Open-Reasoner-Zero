@@ -413,13 +413,14 @@ class CustomRewardTrainer(RayPPOTrainer):
             prompts=prompts, sampling_params=sampling_params, use_tqdm=False, truncate_prompt=True
         )
 
+        # pattern = re.compile(r"(\\boxed{.*})")
+        if self.cfg.boxed_pattern:
+            pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+        else:
+            pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
+
         @ray.remote(num_cpus=1)
         def extract_final_answers_batch(responses: List[str], tokenizer) -> List[dict]:
-            # pattern = re.compile(r"(\\boxed{.*})")
-            if self.cfg.boxed_pattern:
-                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
-            else:
-                pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
             results = []
             for response in responses:
                 matches = re.findall(pattern, response)
