@@ -62,7 +62,7 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
-    offload_critic_policy_colocation: bool = True
+    offload_critic_policy_colocation: bool = False
     vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
@@ -72,12 +72,12 @@ class PPOExpConfig(BasePPOExpConfig):
     boxed_pattern: bool = True
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'ppo-student-data-v0-boxed-{randint}'
+    e_name = f'ppo-student-data-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -140,7 +140,7 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = False #False
+    use_grpo: bool = True #False
     remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
@@ -151,29 +151,29 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.02
+    kl_max_coef: float = 0.01
     kl_mean_coef: float = 1
     reward_kl_coef: float = 1
     kl_reward_clamp: float = 7
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.3
+    ss_reward_coef: float = 0.33
 
     use_topr: bool = False
-    train_teacher: bool = False
+    train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
     student_teacher_order: bool = False
-    student_training_rounds: int = 300  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_teacher: bool = False
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
+    augment_student_generation_with_teacher: bool = True
+    augment_only_wrong: bool = True
 
     separate_teacher_model: bool = False
 
