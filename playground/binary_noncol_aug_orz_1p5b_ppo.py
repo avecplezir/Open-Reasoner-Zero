@@ -69,7 +69,7 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
-    boxed_pattern: bool = True
+    boxed_pattern: bool = False
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!

@@ -5,18 +5,18 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 
-# PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
-# This is the problem:
-# {{prompt}}
-# """
-
-PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'yes' or 'no', your final answer must be '\\boxed{yes}' or '\\boxed{no}'.
+PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
 This is the problem:
 {{prompt}}
 """
-PROMPT_INSTRUCTION_TEMPLATE_JNJA = PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED
+
+# PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'yes' or 'no', your final answer must be '\\boxed{yes}' or '\\boxed{no}'.
+# This is the problem:
+# {{prompt}}
+# """
+# PROMPT_INSTRUCTION_TEMPLATE_JNJA = PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED
 
 TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
 {{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs the reasoning process in the mind that leads to this asnwer, and then recstate the User's final answer. \

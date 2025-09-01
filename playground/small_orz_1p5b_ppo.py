@@ -160,12 +160,13 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 50  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
+    augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
 
