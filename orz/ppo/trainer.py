@@ -283,7 +283,7 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                if self.cfg.separate_teacher_model and (self.student_training_step == self.cfg.student_training_rounds):
+                if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
@@ -427,6 +427,41 @@ class RayPPOTrainer:
 
             teacher_generated.extend([False] * len(all_student_prompts))
 
+            # Log a few examples to wandb right after student generation
+            if wandb.run is not None and len(all_student_prompts) > 0:
+                n = min(5, len(all_student_prompts))
+                table_data = []
+                for i in range(n):
+                    student_prompt_i = all_student_prompts[i]
+                    teacher_prompt_i = all_teacher_prompts[i]
+                    output_i = outputs[i]
+                    final_answer_i = final_answers[i]
+                    # initial_scores/initial_teacher_scores may be numpy arrays or tensors
+                    student_correct_i = initial_scores[i]
+                    teacher_correct_i = initial_teacher_scores[i]
+                    table_data.append([
+                        student_prompt_i,
+                        teacher_prompt_i,
+                        output_i,
+                        final_answer_i,
+                        student_correct_i,
+                        teacher_correct_i,
+                    ])
+                wandb.log({
+                    "step": self.global_step,
+                    "student_generation_examples": wandb.Table(
+                        columns=[
+                            "student_prompt",
+                            "teacher_prompt",
+                            "output",
+                            "final_answer",
+                            "student_correct",
+                            "teacher_correct",
+                        ],
+                        data=table_data,
+                    ),
+                })
+
             combined_all_student_prompts.extend(all_student_prompts)
             combined_all_teacher_prompts.extend(all_teacher_prompts)
             combined_outputs.extend(outputs)
@@ -448,10 +483,10 @@ class RayPPOTrainer:
             all_teacher_prompts = []
             aug_all_student_prompts = []
             aug_all_extras = []
-            logger.info(f"initial_teacher_scores {len(initial_teacher_scores)}, all_extras {len(all_extras)} all_student_prompts {len(all_student_prompts)}, final_answers {len(final_answers)}")
+            # logger.info(f"initial_teacher_scores {len(initial_teacher_scores)}, all_extras {len(all_extras)} all_student_prompts {len(all_student_prompts)}, final_answers {len(final_answers)}")
             for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)):
                 if teacher_score:
-                    logger.info(f"teacher_score {teacher_score}, teacher_yes {teacher_yes[i]}, teacher_no {teacher_no[i]}, student_score {student_score}, final_answer {final_answer}")
+                    # logger.info(f"teacher_score {teacher_score}, teacher_yes {teacher_yes[i]}, teacher_no {teacher_no[i]}, student_score {student_score}, final_answer {final_answer}")
                     if self.cfg.augment_only_wrong:
                         if not student_score:
                             if teacher_yes[i]:
@@ -524,6 +559,40 @@ class RayPPOTrainer:
                         all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
+
+            # Log corresponding teacher generation examples to wandb
+            if wandb.run is not None and len(all_teacher_prompts) > 0:
+                n = min(5, len(all_teacher_prompts))
+                table_data = []
+                for i in range(n):
+                    student_prompt_i = all_student_prompts[i]
+                    teacher_prompt_i = all_teacher_prompts[i]
+                    output_i = outputs[i]
+                    final_answer_i = final_answers[i]
+                    student_correct_i = initial_scores[i]
+                    teacher_correct_i = initial_teacher_scores[i]
+                    table_data.append([
+                        student_prompt_i,
+                        teacher_prompt_i,
+                        output_i,
+                        final_answer_i,
+                        student_correct_i,
+                        teacher_correct_i,
+                    ])
+                wandb.log({
+                    "step": self.global_step,
+                    "teacher_generation_examples": wandb.Table(
+                        columns=[
+                            "student_prompt",
+                            "teacher_prompt",
+                            "output",
+                            "final_answer",
+                            "student_correct",
+                            "teacher_correct",
+                        ],
+                        data=table_data,
+                    ),
+                })
 
             teacher_generated.extend([True] * len(all_student_prompts))
 
@@ -832,34 +901,34 @@ class RayPPOTrainer:
                     logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
 
         # 2 vis student and teacher to wandb and writer
-        for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
-            vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
-            self.writer.add_text(f"{prefix}_sequences", vis, self.global_step)
-
-            if wandb.run is not None:
-                data = []
-                # Log up to 5 examples from different experiences
-                for i in range(min(5, len(experiences))):
-                    if len(experiences[i].sequences) > 0:
-                        vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
-
-                        # Extract student prompt and reasoning parts
-                        if "Assistant: <think>" in vis_example:
-                            prompt_part = vis_example.split("Assistant: <think>")[0]
-                            reasoning_part = vis_example.split("Assistant: <think>")[1]
-                        else:
-                            prompt_part = vis_example
-                            reasoning_part = ""
-
-                        data.append([prompt_part, reasoning_part])
-
-                if data:
-                    wandb.log({
-                        "step": self.global_step,
-                        f"{prefix}_examples": wandb.Table(
-                            columns=["prompt", "reasoning"],
-                            data=data)
-                    })
+        # for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
+        #     vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
+        #     self.writer.add_text(f"{prefix}_sequences", vis, self.global_step)
+        #
+        #     if wandb.run is not None:
+        #         data = []
+        #         # Log up to 5 examples from different experiences
+        #         for i in range(min(5, len(experiences))):
+        #             if len(experiences[i].sequences) > 0:
+        #                 vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
+        #
+        #                 # Extract student prompt and reasoning parts
+        #                 if "Assistant: <think>" in vis_example:
+        #                     prompt_part = vis_example.split("Assistant: <think>")[0]
+        #                     reasoning_part = vis_example.split("Assistant: <think>")[1]
+        #                 else:
+        #                     prompt_part = vis_example
+        #                     reasoning_part = ""
+        #
+        #                 data.append([prompt_part, reasoning_part])
+        #
+        #         if data:
+        #             wandb.log({
+        #                 "step": self.global_step,
+        #                 f"{prefix}_examples": wandb.Table(
+        #                     columns=["prompt", "reasoning"],
+        #                     data=data)
+        #             })
 
         self.writer.flush()
 

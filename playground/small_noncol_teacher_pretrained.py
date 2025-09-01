@@ -172,10 +172,11 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = True
+    augment_only_wrong: bool = False
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = "" if separate_teacher_model else pretrain  # TODO: or put your downloaded model path here!
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
+    sync_teacher_weights: bool = False
 
 
 if __name__ == "__main__":
