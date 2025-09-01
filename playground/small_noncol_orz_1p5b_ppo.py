@@ -172,9 +172,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
+    augment_only_wrong: bool = True
 
-    separate_teacher_model: bool = True
+    separate_teacher_model: bool = False
 
 
 if __name__ == "__main__":

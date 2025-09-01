@@ -398,11 +398,11 @@ class RayPPOTrainer:
                     dp_tasks = []
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
-                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(
+                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no = await reward_fn(
                         all_student_prompts, outputs, all_extras)
                     assert len(all_student_prompts) == len(outputs), "generate objects number after custom reward function must be equal to all inputs number"
             else:
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = all_student_prompts, outputs, None, None, None, None, None, None
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no = all_student_prompts, outputs, None, None, None, None, None, None, None, None
 
             # create teacher prompts from student prompts
             if self.tokenizer.bos_token_id is None:
@@ -451,21 +451,21 @@ class RayPPOTrainer:
             logger.info(f"initial_teacher_scores {len(initial_teacher_scores)}, all_extras {len(all_extras)} all_student_prompts {len(all_student_prompts)}, final_answers {len(final_answers)}")
             for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)):
                 if teacher_score:
-                    logger.info(f"teacher_score {teacher_score}, student_score {student_score}, final_answer {final_answer}")
+                    logger.info(f"teacher_score {teacher_score}, teacher_yes {teacher_yes[i]}, teacher_no {teacher_no[i]}, student_score {student_score}, final_answer {final_answer}")
                     if self.cfg.augment_only_wrong:
                         if not student_score:
-                            if 'yes' in final_answer.lower():
+                            if teacher_yes[i]:
                                 opposite_answer = '\\boxed{no}' if self.cfg.boxed_pattern else 'no'
-                            elif 'no' in final_answer.lower():
+                            elif teacher_no[i]:
                                 opposite_answer = '\\boxed{yes}' if self.cfg.boxed_pattern else 'yes'
                             else:
                                 assert False, f"final_answer {final_answer} must be yes or no"
                         else:
                             continue
                     else:
-                        if 'yes' in final_answer.lower():
+                        if teacher_yes[i]:
                             opposite_answer = '\\boxed{no}' if self.cfg.boxed_pattern else 'no'
-                        elif 'no' in final_answer.lower():
+                        elif teacher_no[i]:
                             opposite_answer = '\\boxed{yes}' if self.cfg.boxed_pattern else 'yes'
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"

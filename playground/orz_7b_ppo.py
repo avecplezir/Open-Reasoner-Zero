@@ -366,6 +366,8 @@ class CustomRewardTrainer(RayPPOTrainer):
         res_teacher_score_tensors = []
         res_indices = []
         final_answers = []
+        teacher_yes = []
+        teacher_no = []
         for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
             response = response if len(response) > 0 else "<empty response>"
             res_prompts.append(prompt)
@@ -377,8 +379,12 @@ class CustomRewardTrainer(RayPPOTrainer):
             end_idx = output.get('answer_end_idx', None)
             res_indices.append((begin_idx, end_idx))
             final_answers.append(output.get('final_answer', ''))
+            teacher_yes.append(output['teacher_yes'])
+            teacher_no.append(output['teacher_no'])
 
-        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors, res_indices, initial_scores, initial_teacher_scores, final_answers
+
+        return (res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors,
+                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no)
 
     @override
     @torch.no_grad()
@@ -488,22 +494,27 @@ class CustomRewardTrainer(RayPPOTrainer):
                 equal_teacher_tasks_no.append(is_equal(solution2answer('no'), solution2answer(final_answer_item['final_answer']), executor))
             equal_teacher_results_no = await asyncio.gather(*equal_teacher_tasks_no)
             equal_teacher_results = [bool(y+n) for y, n in zip(equal_teacher_results_yes, equal_teacher_results_no)]
-            # logger.info(f'equal_teacher_results {equal_teacher_results}')
-        else:
-            equal_teacher_tasks = []
-            for extra, final_answer_item in zip(extras, final_answer_items):
-                equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
-            equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
+        # else:
+        #     equal_teacher_tasks = []
+        #     for extra, final_answer_item in zip(extras, final_answer_items):
+        #         equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
+        #     equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
+        #     # put smt here, won't be used
+        #     equal_teacher_results_yes = [False] * len(equal_teacher_results)
+        #     equal_teacher_results_no = [False] * len(equal_teacher_results)
 
         results = []
-        for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect in zip(
-            extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results
+        for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(
+            extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results,
+            equal_teacher_results_yes, equal_teacher_results_no,
         ):
             results.append(
                 dict(
                     response=response,
                     iscorrect=iscorrect,
                     teacher_iscorrect=teacher_iscorrect,
+                    teacher_yes=teacher_yes,
+                    teacher_no=teacher_no,
                     stop_reason=stop_reason,
                     final_answer=final_answer_item['final_answer'],
                     answer_begin_idx=final_answer_item['answer_begin_idx'],
