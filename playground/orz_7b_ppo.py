@@ -303,13 +303,6 @@ class CustomRewardTrainer(RayPPOTrainer):
                     # transform scores to -1, 1 if student_grpo_normalization is removed
                     scores[i] = 2 * (scores[i] - 0.5)
 
-            # grpo teacher reward normalization
-            # if not self.cfg.grpo_normalize_only_at_trainer and not self.cfg.remove_teacher_grpo_normalization:
-            #     for i, prompt in enumerate(prompts):
-            #         teacher_scores[i] -= np.mean(teacher_pass_at_n_dict[prompt])
-            #         if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-            #             teacher_scores[i] /= teacher_std
-
             if self.cfg.use_minus_plus_one_teacher_reward:
                 for i, prompt in enumerate(prompts):
                     teacher_scores[i] = 2 * (teacher_scores[i] - 0.5)
