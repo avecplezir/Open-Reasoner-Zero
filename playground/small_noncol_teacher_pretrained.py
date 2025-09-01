@@ -144,7 +144,7 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.9
+    gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
@@ -175,7 +175,9 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
+    # teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
+    teacher_pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    # teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 
 

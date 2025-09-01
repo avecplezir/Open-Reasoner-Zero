@@ -311,9 +311,11 @@ class RayPPOTrainer:
                         await self._backload_vllm_engines()
 
             if self.cfg.update_ref_every_epoch:
-                await self.policy_model.backload_to_gpu()
+                if self.cfg.colocate_all:
+                    await self.policy_model.backload_to_gpu()
                 await self.policy_model.async_save_model(self.tokenizer, self.global_step)
-                await self.policy_model.offload_to_cpu()
+                if self.cfg.colocate_all:
+                    await self.policy_model.offload_to_cpu()
                 await asyncio.gather(
                     *self.ref_model.async_init_model_from_pretrained(
                         self.strategy, os.path.join(self.cfg.save_path, f"iter{self.global_step}", "policy")
@@ -411,9 +413,10 @@ class RayPPOTrainer:
                 bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
 
             all_teacher_prompts = []
-            for all_extra, final_answer, score in zip(all_extras, final_answers, initial_teacher_scores):
+            indices_incorrect = []
+            for i, (all_extra, final_answer, student_score, teacher_score) in enumerate(zip(all_extras, final_answers, initial_scores, initial_teacher_scores)):
 
-                if score:
+                if teacher_score:
                     teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
                 else:
                     if random.random() > 0.5:
@@ -422,6 +425,9 @@ class RayPPOTrainer:
                         teacher_prompt = all_extra["teacher_prompt_no"]
 
                 all_teacher_prompts.append(teacher_prompt)
+
+                if not student_score:
+                    indices_incorrect.append(i)
 
             assert len(all_student_prompts) == len(all_teacher_prompts), "student and teacher prompts must be equal in length"
 
@@ -432,20 +438,24 @@ class RayPPOTrainer:
                 n = min(5, len(all_student_prompts))
                 table_data = []
                 for i in range(n):
-                    student_prompt_i = all_student_prompts[i]
-                    teacher_prompt_i = all_teacher_prompts[i]
-                    output_i = outputs[i]
-                    final_answer_i = final_answers[i]
-                    # initial_scores/initial_teacher_scores may be numpy arrays or tensors
-                    student_correct_i = initial_scores[i]
-                    teacher_correct_i = initial_teacher_scores[i]
                     table_data.append([
-                        student_prompt_i,
-                        teacher_prompt_i,
-                        output_i,
-                        final_answer_i,
-                        student_correct_i,
-                        teacher_correct_i,
+                        all_student_prompts[i],
+                        all_teacher_prompts[i],
+                        outputs[i],
+                        final_answers[i],
+                        bool(initial_scores[i]),
+                        bool(initial_teacher_scores[i]),
+                    ])
+                n = min(5, len(indices_incorrect))
+                for i in range(n):
+                    idx = indices_incorrect[i]
+                    table_data.append([
+                        all_student_prompts[idx],
+                        all_teacher_prompts[idx],
+                        outputs[idx],
+                        final_answers[idx],
+                        bool(initial_scores[idx]),
+                        bool(initial_teacher_scores[idx]),
                     ])
                 wandb.log({
                     "step": self.global_step,
@@ -565,20 +575,26 @@ class RayPPOTrainer:
                 n = min(5, len(all_teacher_prompts))
                 table_data = []
                 for i in range(n):
-                    student_prompt_i = all_student_prompts[i]
-                    teacher_prompt_i = all_teacher_prompts[i]
-                    output_i = outputs[i]
-                    final_answer_i = final_answers[i]
-                    student_correct_i = initial_scores[i]
-                    teacher_correct_i = initial_teacher_scores[i]
                     table_data.append([
-                        student_prompt_i,
-                        teacher_prompt_i,
-                        output_i,
-                        final_answer_i,
-                        student_correct_i,
-                        teacher_correct_i,
+                        all_student_prompts[i],
+                        all_teacher_prompts[i],
+                        outputs[i],
+                        final_answers[i],
+                        bool(initial_scores[i]),
+                        bool(initial_teacher_scores[i]),
                     ])
+                if not self.cfg.augment_only_wrong:
+                    n = min(5, len(indices_incorrect))
+                    for i in range(n):
+                        idx = indices_incorrect[i]
+                        table_data.append([
+                            all_student_prompts[idx],
+                            all_teacher_prompts[idx],
+                            outputs[idx],
+                            final_answers[idx],
+                            bool(initial_scores[idx]),
+                            bool(initial_teacher_scores[idx]),
+                        ])
                 wandb.log({
                     "step": self.global_step,
                     "teacher_generation_examples": wandb.Table(
@@ -900,35 +916,6 @@ class RayPPOTrainer:
                     self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
                     logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}")
 
-        # 2 vis student and teacher to wandb and writer
-        # for experiences, prefix in zip([teacher_experiences, student_experiences], ["teacher", "student"]):
-        #     vis = self._detokenize(experiences[0].sequences[0][: int(experiences[0].info["total_length"].flatten()[0])])
-        #     self.writer.add_text(f"{prefix}_sequences", vis, self.global_step)
-        #
-        #     if wandb.run is not None:
-        #         data = []
-        #         # Log up to 5 examples from different experiences
-        #         for i in range(min(5, len(experiences))):
-        #             if len(experiences[i].sequences) > 0:
-        #                 vis_example = self._detokenize(experiences[i].sequences[0][: int(experiences[i].info["total_length"].flatten()[0])])
-        #
-        #                 # Extract student prompt and reasoning parts
-        #                 if "Assistant: <think>" in vis_example:
-        #                     prompt_part = vis_example.split("Assistant: <think>")[0]
-        #                     reasoning_part = vis_example.split("Assistant: <think>")[1]
-        #                 else:
-        #                     prompt_part = vis_example
-        #                     reasoning_part = ""
-        #
-        #                 data.append([prompt_part, reasoning_part])
-        #
-        #         if data:
-        #             wandb.log({
-        #                 "step": self.global_step,
-        #                 f"{prefix}_examples": wandb.Table(
-        #                     columns=["prompt", "reasoning"],
-        #                     data=data)
-        #             })
 
         self.writer.flush()
 
