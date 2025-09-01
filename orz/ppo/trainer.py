@@ -518,7 +518,7 @@ class RayPPOTrainer:
                     dp_tasks = []
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
-                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers = await reward_fn(
+                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, _, _ = await reward_fn(
                         all_student_prompts, outputs, all_extras)
                     assert len(all_student_prompts) == len(outputs) == len(
                         all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
@@ -1330,7 +1330,7 @@ class RayPPOTrainer:
             refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             refs.extend(policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             if cfg.separate_teacher_model:
-                refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+                refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))
             if cfg.critic_pretrain:
                 refs.extend(critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))
             if cfg.reward_pretrain:
@@ -1346,7 +1346,7 @@ class RayPPOTrainer:
             await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
             await policy_model.offload_to_cpu()
             if cfg.separate_teacher_model:
-                await asyncio.gather(*teacher_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+                await asyncio.gather(*teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))
                 await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
                 await teacher_model.offload_to_cpu()
             if cfg.critic_pretrain:

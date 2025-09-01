@@ -494,20 +494,18 @@ class CustomRewardTrainer(RayPPOTrainer):
                 equal_teacher_tasks_no.append(is_equal(solution2answer('no'), solution2answer(final_answer_item['final_answer']), executor))
             equal_teacher_results_no = await asyncio.gather(*equal_teacher_tasks_no)
             equal_teacher_results = [bool(y+n) for y, n in zip(equal_teacher_results_yes, equal_teacher_results_no)]
-        # else:
-        #     equal_teacher_tasks = []
-        #     for extra, final_answer_item in zip(extras, final_answer_items):
-        #         equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
-        #     equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
-        #     # put smt here, won't be used
-        #     equal_teacher_results_yes = [False] * len(equal_teacher_results)
-        #     equal_teacher_results_no = [False] * len(equal_teacher_results)
+        else:
+            equal_teacher_tasks = []
+            for extra, final_answer_item in zip(extras, final_answer_items):
+                equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
+            equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
+            # put smt here, won't be used
+            equal_teacher_results_yes = [False] * len(equal_teacher_results)
+            equal_teacher_results_no = [False] * len(equal_teacher_results)
 
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(
-            extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results,
-            equal_teacher_results_yes, equal_teacher_results_no,
-        ):
+            extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results, equal_teacher_results_yes, equal_teacher_results_no):
             results.append(
                 dict(
                     response=response,
