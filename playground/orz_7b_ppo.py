@@ -503,6 +503,24 @@ class CustomRewardTrainer(RayPPOTrainer):
             equal_teacher_results_yes = [False] * len(equal_teacher_results)
             equal_teacher_results_no = [False] * len(equal_teacher_results)
 
+        if extras[0].get("teacher_answer", None) is not None:
+            for i in range(len(equal_teacher_results)):
+                # Sanity check: ensure prompt-embedded answer matches extras[i]['teacher_answer']
+                try:
+                    m = re.search(r"The final answer is\s+(.*?)\.", prompts[i])
+                    if m:
+                        declared = m.group(1).strip()
+                        # Normalize boxed variants
+                        declared = solution2answer(declared)
+                        declared = declared.strip()
+                        teacher_ans_norm = solution2answer(extras[i].get('teacher_answer', '')).strip()
+                        if declared != teacher_ans_norm:
+                            logger.warning(
+                                f"Prompt/extras mismatch at index {i}: prompt_declared={declared}, teacher_answer={teacher_ans_norm}"
+                            )
+                except Exception:
+                    pass
+
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(
             extras, responses, final_answer_items, stop_reasons, equal_results, equal_teacher_results, equal_teacher_results_yes, equal_teacher_results_no):

@@ -151,15 +151,15 @@ class PPOExpConfig(BasePPOExpConfig):
     lambd: float = 1.0
 
     kl_max_coef: float = 0.01
-    kl_mean_coef: float = 0
+    kl_mean_coef: float = 0.1
     reward_kl_coef: float = 0.1
     kl_reward_clamp: float = 5
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 1.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.
+    ss_reward_coef: float = 0.1
 
-    use_topr: bool = True
+    use_topr: bool = False
     train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
@@ -167,7 +167,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
 
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
@@ -175,8 +175,8 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
-    # teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
-    teacher_pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
+    # teacher_pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     # teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 

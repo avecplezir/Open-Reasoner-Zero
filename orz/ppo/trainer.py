@@ -493,25 +493,29 @@ class RayPPOTrainer:
             all_teacher_prompts = []
             aug_all_student_prompts = []
             aug_all_extras = []
+            indices_incorrect = []
             # logger.info(f"initial_teacher_scores {len(initial_teacher_scores)}, all_extras {len(all_extras)} all_student_prompts {len(all_student_prompts)}, final_answers {len(final_answers)}")
             for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)):
                 if teacher_score:
+                    if not student_score:
+                        indices_incorrect.append(i)
+
                     # logger.info(f"teacher_score {teacher_score}, teacher_yes {teacher_yes[i]}, teacher_no {teacher_no[i]}, student_score {student_score}, final_answer {final_answer}")
                     if self.cfg.augment_only_wrong:
                         if not student_score:
                             if teacher_yes[i]:
-                                opposite_answer = '\\boxed{no}' if self.cfg.boxed_pattern else 'no'
+                                opposite_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                             elif teacher_no[i]:
-                                opposite_answer = '\\boxed{yes}' if self.cfg.boxed_pattern else 'yes'
+                                opposite_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
                             else:
                                 assert False, f"final_answer {final_answer} must be yes or no"
                         else:
                             continue
                     else:
                         if teacher_yes[i]:
-                            opposite_answer = '\\boxed{no}' if self.cfg.boxed_pattern else 'no'
+                            opposite_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                         elif teacher_no[i]:
-                            opposite_answer = '\\boxed{yes}' if self.cfg.boxed_pattern else 'yes'
+                            opposite_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
 
