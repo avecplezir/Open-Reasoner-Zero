@@ -311,7 +311,7 @@ class RayPPOTrainer:
                     async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
                         await self._backload_vllm_engines()
 
-            if self.cfg.update_ref_every_epoch:
+            if self.cfg.update_ref_every_epoch and self.cfg.use_ref_model:
                 if self.cfg.colocate_all:
                     await self.policy_model.backload_to_gpu()
                 await self.policy_model.async_save_model(self.tokenizer, self.global_step)
@@ -1044,10 +1044,11 @@ class RayPPOTrainer:
                 await self.critic_model.offload_to_cpu()
 
         # calculate ref log probs
-        base_action_log_probs_ref = micro_infer_model(
-            num_ref_dp_groups, "ref_model", sequences_all, num_actions_all, attention_mask_all, packed_seq_lens_all
-        )
-        base_log_probs = None
+        if self.cfg.use_ref_model:
+            base_action_log_probs_ref = micro_infer_model(
+                num_ref_dp_groups, "ref_model", sequences_all, num_actions_all, attention_mask_all, packed_seq_lens_all
+            )
+            base_log_probs = None
 
         # handle colocate critic and reward model
         if self.cfg.colocate_critic_reward and not self.cfg.colocate_all and self.critic_model is not None:
@@ -1055,7 +1056,7 @@ class RayPPOTrainer:
             await self.critic_model.async_run_method("empty_cache")
 
         # handle colocate actor and ref model
-        if self.cfg.colocate_actor_ref or self.cfg.colocate_all:
+        if self.cfg.colocate_actor_ref or self.cfg.colocate_all and self.cfg.use_ref_model:
             base_log_probs = await base_action_log_probs_ref
             await self.ref_model.async_run_method("empty_cache")
 
@@ -1121,12 +1122,16 @@ class RayPPOTrainer:
                     results = await asyncio.gather(action_log_probs_ref, *reward_refs)
                     action_log_probs, rewards = results[0], results[1:]
 
+        if not self.cfg.use_ref_model:
+            base_log_probs = action_log_probs
+
         r = torch.stack(rewards).sum(dim=0) if len(rewards) > 0 else None
         if not self.cfg.colocate_all:
             empty_cache_tasks = [
                 self.policy_model.async_run_method("empty_cache") if not use_teacher_model else self.teacher_model.async_run_method("empty_cache"),
-                self.ref_model.async_run_method("empty_cache"),
             ]
+            if self.cfg.use_ref_model:
+                empty_cache_tasks.append(self.ref_model.async_run_method("empty_cache"))
             if self.critic_model:
                 empty_cache_tasks.append(self.critic_model.async_run_method("empty_cache"))
             if self.reward_model:
@@ -1250,13 +1255,17 @@ class RayPPOTrainer:
                     pg=pg,
                     num_gpus_per_actor=0.1,
                 )
-            ref_model = PPORayActorGroup(
-                cfg.ref_num_nodes,
-                cfg.ref_num_gpus_per_node,
-                RefRayActor,
-                pg=pg,
-                num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
-            )
+            if self.cfg.use_ref_model:
+                ref_model = PPORayActorGroup(
+                    cfg.ref_num_nodes,
+                    cfg.ref_num_gpus_per_node,
+                    RefRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
+                )
+            else:
+                ref_model = None
+
             if cfg.critic_pretrain:
                 critic_model = PPORayActorGroup(
                     cfg.critic_num_nodes,
@@ -1324,13 +1333,16 @@ class RayPPOTrainer:
                     pg=pg,
                     num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
                 )
-            ref_model = PPORayActorGroup(
-                cfg.ref_num_nodes,
-                cfg.ref_num_gpus_per_node,
-                RefRayActor,
-                pg=pg,
-                num_gpus_per_actor=num_gpus_per_actors[-1] if pg else 1,
-            )
+            if cfg.use_ref_model:
+                ref_model = PPORayActorGroup(
+                    cfg.ref_num_nodes,
+                    cfg.ref_num_gpus_per_node,
+                    RefRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=num_gpus_per_actors[-1] if pg else 1,
+                )
+            else:
+                ref_model = None
 
             # if colocated, create placement group for critic and reward model explicitly.
             if cfg.critic_pretrain:
@@ -1391,7 +1403,8 @@ class RayPPOTrainer:
 
         if not cfg.colocate_all:
             refs = []
-            refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            if ref_model is not None:
+                refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             refs.extend(policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             if cfg.separate_teacher_model:
                 refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))

@@ -169,6 +169,9 @@ class DeepspeedStrategy(ABC):
         name="model",
         **kwargs,
     ) -> None:
+        # torch.empty_cache()
+        # torch.cuda.empty_cache()
+        # torch.distributed.barrier()
         if isinstance(model, Actor):
             model = model.model
         model.step()

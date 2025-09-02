@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 2
+    actor_num = 3
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -62,7 +62,7 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
-    offload_critic_policy_colocation: bool = False
+    offload_critic_policy_colocation: bool = True
     vllm_num_engines: int = total_num_nodes - actor_num
     vllm_tensor_parallel_size: int = 1
     adam_offload: bool = False
@@ -72,12 +72,12 @@ class PPOExpConfig(BasePPOExpConfig):
     boxed_pattern: bool = False
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-7B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'ppo-student-data-v0-{randint}'
+    e_name = f'7B-student-data-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -124,8 +124,9 @@ class PPOExpConfig(BasePPOExpConfig):
     init_kl_coef: float = 0
     # 更换KL loss + k3
     kl_loss_coef: float = 0.0
-    use_kl_loss: bool = True
+    use_kl_loss: bool = False
     use_kl_estimator_k3: bool = True
+    use_ref_model: bool = False
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
@@ -141,12 +142,12 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = False #False
+    use_grpo: bool = True
     remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.9
+    gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
