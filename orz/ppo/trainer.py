@@ -283,8 +283,8 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                # if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
-                if self.global_step == 1:
+                if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
+                # if self.global_step == 1:
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
@@ -382,7 +382,7 @@ class RayPPOTrainer:
                     if len(dp_student_inputs) <= 0:
                         continue
                     gen_func = self._get_generate_function(dp_rank)
-                    dp_tasks.append(self.generate_vllm(gen_func, dp_student_inputs, extras=dp_extras, **generate_kwargs))
+                    dp_tasks.append(self.generate_vllm(gen_func, dp_student_inputs, extras=dp_extras, teacher=False, **generate_kwargs))
 
                 logger.info("start generation from student prompts")
                 local_responses = await asyncio.gather(*dp_tasks)
@@ -551,7 +551,7 @@ class RayPPOTrainer:
                         continue
                     gen_func = self._get_generate_function(dp_rank)
                     dp_tasks.append(
-                        self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, **generate_kwargs))
+                        self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, teacher=True, **generate_kwargs))
 
                 logger.info("start generation from complimentary teacher prompts")
                 local_responses = await asyncio.gather(*dp_tasks)

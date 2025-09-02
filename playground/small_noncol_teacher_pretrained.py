@@ -134,6 +134,7 @@ class PPOExpConfig(BasePPOExpConfig):
     max_len: int = 12192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
+    teacher_temperature: float = 0.7
     top_p: float = 1.0
     top_k: int = -1
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])

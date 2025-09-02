@@ -399,8 +399,10 @@ class CustomRewardTrainer(RayPPOTrainer):
 
         # read sampling params from self.cfg
 
+        temperature = self.cfg.teacher_temperature if kwargs.get("teacher", False) else self.cfg.temperature
+        logger.info(f"Using temperature: {temperature} (teacher={kwargs.get('teacher', False)})")
         sampling_params = SamplingParams(
-            temperature=self.cfg.temperature,
+            temperature=temperature,
             top_p=self.cfg.top_p,
             top_k=self.cfg.top_k,
             max_tokens=self.cfg.generate_max_len,
