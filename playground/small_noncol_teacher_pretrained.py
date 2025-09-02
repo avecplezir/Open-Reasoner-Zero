@@ -126,7 +126,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_estimator_k3: bool = True
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 2
+    eval_interval: int = 1
     eval_teacher: bool = True
 
     # generate related settings
@@ -167,7 +167,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
 
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
@@ -178,7 +178,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #"" if separate_teacher_model else pretrain
     # teacher_pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     # teacher_pretrain: Optional[str] = pretrain
-    sync_teacher_weights: bool = False
+    sync_teacher_weights: bool = True
 
 
 if __name__ == "__main__":

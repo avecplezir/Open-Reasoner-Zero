@@ -521,6 +521,27 @@ class PolicyRayActorBase(RayActor):
         # Load persistent buffers when present
         logger.info(f'module.named_buffers() {len(list(model.named_buffers()))}')
         logger.info(f"missing {missing} unexpected {unexpected} shape_mismatch {shape_mismatch}")
+        try:
+            engine = self.model.model if isinstance(self.model, Actor) else self.model
+            if engine.zero_optimization_stage() == 3:
+                from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum, OffloadDeviceEnum
+                # Offload updated hp params and optimizer states to CPU, then reload
+                if getattr(engine, "optimizer", None) is not None:
+                    engine.optimizer.offload_states(
+                        include=[
+                            OffloadStateTypeEnum.optim_states,
+                            OffloadStateTypeEnum.contiguous_grad_buffer,
+                            OffloadStateTypeEnum.hp_params,
+                        ],
+                        device=OffloadDeviceEnum.cpu,
+                        pin_memory=True,
+                        non_blocking=True,
+                    )
+                torch.cuda.synchronize()
+                engine.reload_states(non_blocking=True)
+                torch.cuda.synchronize()
+        except Exception as e:
+            logger.warning(f"Post-load ZeRO refresh failed (continuing): {e}")
 
     def _reset_optimizer_state(self, reset_scheduler: bool = True):
         """Reset optimizer moments/state (and optionally scheduler) for the policy.
@@ -534,17 +555,28 @@ class PolicyRayActorBase(RayActor):
 
         # Clear optimizer state safely
         optim = getattr(engine, "optimizer", None)
+
+        try:
+            if hasattr(optim, "refresh_fp32_params"):
+                optim.refresh_fp32_params()
+                logger.info("Refreshed fp32 params.")
+        except Exception:
+            pass
+
         if optim is not None:
             try:
                 optim.state.clear()
+                logger.info("Cleared optimizer state.")
             except Exception:
                 # Fallback: reassign empty dict
                 try:
                     optim.state = {}
+                    logger.info("Reset optimizer state to {}.")
                 except Exception:
                     pass
             try:
                 optim.zero_grad(set_to_none=True)
+                logger.info("zero_grad optimizer.")
             except Exception:
                 pass
 
@@ -562,6 +594,7 @@ class PolicyRayActorBase(RayActor):
                 if hasattr(engine, "_lr_scheduler"):
                     engine._lr_scheduler = new_scheduler
                 self.scheduler = new_scheduler
+                logger.info("reset optimizer scheduler.")
             except Exception:
                 pass
 

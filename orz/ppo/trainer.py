@@ -283,7 +283,8 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
+                # if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
+                if self.global_step == 1:
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
@@ -522,11 +523,14 @@ class RayPPOTrainer:
                     teacher_prompt = create_teacher_prompt_from_answer(extra["dialogue"], opposite_answer, bos_token)
                     # logger.info(f"teacher_score {teacher_score}, final_answer {final_answer}, opposite_answer {opposite_answer}")
                     # logger.info(f"teacher_prompt {teacher_prompt} \n, student_prompt {student_prompt}")
-                    extra["teacher_answer"] = opposite_answer
+                    # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
+                    # Create a per-sample copy carrying the teacher_answer for alignment checks downstream.
+                    new_extra = dict(extra)
+                    new_extra["teacher_answer"] = opposite_answer
 
                     all_teacher_prompts.append(teacher_prompt)
                     aug_all_student_prompts.append(student_prompt)
-                    aug_all_extras.append(extra)
+                    aug_all_extras.append(new_extra)
 
                 # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
                 # 1.1 generate sequences via vllm engines
@@ -2177,5 +2181,7 @@ class RayPPOTrainer:
             await self.teacher_model.async_run_method("_load_policy_from_dir", model_dir)
             # Reset optimizer/scheduler state on teacher to avoid stale momentum
             await self.teacher_model.async_run_method("_reset_optimizer_state", True)
+            await self.teacher_model.offload_to_cpu()
+            await self.teacher_model.backload_to_gpu()
         if self.cfg.colocate_all:
             await self.teacher_model.offload_to_cpu()
