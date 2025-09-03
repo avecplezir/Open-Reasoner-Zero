@@ -178,6 +178,8 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_pretrain: Optional[str] = "" if separate_teacher_model else pretrain  # TODO: or put your downloaded model path here!
     sync_teacher_weights: bool = False
 
+    teacher_explain_only: bool = False
+
 
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())

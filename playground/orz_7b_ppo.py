@@ -180,6 +180,8 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
+    teacher_explain_only: bool = False
+
 
 class CustomRewardTrainer(RayPPOTrainer):
     @override
@@ -413,6 +415,15 @@ class CustomRewardTrainer(RayPPOTrainer):
         responses, stop_reasons = await gen_func(
             prompts=prompts, sampling_params=sampling_params, use_tqdm=False, truncate_prompt=True
         )
+
+        # If teacher is generating explanation-only, append the prompted answer
+        # so downstream <answer> extraction remains unchanged.
+        if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
+            new_responses = []
+            for i, res in enumerate(responses):
+                ans = extras[i].get("teacher_answer", "")
+                new_responses.append(f"{res} <answer>{ans}</answer>")
+            responses = new_responses
 
         # pattern = re.compile(r"(\\boxed{.*})")
         if self.cfg.boxed_pattern:

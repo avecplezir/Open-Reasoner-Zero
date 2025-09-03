@@ -34,7 +34,10 @@ from orz.ppo.utils import (
     normalize_advantages,
 )
 
-from playground.zero_setting_base import create_teacher_prompt_from_answer
+from playground.zero_setting_base import (
+    create_teacher_prompt_from_answer,
+    create_teacher_explain_only_prompt_from_answer,
+)
 
 
 class RayPPOTrainer:
@@ -418,7 +421,14 @@ class RayPPOTrainer:
             for i, (all_extra, final_answer, student_score, teacher_score) in enumerate(zip(all_extras, final_answers, initial_scores, initial_teacher_scores)):
 
                 if teacher_score:
-                    teacher_prompt = create_teacher_prompt_from_answer(all_extra["dialogue"], final_answer, bos_token)
+                    if self.cfg.teacher_explain_only:
+                        teacher_prompt = create_teacher_explain_only_prompt_from_answer(
+                            all_extra["dialogue"], final_answer, bos_token
+                        )
+                    else:
+                        teacher_prompt = create_teacher_prompt_from_answer(
+                            all_extra["dialogue"], final_answer, bos_token
+                        )
                 else:
                     if random.random() > 0.5:
                         teacher_prompt = all_extra["teacher_prompt_yes"]
@@ -520,7 +530,14 @@ class RayPPOTrainer:
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
 
-                    teacher_prompt = create_teacher_prompt_from_answer(extra["dialogue"], opposite_answer, bos_token)
+                    if self.cfg.teacher_explain_only:
+                        teacher_prompt = create_teacher_explain_only_prompt_from_answer(
+                            extra["dialogue"], opposite_answer, bos_token
+                        )
+                    else:
+                        teacher_prompt = create_teacher_prompt_from_answer(
+                            extra["dialogue"], opposite_answer, bos_token
+                        )
                     # logger.info(f"teacher_score {teacher_score}, final_answer {final_answer}, opposite_answer {opposite_answer}")
                     # logger.info(f"teacher_prompt {teacher_prompt} \n, student_prompt {student_prompt}")
                     # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
@@ -738,17 +755,25 @@ class RayPPOTrainer:
 
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
+                    if self.cfg.teacher_explain_only:
+                        assert final_answer_start < final_answer_end, f"final_answer_start {final_answer_start} must be less than final_answer_end {final_answer_end} for teacher_explain_only"
+
                     if final_answer_start is not None and final_answer_start < final_answer_end:
 
                         final_answer_start, final_answer_end = offset + final_answer_start, offset + final_answer_end
+                        if self.cfg.teacher_explain_only:
+                            teacher_exp.action_log_probs[:, final_answer_start:] = 0.
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
+                        s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
-                        # s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
                         # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
                         # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
                         # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
+                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:])
+                        logger.info(f"start end: {s_final_answer_start}, vis_final_answer: {vis_final_answer}")
+
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = self.cfg.kl_mean_coef * ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min

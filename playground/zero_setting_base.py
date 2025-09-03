@@ -24,6 +24,14 @@ The reasoning process is enclosed within <think> </think> and answer is enclosed
 Assistant: <think>\
 """
 
+# Teacher variant: explanation only (no <answer> in the output). We will append
+# the provided answer programmatically after generation.
+TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs only the reasoning process in the mind that leads to this answer. \
+Output only the reasoning process inside <think> </think> tags and DO NOT output the <answer> tag. User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
+
 STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
 {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
 The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
@@ -61,8 +69,31 @@ def create_teacher_prompt_from_answer(dialogue: List, answer: str = "", bos_toke
 
     return teacher_prompt_answer
 
+
+def create_teacher_explain_only_prompt_from_answer(dialogue: List, answer: str = "", bos_token: str = ""):
+    """Create teacher prompt (explanation only, no <answer> in output)."""
+    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA
+
+    prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
+
+    assert len(dialogue) == 2, "dialogue must contain 2 items"
+
+    prompt_instruction_template = Template(prompt_instruction_template_jinja)
+    prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
+    teacher_prompt_template = Template(teacher_prompt_template_jinja)
+
+    teacher_prompt_answer = teacher_prompt_template.render(
+        bos_token=bos_token,
+        prompt=prompt_instruction,
+        answer=answer
+    )
+
+    return teacher_prompt_answer
+
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
+        # Optional flag to control teacher prompt style
+        self.teacher_explain_only = kwargs.pop("teacher_explain_only", False)
         super().__init__(*args, **kwargs)
 
     def process_dialogue(self, dialogue: List):
@@ -96,7 +127,11 @@ class CustomDataset(PromptDataset):
 
     def create_teacher_prompt(self, dialogue: List):
         """Create teacher prompt with ground truth answer included."""
-        teacher_prompt_template_jinja = TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+        teacher_prompt_template_jinja = (
+            TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA
+            if self.teacher_explain_only
+            else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+        )
 
         prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
@@ -110,7 +145,7 @@ class CustomDataset(PromptDataset):
         else:
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
         
-        answer = dialogue[1]["ground_truth"]["value"]
+        # answer = dialogue[1]["ground_truth"]["value"]
         teacher_prompt_yes = teacher_prompt_template.render(
             bos_token=bos_token, 
             prompt=prompt_instruction,
