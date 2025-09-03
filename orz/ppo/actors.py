@@ -638,10 +638,10 @@ class PolicyRayActorBase(RayActor):
                 disable=not self.strategy.is_rank_0(),
             )
             for local_step, experience in enumerate(pbar):
-                if (local_step + 1) % accumulation_steps == 0:
-                    # accelerator.wait_for_everyone()
-                    torch.distributed.barrier()
-                    get_accelerator().empty_cache()
+                # if (local_step + 1) % accumulation_steps == 0:
+                #     # accelerator.wait_for_everyone()
+                #     torch.distributed.barrier()
+                #     get_accelerator().empty_cache()
 
                 experience.to_device(device)
                 status = self.training_step(experience, global_steps, local_step, accumulation_steps)
@@ -788,6 +788,8 @@ class PolicyRayActorBase(RayActor):
         self.strategy.backward(loss, self.model, self.optimizer)
 
         if (local_step + 1) % accumulation_steps == 0:
+            # torch.distributed.barrier()
+            # get_accelerator().empty_cache()
             self.strategy.optimizer_step(self.optimizer, self.model, self.scheduler, name="actor")
 
         # status
@@ -932,7 +934,6 @@ class PolicyRayActorBase(RayActor):
         count, num_params = 0, len(list(model.named_parameters()))
         if torch.distributed.get_rank() == 0:
             group_name = getattr(self, "_model_update_group_name", None)
-            logger.info(f"Broadcasting group_name {group_name}")
 
         for name, param in model.named_parameters():
             count += 1  # empty_cache at last param
@@ -950,10 +951,6 @@ class PolicyRayActorBase(RayActor):
                     )
                     for engine in vllm_engines
                 ]
-            # if self.strategy.args.zero_stage == 3:
-            #     while hasattr(param, 'ds_status') and param.ds_status == ZeroParamStatus.INFLIGHT:
-            #         torch.cuda.synchronize()
-            #     torch.distributed.barrier()
 
             with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
                 if torch.distributed.get_rank() == 0:
@@ -961,9 +958,6 @@ class PolicyRayActorBase(RayActor):
                     ray.get(refs)
 
                 torch.cuda.synchronize()
-                # Force cleanup after each parameter broadcast
-                # torch.cuda.empty_cache()
-                # torch.cuda.ipc_collect()
 
         torch.distributed.barrier()
         self.strategy.print("Broadcast actor weights to vllm engines done")

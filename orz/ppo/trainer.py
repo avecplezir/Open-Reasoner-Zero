@@ -255,12 +255,12 @@ class RayPPOTrainer:
                     await self.teacher_model.offload_to_cpu()
                     await self.teacher_model.backload_to_gpu()
 
-                await self.policy_model.offload_to_cpu()
-                await self.policy_model.backload_to_gpu()
+                    await self.policy_model.offload_to_cpu()
+                    await self.policy_model.backload_to_gpu()
 
-                if self.cfg.critic_pretrain:
-                    await self.critic_model.offload_to_cpu()
-                    await self.critic_model.backload_to_gpu()
+                    if self.cfg.critic_pretrain:
+                        await self.critic_model.offload_to_cpu()
+                        await self.critic_model.backload_to_gpu()
 
                 if self.cfg.separate_teacher_model:
                     logger.info(f"Global step {self.global_step}, student_training_step {self.student_training_step}, teacher_training_step {self.teacher_training_step}, sync teacher weigts {sync_teacher_weigts}")
@@ -1056,7 +1056,7 @@ class RayPPOTrainer:
             await self.critic_model.async_run_method("empty_cache")
 
         # handle colocate actor and ref model
-        if self.cfg.colocate_actor_ref or self.cfg.colocate_all and self.cfg.use_ref_model:
+        if (self.cfg.colocate_actor_ref or self.cfg.colocate_all) and self.cfg.use_ref_model:
             base_log_probs = await base_action_log_probs_ref
             await self.ref_model.async_run_method("empty_cache")
 
@@ -1316,7 +1316,7 @@ class RayPPOTrainer:
                     if cfg.critic_pretrain:
                         num_gpus_per_actors = [0.3]
                     else:
-                        num_gpus_per_actors = [0.75, 0.25]
+                        num_gpus_per_actors = [0.7, 0.25]
 
             policy_model = PPORayActorGroup(
                 cfg.actor_num_nodes,
