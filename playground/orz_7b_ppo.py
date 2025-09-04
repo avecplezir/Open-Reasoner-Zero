@@ -400,7 +400,6 @@ class CustomRewardTrainer(RayPPOTrainer):
         from vllm import SamplingParams
 
         # read sampling params from self.cfg
-
         temperature = self.cfg.teacher_temperature if kwargs.get("teacher", False) else self.cfg.temperature
         logger.info(f"Using temperature: {temperature} (teacher={kwargs.get('teacher', False)})")
         sampling_params = SamplingParams(
@@ -463,9 +462,10 @@ class CustomRewardTrainer(RayPPOTrainer):
                         
                         # Verification: detokenize the extracted tokens back to text
                         # if answer_begin_idx is not None and answer_end_idx is not None:
-                        #     answer_tokens = tokenized_full[answer_begin_idx:answer_end_idx]
+                        #     answer_tokens = prefix_plus_answer_tokens[answer_begin_idx:answer_end_idx]
                         #     detokenized_answer = tokenizer.decode(answer_tokens, skip_special_tokens=False)
-                        #     logger.info(f"Original final_answer: '{final_answer}' Answer content: '{answer_content}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
+                        #     # logger.info(f"Original final_answer: '{final_answer}' Answer content: '{prefix_plus_answer}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
+                        #     logger.info(f"Original final_answer: '{final_answer}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
 
                 results.append({
                     "final_answer": final_answer,

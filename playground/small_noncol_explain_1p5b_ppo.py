@@ -180,8 +180,6 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_explain_only: bool = True
 
 
-
-
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())
     logger.info(exp.get_cfg_as_str(exp.cfg))

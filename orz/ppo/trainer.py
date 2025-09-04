@@ -748,31 +748,37 @@ class RayPPOTrainer:
                 offset = 0
                 seq_offset = 0
                 total_lengths = student_exp.info["total_length"].flatten()
-                for i, num_action in enumerate(teacher_exp.num_actions[0]):
+                for i, (num_action, student_num_action) in enumerate(zip(teacher_exp.num_actions[0], student_exp.num_actions[0])):
                     na = int(num_action.item())
+                    student_na = int(student_num_action.item())
+                    assert na == student_na, f"student and teacher num_actions must be equal {na} {student_na}"
                     seq_len = int(total_lengths[i])
                     prompt_len = seq_len - na
 
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
-                    if self.cfg.teacher_explain_only:
-                        assert final_answer_start < final_answer_end, f"final_answer_start {final_answer_start} must be less than final_answer_end {final_answer_end} for teacher_explain_only"
+                    teacher_score = initial_teacher_scores[teacher_prompt_idx]
+                    answer_tokens_offset = 3
 
-                    if final_answer_start is not None and final_answer_start < final_answer_end:
+                    if teacher_score and final_answer_start is not None and final_answer_start < final_answer_end:
 
-                        final_answer_start, final_answer_end = offset + final_answer_start, offset + final_answer_end
-                        if self.cfg.teacher_explain_only:
-                            teacher_exp.action_log_probs[:, final_answer_start:] = 0.
-                        final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start:final_answer_end]
                         s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+
+                        logger.info(f'final_answer_start {final_answer_start-answer_tokens_offset}, final_answer_end {final_answer_end+answer_tokens_offset}, na {na}')
+                        final_answer_start_offset, final_answer_end_offset = offset + final_answer_start, offset + final_answer_end
+
+                        if self.cfg.teacher_explain_only:
+                            teacher_exp.action_log_probs[:, final_answer_start_offset-answer_tokens_offset:final_answer_end_offset+answer_tokens_offset] = 0.
+
+                        final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset]
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
                         # s_final_answer_log_propbs = student_exp.action_log_probs[:, s_final_answer_start:s_final_answer_end]
                         # logger.info(f'final_answer_log_propbs: {final_answer_log_propbs.shape}')
                         # check if we find indices correctly
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
                         # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
-                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:])
-                        logger.info(f"start end: {s_final_answer_start}, vis_final_answer: {vis_final_answer}")
+                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-answer_tokens_offset:s_final_answer_end+answer_tokens_offset])
+                        logger.info(f"start end: {s_final_answer_start-answer_tokens_offset}, vis_final_answer: {vis_final_answer}")
 
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()
@@ -785,7 +791,10 @@ class RayPPOTrainer:
                     ss_reward_list.append(ss_reward)
 
                     # computing kl divergence reward
-                    start, end = offset, offset + na
+                    if final_answer_start is None or final_answer_start > final_answer_end:
+                        start, end = offset, offset + final_answer_start - answer_tokens_offset
+                    else:
+                        start, end = offset, offset + na
                     kl_episode = kl_div_all[:, start:end].clone()
                     kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
                     kl_mean = masked_mean(kl_episode, None, dim=-1)
@@ -876,7 +885,7 @@ class RayPPOTrainer:
                 correct_match_reward_trainer = np.array([]) if np.all(it) else np.array(match_reward_list[ct])
                 incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(match_reward_list[it])
                 avg_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
-                avg_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item(),
+                avg_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item()
 
                 ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), slice)
                 cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), slice)
@@ -925,11 +934,11 @@ class RayPPOTrainer:
                     f"{prefix}avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(student_incorrect_ratio_clipped_0_1_list).item(),
                     }
                 )
+                logger.info(f"{prefix} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward {avg_match_reward}")
 
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
 
-            logger.info(f"avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_match_reward {avg_match_reward}")
 
             async with Timer(f"computing GRPO normalized rewards"):
                 if self.cfg.use_grpo and not self.cfg.remove_teacher_grpo_normalization:
