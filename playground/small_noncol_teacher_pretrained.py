@@ -161,7 +161,6 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.1
 
     use_topr: bool = False
-    train_teacher: bool = True
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True

@@ -123,6 +123,8 @@ class BasePPOExpConfig(BaseConfig):
     eval_interval: int = -1
     update_ref_every_epoch: bool = False
 
+    boxed_pattern: bool = False
+
 
 class BasePPOExp(BaseExp):
     @cached_property

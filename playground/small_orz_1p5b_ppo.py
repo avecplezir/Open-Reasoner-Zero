@@ -144,12 +144,12 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 1
-    kl_mean_coef: float = 0.0
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1
     reward_kl_coef: float = 0.
-    kl_reward_clamp: float = 5
+    kl_reward_clamp: float = 100
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1.
+    reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = True
     ss_reward_coef: float = 0.
 
@@ -169,6 +169,8 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
+
+    teacher_explain_only: bool = True
 
 
 if __name__ == "__main__":

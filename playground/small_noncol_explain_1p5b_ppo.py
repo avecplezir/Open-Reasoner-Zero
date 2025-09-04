@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'topr-aug-data-separate-normalized-tr10-st5-v0-{randint}'
+    e_name = f'grpo-explain-separate-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -97,7 +97,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # ppo related settings
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 0 if not DEBUG_MODE else 0
+    num_warmup_steps: int = 0
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
@@ -128,54 +128,58 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_teacher: bool = True
 
     # generate related settings
-    generate_max_len: int = 12000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
+    teacher_temperature: float = 0.7
     top_p: float = 1.0
     top_k: int = -1
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True
+    use_grpo: bool = True #False
     remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    gpu_memory_utilization: float = 0.9
+    use_ref_model: bool = False
+    gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     gamma: float = 1.0
     lambd: float = 1.0
 
     kl_max_coef: float = 0.01
-    kl_mean_coef: float = 0
-    reward_kl_coef: float = 0.1
-    kl_reward_clamp: float = 5
+    kl_mean_coef: float = 1
+    reward_kl_coef: float = 0.
+    kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1.
+    reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.
+    ss_reward_coef: float = 0.33
 
-    use_topr: bool = True
+    use_topr: bool = False
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 5  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = True
+    augment_only_wrong: bool = False
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = "" if separate_teacher_model else pretrain  # TODO: or put your downloaded model path here!
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 
-    teacher_explain_only: bool = False
+    teacher_explain_only: bool = True
+
+
 
 
 if __name__ == "__main__":
