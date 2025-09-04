@@ -758,11 +758,11 @@ class RayPPOTrainer:
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
                     teacher_score = initial_teacher_scores[teacher_prompt_idx]
-                    answer_tokens_offset = 5
+                    answer_tokens_offset = 3
 
                     if teacher_score and final_answer_start is not None and final_answer_start < final_answer_end:
 
-                        s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        # s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
 
                         # logger.info(f'final_answer_start {final_answer_start-answer_tokens_offset}, final_answer_end {final_answer_end+answer_tokens_offset}, na {na}')
                         # final_answer_start_offset, final_answer_end_offset = offset + final_answer_start, offset + final_answer_end
@@ -775,8 +775,8 @@ class RayPPOTrainer:
                         # check if we find indices correctly
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
                         # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
-                        vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-answer_tokens_offset:s_final_answer_end+answer_tokens_offset])
-                        logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}")
+                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-answer_tokens_offset:s_final_answer_end+answer_tokens_offset])
+                        # logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}")
 
                         ss_reward_mean = final_answer_log_propbs.mean().item()
                         ss_reward_min = final_answer_log_propbs.min().item()

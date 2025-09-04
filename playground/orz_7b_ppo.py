@@ -402,6 +402,10 @@ class CustomRewardTrainer(RayPPOTrainer):
         # read sampling params from self.cfg
         temperature = self.cfg.teacher_temperature if kwargs.get("teacher", False) else self.cfg.temperature
         logger.info(f"Using temperature: {temperature} (teacher={kwargs.get('teacher', False)})")
+        # Build teacher-only stop list to halt at </think>
+        stop = list(self.cfg.stop)
+        stop = ["</think>"] if kwargs.get("teacher", False) and self.cfg.teacher_explain_only else stop
+
         sampling_params = SamplingParams(
             temperature=temperature,
             top_p=self.cfg.top_p,
@@ -409,22 +413,22 @@ class CustomRewardTrainer(RayPPOTrainer):
             max_tokens=self.cfg.generate_max_len,
             skip_special_tokens=False,
             include_stop_str_in_output=True,
-            stop=self.cfg.stop,
+            stop=stop,
         )
         responses, stop_reasons = await gen_func(
             prompts=prompts, sampling_params=sampling_params, use_tqdm=False, truncate_prompt=True
         )
 
         # Clean teacher responses in explain-only mode: drop stray endoftext markers
-        if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
-            responses = [r.replace("<|endoftext|>", "") for r in responses]
+        # if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
+        #     responses = [r.replace("<|endoftext|>", "") for r in responses]
 
         # If teacher is generating explanation-only, append the prompted answer
         # so downstream <answer> extraction remains unchanged.
-        if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
+        if kwargs.get("teacher", False) and self.cfg.teacher_explain_only:
             new_responses = []
             for i, res in enumerate(responses):
-                ans = extras[i].get("teacher_answer", "")
+                ans = extras[i]["teacher_answer"]
                 new_responses.append(f"{res} <answer>{ans}</answer>")
             responses = new_responses
 
