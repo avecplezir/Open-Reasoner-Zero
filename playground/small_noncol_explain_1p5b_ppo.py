@@ -123,7 +123,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 2
     eval_teacher: bool = True
 
@@ -177,7 +177,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 
-    teacher_explain_only: bool = True
+    teacher_explain_only: bool = False
 
 
 if __name__ == "__main__":

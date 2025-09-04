@@ -415,6 +415,10 @@ class CustomRewardTrainer(RayPPOTrainer):
             prompts=prompts, sampling_params=sampling_params, use_tqdm=False, truncate_prompt=True
         )
 
+        # Clean teacher responses in explain-only mode: drop stray endoftext markers
+        if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
+            responses = [r.replace("<|endoftext|>", "") for r in responses]
+
         # If teacher is generating explanation-only, append the prompted answer
         # so downstream <answer> extraction remains unchanged.
         if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
