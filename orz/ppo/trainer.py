@@ -856,19 +856,7 @@ class RayPPOTrainer:
             teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
             student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
 
-            avg_student_teacher_kl = sum(kl_mean_list) / len(kl_mean_list)
-            avg_student_teacher_kl_max = sum(kl_max_list) / len(kl_max_list)
-            avg_match_reward = sum(match_reward_list) / len(match_reward_list) if len(match_reward_list) > 0 else 0
-            correct_match_reward_trainer = np.array([]) if np.all(initial_scores == 0) else np.array(match_reward_list[initial_scores == 1])
-            incorrect_match_reward_trainer = np.array([]) if np.all(initial_scores == 1) else np.array(match_reward_list[initial_scores == 0])
-
-            log_dict = {
-                "avg_student_teacher_kl": avg_student_teacher_kl,
-                "avg_student_teacher_kl_max": avg_student_teacher_kl_max,
-                "avg_match_reward": avg_match_reward,
-                "avg_correct_match_reward": 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item(),
-                "avg_incorrect_match_reward": 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item(),
-            }
+            log_dict = {}
 
             for prefix in ["", "teacher", "student"]:
                 if prefix == "teacher":
@@ -877,6 +865,18 @@ class RayPPOTrainer:
                     slice = teacher_generated == 0
                 else:
                     slice = np.array([True] * len(teacher_generated))
+
+                avg_student_teacher_kl = sum(kl_mean_list[slice]) / len(kl_mean_list[slice])
+                avg_student_teacher_kl_max = sum(kl_max_list[slice]) / len(kl_max_list[slice])
+                avg_match_reward = sum(match_reward_list[slice]) / len(match_reward_list[slice]) if len(match_reward_list[slice]) > 0 else 0
+
+                ct = np.logical_and(initial_scores == 1, slice)
+                it = np.logical_and(initial_scores == 0, slice)
+
+                correct_match_reward_trainer = np.array([]) if np.all(it) else np.array(match_reward_list[ct])
+                incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(match_reward_list[it])
+                avg_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
+                avg_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item(),
 
                 ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), slice)
                 cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), slice)
@@ -900,6 +900,11 @@ class RayPPOTrainer:
                 prefix = f"{prefix}/" if prefix != "" else prefix
                 log_dict.update(
                     {
+                    f"{prefix}avg_student_teacher_kl": avg_student_teacher_kl,
+                    f"{prefix}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
+                    f"{prefix}avg_match_reward": avg_match_reward,
+                    f"{prefix}avg_correct_match_reward": avg_correct_match_reward,
+                    f"{prefix}avg_incorrect_match_reward": avg_incorrect_match_reward,
                     f"{prefix}avg_ss_reward_mean": 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item(),
                     f"{prefix}avg_ss_reward_min": 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item(),
                     f"{prefix}avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
