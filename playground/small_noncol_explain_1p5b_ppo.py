@@ -95,6 +95,7 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
+    train_batch_size: int = 1024 if not DEBUG_MODE else 256
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
     num_warmup_steps: int = 0
@@ -106,9 +107,9 @@ class PPOExpConfig(BasePPOExpConfig):
     update_ref_every_epoch: bool = False
     advantage_normalize: bool = True
 
-    num_episodes: int = 5
+    num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     max_epochs: int = 1
@@ -123,8 +124,8 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 2
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 5
     eval_teacher: bool = True
 
     # generate related settings
@@ -166,7 +167,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
 
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 5  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
@@ -177,7 +178,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 
-    teacher_explain_only: bool = False
+    teacher_explain_only: bool = True
 
 
 if __name__ == "__main__":

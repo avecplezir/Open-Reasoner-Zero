@@ -17,7 +17,7 @@ import copy
 import json
 import os
 import re
-from collections import defaultdict
+from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cached_property
@@ -191,6 +191,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         outputs: List[Any],
         extras: List[dict],
         reward_model_fn: Callable[[List[str], List[str]], Awaitable[torch.Tensor]],
+        prefix: str = "",
     ) -> Tuple[List[str], List[str], List[torch.Tensor], List[torch.Tensor], List[Tuple[int, int]]]:
         # make log metrics
         scores = []
@@ -257,6 +258,9 @@ class CustomRewardTrainer(RayPPOTrainer):
                 )
             }, step=self.global_step)
 
+        has_thinks = []
+        has_answers = []
+        formatting_oks = []
         for idx in range(len(outputs)):
             prompt, output, out_token = prompts[idx], outputs[idx], output_tokens[idx]
             rep_score, reflection_pattern_score = repeat_scores[idx], reflection_pattern_scores[idx]
@@ -266,10 +270,26 @@ class CustomRewardTrainer(RayPPOTrainer):
             response_token = len(out_token)
             output["repeat_score"] = rep_score
             output["reflection_pattern_score"] = reflection_pattern_score
-            # only correct and stoped response can aquire reward
+
+            # Formatting checks (student only): require both <think>...</think> and <answer>...</answer>
+            resp_txt = output.get("response", "")
+            has_think = bool(re.search(r".*?</think>", resp_txt, re.DOTALL))
+            has_answer = bool(re.search(r"<answer>.*?</answer>", resp_txt, re.DOTALL))
+            # Ensure ordering: <think> before <answer>
+            think_pos = resp_txt.find("<think>")
+            answer_pos = resp_txt.find("<answer>")
+            formatting_ok = has_think and has_answer and (think_pos == -1 or answer_pos == -1 or think_pos < answer_pos)
+            output["has_think"] = has_think
+            output["has_answer"] = has_answer
+            output["formatting_ok"] = formatting_ok
+            has_thinks.append(has_think)
+            has_answers.append(has_answer)
+            formatting_oks.append(formatting_ok)
+
+            # only correct and stopped response can acquire reward (student) and must have correct formatting
             if stop_reason == "stop":
-                score = 1.0 if iscorrect else 0.0
-                teacher_score = 1.0 if teacher_iscorrect else 0.0
+                score = 1.0 if (iscorrect and formatting_ok) else 0.0
+                teacher_score = 1.0 if (teacher_iscorrect and formatting_ok) else 0.0
             else:
                 avg_non_stop_count += 1
                 score = 0.0
@@ -292,22 +312,22 @@ class CustomRewardTrainer(RayPPOTrainer):
         initial_scores = copy.deepcopy(scores)
         initial_teacher_scores = copy.deepcopy(teacher_scores)
         # GRPO
-        if self.cfg.use_grpo:
-            self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
-            self.writer.add_scalar("grpo_teacher_raw_reward", np.mean(teacher_scores), self.global_step)
+        # if self.cfg.use_grpo:
+            # self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
+            # self.writer.add_scalar("grpo_teacher_raw_reward", np.mean(teacher_scores), self.global_step)
             # grpo student reward normalization
-            for i, prompt in enumerate(prompts):
-                if not self.cfg.remove_student_grpo_normalization:
-                    scores[i] -= np.mean(pass_at_n_dict[prompt])
-                    if std := np.std(pass_at_n_dict[prompt]) > 0:
-                        scores[i] /= std
-                else:
+            # for i, prompt in enumerate(prompts):
+            #     if not self.cfg.remove_student_grpo_normalization:
+            #         scores[i] -= np.mean(pass_at_n_dict[prompt])
+            #         if std := np.std(pass_at_n_dict[prompt]) > 0:
+            #             scores[i] /= std
+            #     else:
                     # transform scores to -1, 1 if student_grpo_normalization is removed
-                    scores[i] = 2 * (scores[i] - 0.5)
-
-            if self.cfg.use_minus_plus_one_teacher_reward:
-                for i, prompt in enumerate(prompts):
-                    teacher_scores[i] = 2 * (teacher_scores[i] - 0.5)
+                    # scores[i] = 2 * (scores[i] - 0.5)
+            #
+            # if self.cfg.use_minus_plus_one_teacher_reward:
+            #     for i, prompt in enumerate(prompts):
+            #         teacher_scores[i] = 2 * (teacher_scores[i] - 0.5)
 
         def dump_results(prompts, outputs, scores):
             saved = []
@@ -326,17 +346,20 @@ class CustomRewardTrainer(RayPPOTrainer):
         )
 
         log_dict = {
-            "avg_non_stop_count": avg_non_stop_count / len(prompts),
-            "avg_repeat_score": sum(repeat_scores) / len(prompts),
-            "avg_reflection_pattern_score": sum(reflection_pattern_scores) / len(prompts),
-            "avg_pass_at_n": sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict),
-            "avg_teacher_pass_at_n": sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict),
-            "avg_num_tokens": np.mean(num_tokens_arr).item(),
-            "std_num_tokens": np.std(num_tokens_arr).item(),
-            "avg_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.mean(correct_tokens_arr).item(),
-            "std_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.std(correct_tokens_arr).item(),
-            "avg_incorrect_num_tokens": 0 if len(incorrect_tokens_arr) == 0 else np.mean(incorrect_tokens_arr).item(),
-            "std_incorrect_num_tokens": 0 if len(incorrect_tokens_arr) == 0 else np.std(incorrect_tokens_arr).item(),
+            f"{prefix}avg_non_stop_count": avg_non_stop_count / len(prompts),
+            f"{prefix}avg_repeat_score": sum(repeat_scores) / len(prompts),
+            f"{prefix}avg_reflection_pattern_score": sum(reflection_pattern_scores) / len(prompts),
+            # "avg_pass_at_n": sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict),
+            # "avg_teacher_pass_at_n": sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict),
+            f"{prefix}avg_num_tokens": np.mean(num_tokens_arr).item(),
+            f"{prefix}std_num_tokens": np.std(num_tokens_arr).item(),
+            f"{prefix}avg_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.mean(correct_tokens_arr).item(),
+            f"{prefix}std_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.std(correct_tokens_arr).item(),
+            f"{prefix}avg_incorrect_num_tokens": 0 if len(incorrect_tokens_arr) == 0 else np.mean(incorrect_tokens_arr).item(),
+            f"{prefix}std_incorrect_num_tokens": 0 if len(incorrect_tokens_arr) == 0 else np.std(incorrect_tokens_arr).item(),
+            f"{prefix}frac_has_think": sum(has_thinks) / len(has_thinks),
+            f"{prefix}frac_has_answer": sum(has_answers) / len(has_answers),
+            f"{prefix}frac_formatting_ok": sum(formatting_oks) / len(formatting_oks),
         }
         for k, v in log_dict.items():
             self.writer.add_scalar(k, v, self.global_step)
@@ -370,6 +393,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         final_answers = []
         teacher_yes = []
         teacher_no = []
+        stop_reasons = []
         for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
             response = response if len(response) > 0 else "<empty response>"
             res_prompts.append(prompt)
@@ -383,10 +407,11 @@ class CustomRewardTrainer(RayPPOTrainer):
             final_answers.append(output.get('final_answer', ''))
             teacher_yes.append(output['teacher_yes'])
             teacher_no.append(output['teacher_no'])
+            stop_reasons.append(output['stop_reason'])
 
 
         return (res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors,
-                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no)
+                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, stop_reasons)
 
     @override
     @torch.no_grad()
@@ -404,7 +429,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         logger.info(f"Using temperature: {temperature} (teacher={kwargs.get('teacher', False)})")
         # Build teacher-only stop list to halt at </think>
         stop = list(self.cfg.stop)
-        stop = ["</think>"] if kwargs.get("teacher", False) and self.cfg.teacher_explain_only else stop
+        stop = ["User:", "Human:", "Assistant:", "</think>"] if kwargs.get("teacher", False) and self.cfg.teacher_explain_only else stop
 
         sampling_params = SamplingParams(
             temperature=temperature,
@@ -541,6 +566,32 @@ class CustomRewardTrainer(RayPPOTrainer):
                             )
                 except Exception:
                     pass
+
+        # Teacher-only sanity checks: stop reasons distribution and mismatches
+        if kwargs.get("teacher", False) and self.cfg.teacher_explain_only:
+            # Log teacher stop reasons distribution
+            try:
+                counts = dict(Counter(stop_reasons))
+                logger.info(f"Teacher stop reasons distribution: {counts}")
+            except Exception:
+                pass
+
+            # Log a few mismatches where teacher_iscorrect is False
+            try:
+                mismatches = []
+                for i, (ex, item, t_ok, res) in enumerate(zip(extras, final_answer_items, equal_teacher_results, responses)):
+                    if ex.get("teacher_answer") is not None and not t_ok:
+                        mismatches.append((i, ex.get("teacher_answer", ""), item.get("final_answer", ""), stop_reasons[i], res))
+                if mismatches:
+                    max_show = 5
+                    for j, (idx, t_ans, got, stop_r, res) in enumerate(mismatches[:max_show]):
+                        logger.warning(
+                            f"Teacher mismatch at idx={idx}: teacher_answer={t_ans} != extracted={got}; stop_reason={stop_r}, response={res}"
+                        )
+                    if len(mismatches) > max_show:
+                        logger.warning(f"... {len(mismatches) - max_show} more teacher mismatches omitted")
+            except Exception:
+                pass
 
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(
