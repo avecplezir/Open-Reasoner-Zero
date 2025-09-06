@@ -70,12 +70,12 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/iter104/policy" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/iter50/policy" #f"{prefix}/iter104/policy" iter39 # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-explain-separate-v0-{randint}'
+    e_name = f'grpo-iter50-explain-separate-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -172,7 +172,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = True
+    augment_only_wrong: bool = False
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain

@@ -357,7 +357,7 @@ class RayPPOTrainer:
             # Create paired data (positive/negative for each prompt)
             paired_data = []
             for prompt in all_inputs:
-                for _ in range(2*self.cfg.n_samples_per_prompt):
+                for _ in range(self.cfg.n_samples_per_prompt):
                     paired_data.append((
                         prompt[0],  # student prompt
                         prompt[1]  # extra info
@@ -499,8 +499,8 @@ class RayPPOTrainer:
                     ),
                 })
 
-            if self.train_student and not self.train_teacher and self.cfg.use_teacher_only_data_for_teacher:
-                logger.info("Only using student generated data for teacher training as configured")
+            if not self.train_student and self.train_teacher and self.cfg.use_teacher_only_data_for_teacher:
+                logger.info("Only using teacher generated data for teacher training as configured")
             else:
                 teacher_generated.extend([False] * len(all_student_prompts))
                 combined_all_student_prompts.extend(all_student_prompts)
@@ -521,67 +521,99 @@ class RayPPOTrainer:
                 async with Timer("Sync teacher weights to VLLM engines"):
                     await self._major_sync_teacher_weights_to_vllm()
 
-            # create the oposite teacher prompt and collect data with it
+            # create the complementary teacher prompt(s) and collect data with it
             all_teacher_prompts = []
             aug_all_student_prompts = []
             aug_all_extras = []
             indices_incorrect = []
-            count_teacher = 0
-            for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)):
+            # Track which teacher prompts were already added so we can repeat
+            # each unique prompt exactly n_samples_per_prompt times.
+            added_teacher_prompt_keys = set()
+            assert sum([self.cfg.correct_answer_augmenting, self.cfg.augment_only_wrong, self.cfg.augment_with_opposite_answer]) == 1, "Only one student augmenting strategy can be chosen"
+
+            for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(
+                zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)
+            ):
+                include = True
+                teacher_answer = None
 
                 if self.cfg.correct_answer_augmenting:
+                    # Always use the dataset's ground-truth answer
                     if not student_score:
-                        indices_incorrect.append(i)
+                        # Track a representative incorrect example index; we will
+                        # map it to the start index of the duplicated block below.
+                        representative_incorrect = True
+                    else:
+                        representative_incorrect = False
                     teacher_answer = extra["answer"]
 
                 elif self.cfg.augment_only_wrong:
-                    if teacher_score:
-                        if not student_score:
-                            indices_incorrect.append(count_teacher)
-                            count_teacher += 1
-
-                            if teacher_yes[i]:
-                                teacher_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
-                            elif teacher_no[i]:
-                                teacher_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
-                            else:
-                                assert False, f"final_answer {final_answer} must be yes or no"
-                        else:
-                            continue
-
-                else:
-                    if teacher_score:
-                        if not student_score:
-                            indices_incorrect.append(count_teacher)
-                        count_teacher += 1
-
+                    # Only augment when teacher is correct and student is wrong
+                    if teacher_score and (not student_score):
+                        representative_incorrect = True
                         if teacher_yes[i]:
                             teacher_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                         elif teacher_no[i]:
                             teacher_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
-
-                    if self.cfg.teacher_explain_only:
-                        teacher_prompt = create_teacher_explain_only_prompt_from_answer(
-                            extra["dialogue"], teacher_answer, bos_token
-                        )
                     else:
-                        teacher_prompt = create_teacher_prompt_from_answer(
-                            extra["dialogue"], teacher_answer, bos_token
-                        )
+                        include = False
+                        representative_incorrect = False
 
-                    # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
-                    # Create a per-sample copy carrying the teacher_answer for alignment checks downstream.
-                    new_extra = dict(extra)
-                    new_extra["teacher_answer"] = teacher_answer
+                elif self.cfg.augment_with_opposite_answer:
+                    # When teacher is correct, use the opposite label
+                    if teacher_score:
+                        representative_incorrect = not bool(student_score)
+                        if teacher_yes[i]:
+                            teacher_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                        elif teacher_no[i]:
+                            teacher_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                        else:
+                            assert False, f"final_answer {final_answer} must be yes or no"
+                    else:
+                        include = False
+                        representative_incorrect = False
+                else:
+                    assert False, "One student augmenting strategy must be chosen"
 
-                    all_teacher_prompts.append(teacher_prompt)
-                    aug_all_student_prompts.append(student_prompt)
-                    aug_all_extras.append(new_extra)
+                if not include:
+                    continue
 
-                # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
-                # 1.1 generate sequences via vllm engines
+                # Build the teacher prompt from the chosen answer
+                if self.cfg.teacher_explain_only:
+                    teacher_prompt = create_teacher_explain_only_prompt_from_answer(
+                        extra["dialogue"], teacher_answer, bos_token
+                    )
+                else:
+                    teacher_prompt = create_teacher_prompt_from_answer(
+                        extra["dialogue"], teacher_answer, bos_token
+                    )
+
+                # Use prompt string as a stable key for deduplication
+                key = teacher_prompt
+                if key in added_teacher_prompt_keys:
+                    # Already added n_samples_per_prompt copies for this teacher prompt
+                    continue
+
+                # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
+                new_extra = dict(extra)
+                new_extra["teacher_answer"] = teacher_answer
+
+                # Append exactly n_samples_per_prompt copies to keep parity
+                incorect_index = len(all_teacher_prompts)
+                all_teacher_prompts.extent([teacher_prompt]*self.cfg.n_samples_per_prompt)
+                aug_all_student_prompts.extend([student_prompt]*self.cfg.n_samples_per_prompt)
+                aug_all_extras.extend([dict(new_extra)]*self.cfg.n_samples_per_prompt)
+
+                # Track representative incorrect indices for logging
+                if representative_incorrect:
+                    indices_incorrect.append(incorect_index)
+
+                added_teacher_prompt_keys.add(key)
+
+            # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
+            # 1.1 generate sequences via vllm engines
             all_extras = aug_all_extras
             all_student_prompts = aug_all_student_prompts
             outputs = []
@@ -1001,7 +1033,7 @@ class RayPPOTrainer:
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
 
-            logger.info(f'3 {self.train_student} teacher_generated.sum(), {(~teacher_generated).sum()}')
+            # logger.info(f'3 {self.train_student} teacher_generated.sum(), {(~teacher_generated).sum()}')
             async with Timer(f"computing GRPO normalized rewards"):
                 if self.cfg.use_grpo:
                     prompt_idx = 0

@@ -70,12 +70,12 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-base-explain-v0-{randint}'
+    e_name = f'grpo-base-iter104-explain-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -98,7 +98,7 @@ class PPOExpConfig(BasePPOExpConfig):
     train_batch_size: int = 256 if not DEBUG_MODE else 256
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 50
+    num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
@@ -109,7 +109,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     max_epochs: int = 1
@@ -173,6 +173,8 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = False
     augment_only_wrong: bool = False
+    correct_answer_augmenting: bool = False
+    augment_with_opposite_answer: bool = False
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
