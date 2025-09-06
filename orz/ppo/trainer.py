@@ -699,7 +699,6 @@ class RayPPOTrainer:
         final_answers = [final_answers[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
         correct_formattings = [correct_formattings[i] for i in indices]
-        logger.info(f'2 {self.train_student} teacher_generated.sum(), {(~teacher_generated).sum()}')
 
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
         self.writer.add_scalar("teacher_generated_frac", teacher_generated.mean(), self.global_step)
