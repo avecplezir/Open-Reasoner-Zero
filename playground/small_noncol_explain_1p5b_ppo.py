@@ -95,7 +95,7 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 1024 if not DEBUG_MODE else 256
+    train_batch_size: int = 256 if not DEBUG_MODE else 256
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
     num_warmup_steps: int = 0
@@ -124,7 +124,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
     eval_teacher: bool = True
 
@@ -152,8 +152,8 @@ class PPOExpConfig(BasePPOExpConfig):
     lambd: float = 1.0
 
     kl_max_coef: float = 0.01
-    kl_mean_coef: float = 1
-    reward_kl_coef: float = 0.
+    kl_mean_coef: float = 1.
+    reward_kl_coef: float = 1.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
@@ -172,13 +172,14 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
+    augment_only_wrong: bool = True
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
 
     teacher_explain_only: bool = True
+    use_teacher_only_data_for_teacher: bool = True
 
 
 if __name__ == "__main__":

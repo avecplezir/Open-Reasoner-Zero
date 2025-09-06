@@ -8,7 +8,7 @@ from heapq import heapify, heappop, heappush
 from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
 import wandb
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, Counter
 import gc
 import time
 from deepspeed.accelerator import get_accelerator
@@ -141,6 +141,29 @@ class RayPPOTrainer:
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
 
+                # 2. determine what model to train
+                train_teacher = False
+                train_student = False
+                if self.cfg.student_training_rounds > 0:
+                    if self.teacher_training_step < self.cfg.teacher_training_rounds:
+                        logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
+                        train_teacher = True
+                        self.teacher_training_step += 1
+                    elif self.student_training_step < self.cfg.student_training_rounds:
+                        logger.info(f'training student model, {self.global_step} global step, {self.student_training_step} student step')
+                        train_student = True
+                        self.student_training_step += 1
+                        if self.student_training_step == self.cfg.student_training_rounds:
+                            self.student_training_step = 0
+                            self.teacher_training_step = 0
+                else:
+                    train_teacher = True
+                    train_student = True
+
+                logger.info(f'train_teacher {train_teacher}, train_student {train_student}')
+                self.train_teacher = train_teacher
+                self.train_student = train_student
+
                 # 3. make experiences, calculate advantages and returns
                 await self.make_experience(rand_prompts)
 
@@ -157,31 +180,19 @@ class RayPPOTrainer:
                     sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
-                train_teacher = False
-                train_student = False
-                if self.cfg.student_training_rounds > 0:
-                    if self.teacher_training_step < self.cfg.teacher_training_rounds:
-                        logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
+                if train_teacher and not train_student:
                         train_set = zip([self.teacher_replay_buffer], ["teacher"])
-                        train_teacher = True
                         self.student_replay_buffer.clear()
-                        self.teacher_training_step += 1
-                    elif self.student_training_step < self.cfg.student_training_rounds:
-                        logger.info(f'training student model, {self.global_step} global step, {self.student_training_step} student step')
-                        train_set = zip([self.student_replay_buffer], [""])
-                        train_student = True
-                        self.teacher_replay_buffer.clear()
-                        self.student_training_step += 1
-                    else:
-                        self.student_training_step = 0
-                        self.teacher_training_step = 0
-                else:
+                elif not train_teacher and  train_student:
+                    train_set = zip([self.student_replay_buffer], [""])
+                    self.teacher_replay_buffer.clear()
+                elif train_teacher and train_student:
                     if self.cfg.student_teacher_order:
                         train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'])
                     else:
                         train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''])
-                    train_teacher = True
-                    train_student = True
+                else:
+                    raise ValueError("Either student or teacher must be trained in each iteration")
 
                 if self.cfg.critic_pretrain and self.cfg.colocate_critic_policy and self.cfg.offload_critic_policy_colocation:
                     await self.critic_model.offload_to_cpu()
@@ -347,7 +358,6 @@ class RayPPOTrainer:
             paired_data = []
             for prompt in all_inputs:
                 for _ in range(2*self.cfg.n_samples_per_prompt):
-                    # Create a pair: (student, teacher_yes, teacher_no, extra)
                     paired_data.append((
                         prompt[0],  # student prompt
                         prompt[1]  # extra info
@@ -405,7 +415,7 @@ class RayPPOTrainer:
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
                     all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings = await reward_fn(
-                        all_student_prompts, outputs, all_extras, prefix='student')
+                        all_student_prompts, outputs, all_extras, prefix='student/')
                     assert len(all_student_prompts) == len(outputs), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None
@@ -421,19 +431,27 @@ class RayPPOTrainer:
             for i, (all_extra, final_answer, student_score, teacher_score) in enumerate(zip(all_extras, final_answers, initial_scores, initial_teacher_scores)):
 
                 if teacher_score:
-                    if self.cfg.teacher_explain_only:
-                        teacher_prompt = create_teacher_explain_only_prompt_from_answer(
-                            all_extra["dialogue"], final_answer, bos_token
-                        )
+                    if teacher_yes[i]:
+                        student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                    elif teacher_no[i]:
+                        student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                     else:
-                        teacher_prompt = create_teacher_prompt_from_answer(
-                            all_extra["dialogue"], final_answer, bos_token
-                        )
+                        assert False, f"final_answer {final_answer} must be yes or no"
+
                 else:
                     if random.random() > 0.5:
-                        teacher_prompt = all_extra["teacher_prompt_yes"]
+                        student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
                     else:
-                        teacher_prompt = all_extra["teacher_prompt_no"]
+                        student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+
+                if self.cfg.teacher_explain_only:
+                    teacher_prompt = create_teacher_explain_only_prompt_from_answer(
+                        all_extra["dialogue"], student_answer, bos_token
+                    )
+                else:
+                    teacher_prompt = create_teacher_prompt_from_answer(
+                        all_extra["dialogue"], student_answer, bos_token
+                    )
 
                 all_teacher_prompts.append(teacher_prompt)
 
@@ -481,17 +499,20 @@ class RayPPOTrainer:
                     ),
                 })
 
-            teacher_generated.extend([False] * len(all_student_prompts))
-            combined_all_student_prompts.extend(all_student_prompts)
-            combined_all_teacher_prompts.extend(all_teacher_prompts)
-            combined_outputs.extend(outputs)
-            combined_custom_rewards.extend(custom_rewards)
-            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
-            combined_answer_indices.extend(answer_indices)
-            combined_initial_scores.extend(initial_scores)
-            combined_initial_teacher_scores.extend(initial_teacher_scores)
-            combined_final_answers.extend(final_answers)
-            combined_correct_formattings.extend(correct_formattings)
+            if self.train_student and not self.train_teacher and self.cfg.use_teacher_only_data_for_teacher:
+                logger.info("Only using student generated data for teacher training as configured")
+            else:
+                teacher_generated.extend([False] * len(all_student_prompts))
+                combined_all_student_prompts.extend(all_student_prompts)
+                combined_all_teacher_prompts.extend(all_teacher_prompts)
+                combined_outputs.extend(outputs)
+                combined_custom_rewards.extend(custom_rewards)
+                combined_teacher_custom_rewards.extend(teacher_custom_rewards)
+                combined_answer_indices.extend(answer_indices)
+                combined_initial_scores.extend(initial_scores)
+                combined_initial_teacher_scores.extend(initial_teacher_scores)
+                combined_final_answers.extend(final_answers)
+                combined_correct_formattings.extend(correct_formattings)
 
         if self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student:
 
@@ -512,6 +533,9 @@ class RayPPOTrainer:
                     # logger.info(f"teacher_score {teacher_score}, teacher_yes {teacher_yes[i]}, teacher_no {teacher_no[i]}, student_score {student_score}, final_answer {final_answer}")
                     if self.cfg.augment_only_wrong:
                         if not student_score:
+                            indices_incorrect.append(count_teacher)
+                            count_teacher += 1
+
                             if teacher_yes[i]:
                                 opposite_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                             elif teacher_no[i]:
@@ -592,7 +616,7 @@ class RayPPOTrainer:
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
                     all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, _, _, correct_formattings = await reward_fn(
-                        all_student_prompts, outputs, all_extras, prefix='teacher')
+                        all_student_prompts, outputs, all_extras, prefix='teacher/')
                     assert len(all_student_prompts) == len(outputs) == len(
                         all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
@@ -658,6 +682,7 @@ class RayPPOTrainer:
         all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, correct_formattings = \
             combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers, combined_correct_formattings
 
+        logger.info(f'teacher_generated.sum(), {(~teacher_generated).sum()}')
         # Randomize order of all arrays
         indices = np.random.permutation(len(all_student_prompts))
         all_student_prompts = [all_student_prompts[i] for i in indices]
@@ -671,6 +696,7 @@ class RayPPOTrainer:
         final_answers = [final_answers[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
         correct_formattings = [correct_formattings[i] for i in indices]
+        logger.info(f'2 teacher_generated.sum(), {(~teacher_generated).sum()}')
 
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
 
@@ -815,7 +841,7 @@ class RayPPOTrainer:
                     assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
                     if teacher_score:
                         final_teacher_reward = self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward
-                        # logger.info(f"final_teacher_reward {final_teacher_reward.item()}, ss_reward {ss_reward_list[-1]}, kl_reward {kl_reward}, match_reward {match_reward}, ss_reward_mean {ss_reward_mean}, ss_reward_min {ss_reward_min}, kl_mean {kl_mean}, kl_max {kl_max}, kl_sum {kl_sum}")
+                        # logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]} final_teacher_reward {final_teacher_reward}, ss_reward {ss_reward_list[-1]}, kl_reward {kl_reward}, match_reward {match_reward}, ss_reward_mean {ss_reward_mean}, ss_reward_min {ss_reward_min}, kl_mean {kl_mean}, kl_max {kl_max}, kl_sum {kl_sum}")
                         final_reward_list.append(final_teacher_reward.item())
                     else:
                         final_reward_list.append(-2.0)
@@ -882,6 +908,7 @@ class RayPPOTrainer:
             kl_max_list = np.array(kl_max_list)
             ss_reward_mean_list = np.array(ss_reward_mean_list)
             ss_reward_min_list = np.array(ss_reward_min_list)
+            ss_reward_list = np.array(ss_reward_list)
             match_reward_list = np.array(match_reward_list)
             teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
             student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
@@ -898,10 +925,17 @@ class RayPPOTrainer:
 
                 logger.info(f"{prefix} slice {slice.sum()} samples")
 
+                avg_student_reward = initial_scores[slice].mean()
                 avg_teacher_reward = final_reward_list[slice].mean()
+
                 avg_student_teacher_kl = kl_mean_list[slice].mean()
                 avg_student_teacher_kl_max = kl_max_list[slice].mean()
-                avg_match_reward = sum(match_reward_list[slice]) / len(match_reward_list[slice]) if len(match_reward_list[slice]) > 0 else 0
+
+                avg_match_reward = match_reward_list[slice].mean()
+
+                avg_ss_reward_mean = ss_reward_mean_list[slice].mean()
+                avg_ss_reward_min = ss_reward_min_list[slice].mean()
+                avg_ss_reward = ss_reward_list[slice].mean()
 
                 ct = np.logical_and(initial_scores == 1, slice)
                 it = np.logical_and(initial_scores == 0, slice)
@@ -910,8 +944,6 @@ class RayPPOTrainer:
                 incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(match_reward_list[it])
                 avg_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
                 avg_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item()
-                avg_ss_reward_mean = 0 if len(ss_reward_mean_list) == 0 else np.mean(ss_reward_mean_list).item()
-                avg_ss_reward_min = 0 if len(ss_reward_min_list) == 0 else np.mean(ss_reward_min_list).item()
 
                 ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), slice)
                 cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), slice)
@@ -935,6 +967,7 @@ class RayPPOTrainer:
                 prefix = f"{prefix}/" if prefix != "" else prefix
                 log_dict.update(
                     {
+                    f"{prefix}avg_student_reward": avg_student_reward,
                     f"{prefix}avg_teacher_reward": avg_teacher_reward,
                     f"{prefix}avg_student_teacher_kl": avg_student_teacher_kl,
                     f"{prefix}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
@@ -943,7 +976,7 @@ class RayPPOTrainer:
                     f"{prefix}avg_incorrect_match_reward": avg_incorrect_match_reward,
                     f"{prefix}avg_ss_reward_mean": avg_ss_reward_mean,
                     f"{prefix}avg_ss_reward_min": avg_ss_reward_min,
-                    f"{prefix}avg_ss_reward": 0 if len(ss_reward_list) == 0 else np.mean(ss_reward_list).item(),
+                    f"{prefix}avg_ss_reward": avg_ss_reward,
                     f"{prefix}avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
                     f"{prefix}avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
                     f"{prefix}avg_correct_kl_sum": 0 if len(correct_kl_sum_list) == 0 else np.mean(correct_kl_sum_list).item(),
@@ -961,12 +994,12 @@ class RayPPOTrainer:
                     f"{prefix}avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(student_incorrect_ratio_clipped_0_1_list).item(),
                     }
                 )
-                logger.info(f"{prefix} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_match_reward {avg_match_reward}")
+                logger.info(f"{prefix} avg_teacher_reward: {avg_teacher_reward} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_match_reward {avg_match_reward}")
 
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
 
-
+            logger.info(f'3 teacher_generated.sum(), {(~teacher_generated).sum()}')
             async with Timer(f"computing GRPO normalized rewards"):
                 if self.cfg.use_grpo:
                     prompt_idx = 0
@@ -978,14 +1011,13 @@ class RayPPOTrainer:
                             # teacher
                             prompt = all_teacher_prompts[prompt_idx]
                             teacher_score = final_reward_list[prompt_idx].item()
-
                             teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
+                            # logger.info(f"teacher_generated {teacher_generated[prompt_idx]} teacher_pass_at_n_dict[prompt] {teacher_pass_at_n_dict[prompt]}")
                             if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
                                 teacher_score /= teacher_std
 
                             teacher_score_sum += teacher_score
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
-                            prompt_idx += 1
 
                             # student
                             prompt = all_student_prompts[prompt_idx]
@@ -997,12 +1029,23 @@ class RayPPOTrainer:
                             student_exp.info['custom_rewards'][i][-1] = score
                             score_sum += score
 
+                            prompt_idx += 1
+
                     assert prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
 
-                    self.writer.add_scalar("avg_teacher_reward", teacher_score_sum / len(all_teacher_prompts), self.global_step)
-                    self.writer.add_scalar("avg_student_reward", score_sum / len(all_student_prompts), self.global_step)
-                    logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}, avg_student_reward: {score_sum / len(all_student_prompts)}")
+                    # Log distribution of lengths (attempt counts) per prompt
+                    pass_n_len_dist = dict(Counter(len(v) for v in pass_at_n_dict.values()))
+                    teacher_pass_n_len_dist = dict(Counter(len(v) for v in teacher_pass_at_n_dict.values()))
+                    logger.info(f"pass_at_n attempt lengths distribution: {pass_n_len_dist}")
+                    logger.info(f"teacher_pass_at_n attempt lengths distribution: {teacher_pass_n_len_dist}")
 
+                    avg_pass_at_n =  sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict)
+                    avg_teacher_pass_at_n = sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict)
+                    self.writer.add_scalar("avg_teacher_reward_normalized", teacher_score_sum / len(all_teacher_prompts), self.global_step)
+                    self.writer.add_scalar("avg_student_reward_normalized", score_sum / len(all_student_prompts), self.global_step)
+                    self.writer.add_scalar("avg_pass_at_n", avg_pass_at_n, self.global_step)
+                    self.writer.add_scalar("avg_teacher_pass_at_n", avg_teacher_pass_at_n, self.global_step)
+                    logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}, avg_student_reward: {score_sum / len(all_student_prompts)}, avg_pass_at_n: {avg_pass_at_n}, avg_teacher_pass_at_n: {avg_teacher_pass_at_n}")
 
 
         self.writer.flush()
