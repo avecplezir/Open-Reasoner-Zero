@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-base-iter50-explain-v0-{randint}'
+    e_name = f'grpo-base-iter50-sft-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -126,7 +126,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 5
-    eval_teacher: bool = True
+    eval_teacher: bool = False
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -184,6 +184,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
+    filter_student_for_teacher: bool = True
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

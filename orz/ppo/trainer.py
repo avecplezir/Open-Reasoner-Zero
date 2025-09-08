@@ -747,12 +747,51 @@ class RayPPOTrainer:
         del final_answers
 
         assert self.cfg.student_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"student loss type {self.cfg.student_loss_type} must be ppo, sft or topr")
-        assert self.cfg.teacher_loss_type in ['ppo', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo or topr")
-        if self.cfg.student_loss_type == 'sft':
+        assert self.cfg.teacher_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo, sft or topr")
+        if self.train_student and self.cfg.student_loss_type == 'sft':
             # Keep only correct samples for SFT, regardless of origin
             keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
+            logger.info(f"SFT student filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
+            if len(keep_idx) == 0:
+                # No valid samples this round
+                return
+            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+            outputs = [outputs[i] for i in keep_idx]
+            custom_rewards = [custom_rewards[i] for i in keep_idx]
+            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+            answer_indices = [answer_indices[i] for i in keep_idx]
+            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+            initial_scores = [initial_scores[i] for i in keep_idx]
+            teacher_generated = [teacher_generated[i] for i in keep_idx]
+        elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
+            # Keep only correct samples for SFT, regardless of origin
+            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
+            dropped = len(initial_scores) - len(keep_idx)
+            logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
+            if len(keep_idx) == 0:
+                # No valid samples this round
+                return
+            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+            outputs = [outputs[i] for i in keep_idx]
+            custom_rewards = [custom_rewards[i] for i in keep_idx]
+            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+            answer_indices = [answer_indices[i] for i in keep_idx]
+            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+            initial_scores = [initial_scores[i] for i in keep_idx]
+            teacher_generated = [teacher_generated[i] for i in keep_idx]
+        else:
+            if self.train_teacher:
+                logger.info(f"Using {self.cfg.teacher_loss_type} to train teacher")
+            if self.train_student:
+                logger.info(f"Using {self.cfg.student_loss_type} to train student")
+
+        if self.cfg.filter_student_for_teacher and self.train_teacher and (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting):
+            keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
+            dropped = len(initial_scores) - len(keep_idx)
+            logger.info(f"Augmentation teacher filter: dropping {dropped}/{len(initial_scores)} incorrect student samples")
             if len(keep_idx) == 0:
                 # No valid samples this round
                 return
@@ -963,6 +1002,8 @@ class RayPPOTrainer:
                             if teacher_generated[teacher_prompt_idx]:
                                 # we programatically add the final answer, so the log prob should be 0
                                 student_exp.action_log_probs[:, final_answer_start_prob_offset:final_answer_end_prob_offset] = 0
+                            # mask out teacher answer for teacher if teacher_explain_only
+                            teacher_exp.action_mask[:, final_answer_start_prob_offset:final_answer_end_prob_offset] = 0
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -1112,6 +1153,8 @@ class RayPPOTrainer:
                     assert prompt_idx == len(all_teacher_prompts) == len(final_reward_list), "last teacher prompt idx must be equal to all teacher prompts length"
 
                     # Log distribution of lengths (attempt counts) per prompt
+                    logger.info(f"sum student {sum([len(v)for v in pass_at_n_dict.values()])}, sum teacher {sum([len(v) for v in teacher_pass_at_n_dict.values()])}")
+                    
                     pass_n_len_dist = dict(Counter(len(v) for v in pass_at_n_dict.values()))
                     teacher_pass_n_len_dist = dict(Counter(len(v) for v in teacher_pass_at_n_dict.values()))
                     logger.info(f"pass_at_n attempt lengths distribution: {pass_n_len_dist}")
@@ -1370,6 +1413,7 @@ class RayPPOTrainer:
                 "total_length": total_length,
                 "num_actions": num_actions_all[i],
             }
+
             experiences.append(
                 Experience(
                     sequences_all[i],
@@ -1379,7 +1423,7 @@ class RayPPOTrainer:
                     None,
                     None,
                     attention_mask_all[i],
-                    None,
+                    torch.ones_like(action_log_probs[i]) if self.cfg.teacher_explain_only else None,
                     response_length,
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
                     info,
@@ -1677,12 +1721,13 @@ class RayPPOTrainer:
     @torch.no_grad()
     async def _calc_advantages_and_returns(self, experience: Experience):
         num_actions = experience.info["num_actions"]
+        # ToDo: hardcoded action mask = None, need to fix it later
         reward = await compute_reward.remote(
             experience.info["reward"],
             self.cfg.init_kl_coef,
             experience.kl,
             custom_rewards=experience.info["custom_rewards"],
-            action_mask=experience.action_mask,
+            action_mask=None, #experience.action_mask,
             num_actions=num_actions,
             reward_clip_range=self.cfg.reward_clip_range,
             use_kl_loss=self.cfg.use_kl_loss,
@@ -1690,7 +1735,7 @@ class RayPPOTrainer:
         experience.advantages, experience.returns = await get_advantages_and_returns.remote(
             experience.values,
             reward,
-            experience.action_mask,
+            None, #experience.action_mask,
             num_actions,
             self.cfg.gamma,
             self.cfg.lambd,
@@ -1747,55 +1792,6 @@ class RayPPOTrainer:
 
         return experience, metrics
 
-    def _convert_prompts_outputs_to_batch_tensors(self, prompts: List[str], outputs: List[str]):
-        # This function is used when not packing samples
-        # concat all outputs to following format:
-        #
-        # | [PAD] [PAD] token token token | token token [EOS] [PAD] |
-        # | token token token token token | token token [EOS] [PAD] |
-        # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
-        # |<---------- prompt ----------->|<-------- answer ------->|
-        max_input_len, max_output_len = 0, 0
-        prompt_token_lens, response_token_lens = [], []
-        inputs_token_ids, outputs_token_ids = [], []
-        for prompt, output in zip(prompts, outputs):
-            input_token_ids = self._tokenize(prompt, self.cfg.prompt_max_len, padding=False)["input_ids"]
-            response_token_ids = self._tokenize(output, self.cfg.generate_max_len, padding=False)["input_ids"]
-
-            inputs_token_ids.append(input_token_ids)
-            outputs_token_ids.append(response_token_ids)
-
-            prompt_token_len = len(input_token_ids)
-            response_token_len = len(response_token_ids)
-            prompt_token_lens.append(prompt_token_len)
-            response_token_lens.append(response_token_len)
-
-            max_input_len = max(max_input_len, prompt_token_len)
-            max_output_len = max(max_output_len, response_token_len)
-
-        pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-        sequences = []
-        for i, prompt in enumerate(prompts):
-            # left padding input
-            input_len = prompt_token_lens[i]
-            input_ids = [pad_token_id] * (max_input_len - input_len) + list(inputs_token_ids[i])
-
-            # right padding output
-            output_len = response_token_lens[i]
-            output_ids = list(outputs_token_ids[i]) + [pad_token_id] * (max_output_len - output_len)
-
-            # replace last token with eos_token_id if it is not eos_token_id, keep the total length of output_ids
-            # output_ids[output_len - 1] = eos_token_id
-
-            # concat input and output
-            sequences.append(input_ids + output_ids)
-
-        sequences = torch.tensor(sequences)
-
-        sequences, attention_mask, action_mask = self._process_sequences(
-            sequences, max_input_len, eos_token_id, pad_token_id
-        )
-        return sequences, attention_mask, action_mask
 
     def _convert_prompts_outputs_to_batch_tensors_packing(
         self, prompts: List[str],
@@ -2257,25 +2253,6 @@ class RayPPOTrainer:
                 return responses, finish_reasons
 
         return generate
-
-    def _process_sequences(self, sequences: torch.Tensor, input_len, eos_token_id, pad_token_id):
-        attention_mask = (sequences.ne(eos_token_id) & sequences.ne(pad_token_id)).to(dtype=torch.long)
-        seq_length = attention_mask.size(1)
-
-        eos_indices = seq_length - attention_mask.long().fliplr().argmax(dim=1, keepdim=True).clamp(min=1)
-        sequences.scatter_(dim=1, index=eos_indices, value=eos_token_id)
-
-        # For Llama3 and Qwen2 models, there are some eos_tokens in the middle of the prompt.
-        first_token_indices = attention_mask.long().argmax(dim=1, keepdim=True)
-        mask = torch.arange(seq_length).unsqueeze(0).expand(sequences.size(0), -1).to(device=sequences.device)
-        attention_mask = (mask >= first_token_indices) & (mask <= eos_indices).to(dtype=torch.long)
-
-        # in RL, state_i (current token) + action_i (next token) -> state_i+1 (next token)
-        state_seq = sequences[:, input_len - 1 : -1]
-        action_mask = state_seq.ne(eos_token_id) & state_seq.ne(pad_token_id)
-        action_mask[:, 0] = 1
-
-        return sequences, attention_mask, action_mask
 
     def _tokenize(self, texts, max_length=99999999, padding=True, device=None):
         if not padding:

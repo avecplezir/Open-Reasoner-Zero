@@ -715,9 +715,9 @@ class PolicyRayActorBase(RayActor):
         num_actions = torch.cat(experience.num_actions, dim=0).long().tolist()
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
-
+        action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0) if experience.action_mask[0] is not None else None
         loss_type = experience.info['loss_type'][0].item()
-        ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if loss_type == 'topr' else None
+        ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if loss_type == 2 else None
 
         # actor loss
         action_log_probs, output = self.model(
@@ -735,7 +735,7 @@ class PolicyRayActorBase(RayActor):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=action_mask,
             ratio_clipped_0_1=ratio_clipped_0_1,
             loss_type=loss_type,
         )
@@ -785,7 +785,7 @@ class PolicyRayActorBase(RayActor):
                 kl_loss = -kl_loss
                 r = kl_loss.exp()
                 kl_loss = r - 1.0 - kl_loss
-            kl_loss = masked_mean(kl_loss, experience.action_mask, dim=-1).mean()
+            kl_loss = masked_mean(kl_loss, action_mask, dim=-1).mean()
         else:
             kl_loss = 0
 

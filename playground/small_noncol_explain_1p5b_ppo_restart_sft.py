@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-aug-wrongonly-iter50-explain-v0-{randint}'
+    e_name = f'grpo-aug-wrongonly-iter50-explain-sft-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -105,7 +105,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -124,9 +124,9 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
+    enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 5
-    eval_teacher: bool = True
+    eval_teacher: bool = False
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -140,7 +140,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # grpo related settings
     use_grpo: bool = True #False
-    remove_student_grpo_normalization: bool = False
+    remove_student_grpo_normalization: bool = True
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
@@ -184,8 +184,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = False
+    filter_student_for_teacher: bool = True
 
-    student_loss_type: str = "ppo"
+    student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
 
 

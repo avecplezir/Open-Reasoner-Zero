@@ -306,8 +306,10 @@ class CustomRewardTrainer(RayPPOTrainer):
         # must before grpo, for grpo will change scores
         num_tokens_arr = np.array(num_tokens, dtype=np.float32)  # must be float to calculate mean and std
         scores_arr = np.array(scores)
+        teacher_scores_arr = np.array(teacher_scores)
         correct_tokens_arr = np.array([]) if np.all(scores_arr == 0) else np.array(num_tokens_arr[scores_arr == 1])
         incorrect_tokens_arr = np.array([]) if np.all(scores_arr == 1) else np.array(num_tokens_arr[scores_arr == 0])
+        logger.info(f"{prefix} scores_arr num incorrect {sum(scores_arr == 0)} num_correct {sum(scores_arr == 1)} {(teacher_scores_arr==0).sum()} {(teacher_scores_arr==1).sum()}")
 
         initial_scores = copy.deepcopy(scores)
         initial_teacher_scores = copy.deepcopy(teacher_scores)
