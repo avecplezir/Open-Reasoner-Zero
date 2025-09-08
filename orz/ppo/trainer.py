@@ -925,8 +925,8 @@ class RayPPOTrainer:
                     kl_sum_list.append(kl_sum.item())
                     match_reward_list.append(match_reward.item())
 
-                    student_exp.info['loss_type'] = compute_loss_type_hash(self.cfg.student_loss_type)
-                    teacher_exp.info['loss_type'] = compute_loss_type_hash(self.cfg.teacher_loss_type)
+                    student_exp.info['loss_type'] = torch.tensor(compute_loss_type_hash(self.cfg.student_loss_type)).unsqueeze(0).float()
+                    teacher_exp.info['loss_type'] = torch.tensor(compute_loss_type_hash(self.cfg.teacher_loss_type)).unsqueeze(0).float()
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == 'topr':
@@ -1095,11 +1095,14 @@ class RayPPOTrainer:
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                             # student
-                            prompt = all_student_prompts[prompt_idx]
-                            score = initial_scores[prompt_idx]
-                            score -= np.mean(pass_at_n_dict[prompt])
-                            if std := np.std(pass_at_n_dict[prompt]) > 0:
-                                score /= std
+                            if not self.cfg.remove_student_grpo_normalization:
+                                prompt = all_student_prompts[prompt_idx]
+                                score = initial_scores[prompt_idx]
+                                score -= np.mean(pass_at_n_dict[prompt])
+                                if std := np.std(pass_at_n_dict[prompt]) > 0:
+                                    score /= std
+                            else:
+                                score = initial_scores[prompt_idx]
 
                             student_exp.info['custom_rewards'][i][-1] = score
                             score_sum += score
