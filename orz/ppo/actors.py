@@ -131,19 +131,19 @@ class PolicyLoss(nn.Module):
         ratio_clipped_0_1: Optional[torch.Tensor] = None,
         loss_type: str = 'ppo',
     ) -> torch.Tensor:
-        if loss_type == 'ppo':
+        if loss_type == 1: #'ppo':
             ratio = (log_probs - old_log_probs).exp()
             surr1 = ratio * advantages
             surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
             loss = -torch.min(surr1, surr2)
             loss = masked_mean(loss, action_mask, dim=-1).mean()
-        elif loss_type == 'topr':
+        elif loss_type == 2: #'topr':
             # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
             per_example_loss = -(alpha * advantages * log_probs)
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
-        elif loss_type == 'sft':
+        elif loss_type == 3: #'sft':
             ratio = -log_probs * advantages
             loss = masked_mean(ratio, action_mask, dim=-1).mean()
 

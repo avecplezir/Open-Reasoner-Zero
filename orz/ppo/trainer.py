@@ -925,8 +925,8 @@ class RayPPOTrainer:
                     kl_sum_list.append(kl_sum.item())
                     match_reward_list.append(match_reward.item())
 
-                    student_exp.info['loss_type'] = self.cfg.student_loss_type
-                    teacher_exp.info['loss_type'] = self.cfg.teacher_loss_type
+                    student_exp.info['loss_type'] = compute_loss_type_hash(self.cfg.student_loss_type)
+                    teacher_exp.info['loss_type'] = compute_loss_type_hash(self.cfg.teacher_loss_type)
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == 'topr':
@@ -2394,3 +2394,15 @@ class RayPPOTrainer:
             await self.teacher_model.backload_to_gpu()
         if self.cfg.colocate_all:
             await self.teacher_model.offload_to_cpu()
+
+
+def compute_loss_type_hash(loss_type):
+    if loss_type == 'ppo':
+        loss_type_hash = 1
+    elif loss_type == 'topr':
+        loss_type_hash = 2
+    elif loss_type == 'sft':
+        loss_type_hash = 3
+    else:
+        assert False, f"student loss type {loss_type} must be ppo, sft or topr"
+    return loss_type_hash
