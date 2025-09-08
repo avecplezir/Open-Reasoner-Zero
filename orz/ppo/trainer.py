@@ -118,6 +118,10 @@ class RayPPOTrainer:
         self.global_step = consumed_samples // self.cfg.rollout_batch_size
         self.student_training_step = 0
         self.teacher_training_step = 0
+        # Warmup counter for initial teacher-only training rounds. This is used
+        # when cfg.initial_teacher_training_rounds > 0 to force a number of
+        # teacher updates before the regular teacher/student alternation.
+        self.initial_teacher_training_step = 0
         sync_teacher_weigts = False
         start_episode = consumed_samples // self.cfg.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * self.cfg.rollout_batch_size)
@@ -142,27 +146,35 @@ class RayPPOTrainer:
                             await self.eval(prefix="teacher")
 
                 # 2. determine what model to train
-                train_teacher = False
-                train_student = False
-                if self.cfg.student_training_rounds > 0:
-                    if self.teacher_training_step < self.cfg.teacher_training_rounds:
-                        logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
-                        train_teacher = True
-                        self.teacher_training_step += 1
-                    elif self.student_training_step < self.cfg.student_training_rounds:
-                        logger.info(f'training student model, {self.global_step} global step, {self.student_training_step} student step')
-                        train_student = True
-                        self.student_training_step += 1
-                        if self.student_training_step == self.cfg.student_training_rounds:
-                            self.student_training_step = 0
-                            self.teacher_training_step = 0
-                else:
-                    train_teacher = True
-                    train_student = True
+                self.train_teacher = False
+                self.train_student = False
 
-                logger.info(f'train_teacher {train_teacher}, train_student {train_student}')
-                self.train_teacher = train_teacher
-                self.train_student = train_student
+                # Optional teacher warmup: run N initial teacher-only rounds
+                initial_teacher_training_rounds = self.cfg.initial_teacher_training_rounds
+                if initial_teacher_training_rounds > 0 and self.initial_teacher_training_step < initial_teacher_training_rounds:
+                    logger.info(
+                        f"initial teacher warmup, {self.global_step} global step, {self.initial_teacher_training_step}/{initial_teacher_training_rounds}"
+                    )
+                    self.train_teacher = True
+                    self.initial_teacher_training_step += 1
+                else:
+                    if self.cfg.student_training_rounds > 0:
+                        if self.teacher_training_step < self.cfg.teacher_training_rounds:
+                            logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
+                            self.train_teacher = True
+                            self.teacher_training_step += 1
+                        elif self.student_training_step < self.cfg.student_training_rounds:
+                            logger.info(f'training student model, {self.global_step} global step, {self.student_training_step} student step')
+                            self.train_student = True
+                            self.student_training_step += 1
+                            if self.student_training_step == self.cfg.student_training_rounds:
+                                self.student_training_step = 0
+                                self.teacher_training_step = 0
+                    else:
+                        self.train_teacher = True
+                        self.train_student = True
+
+                logger.info(f'train_teacher {self.train_teacher}, train_student {self.train_student}')
 
                 # 3. make experiences, calculate advantages and returns
                 await self.make_experience(rand_prompts)
@@ -180,13 +192,13 @@ class RayPPOTrainer:
                     sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
-                if train_teacher and not train_student:
+                if self.train_teacher and not self.train_student:
                         train_set = zip([self.teacher_replay_buffer], ["teacher"])
                         self.student_replay_buffer.clear()
-                elif not train_teacher and  train_student:
+                elif not self.train_teacher and  self.train_student:
                     train_set = zip([self.student_replay_buffer], [""])
                     self.teacher_replay_buffer.clear()
-                elif train_teacher and train_student:
+                elif self.train_teacher and self.train_student:
                     if self.cfg.student_teacher_order:
                         train_set = zip([self.student_replay_buffer, self.teacher_replay_buffer], ["", 'teacher'])
                     else:
@@ -288,8 +300,8 @@ class RayPPOTrainer:
                 pbar.update()
                 # log epoch info
                 self.writer.add_scalar("episode_idx", episode, self.global_step)
-                self.writer.add_scalar("teacher_training", train_teacher, self.global_step)
-                self.writer.add_scalar("student_training", train_student, self.global_step)
+                self.writer.add_scalar("teacher_training", self.train_teacher, self.global_step)
+                self.writer.add_scalar("student_training", self.train_student, self.global_step)
                 self.global_step += 1
                 if self.global_step % self.cfg.save_interval == 0:
                     await self.policy_model.async_save_model(self.tokenizer, self.global_step)
@@ -297,8 +309,7 @@ class RayPPOTrainer:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
                     logger.info("Successfully save model weights, training continue.")
 
-                if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.student_training_step == self.cfg.student_training_rounds):
-                # if self.global_step == 1:
+                if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.global_step % self.cfg.synce_teacher_weights_interval) == 0: #(self.student_training_step == self.cfg.student_training_rounds):
                     async with Timer("Sync policy weights into teacher weights"):
                         await self._sync_policy_weights_to_teacher()
                         logger.info(f"Successfully loaded policy params to teacher, {self.global_step} global step")
@@ -526,6 +537,7 @@ class RayPPOTrainer:
             aug_all_student_prompts = []
             aug_all_extras = []
             indices_incorrect = []
+            new_indicess = []
             # Track which teacher prompts were already added so we can repeat
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
@@ -601,14 +613,15 @@ class RayPPOTrainer:
                 new_extra["teacher_answer"] = teacher_answer
 
                 # Append exactly n_samples_per_prompt copies to keep parity
-                incorect_index = len(all_teacher_prompts)
-                all_teacher_prompts.extent([teacher_prompt]*self.cfg.n_samples_per_prompt)
+                index = len(all_teacher_prompts)
+                all_teacher_prompts.extend([teacher_prompt]*self.cfg.n_samples_per_prompt)
                 aug_all_student_prompts.extend([student_prompt]*self.cfg.n_samples_per_prompt)
                 aug_all_extras.extend([dict(new_extra)]*self.cfg.n_samples_per_prompt)
 
                 # Track representative incorrect indices for logging
+                new_indicess.append(index)
                 if representative_incorrect:
-                    indices_incorrect.append(incorect_index)
+                    indices_incorrect.append(index)
 
                 added_teacher_prompt_keys.add(key)
 
@@ -664,12 +677,12 @@ class RayPPOTrainer:
                 table_data = []
                 for i in range(n):
                     table_data.append([
-                        all_student_prompts[i],
-                        all_teacher_prompts[i],
-                        outputs[i],
-                        final_answers[i],
-                        bool(initial_scores[i]),
-                        bool(initial_teacher_scores[i]),
+                        all_student_prompts[new_indicess[i]],
+                        all_teacher_prompts[new_indicess[i]],
+                        outputs[new_indicess[i]],
+                        final_answers[new_indicess[i]],
+                        bool(initial_scores[new_indicess[i]]),
+                        bool(initial_teacher_scores[new_indicess[i]]),
                     ])
                 if not self.cfg.augment_only_wrong:
                     n = min(5, len(indices_incorrect))
@@ -728,9 +741,30 @@ class RayPPOTrainer:
         answer_indices = [answer_indices[i] for i in indices]
         initial_scores = [initial_scores[i] for i in indices]
         initial_teacher_scores = [initial_teacher_scores[i] for i in indices]
-        final_answers = [final_answers[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
-        correct_formattings = [correct_formattings[i] for i in indices]
+
+        del correct_formattings
+        del final_answers
+
+        assert self.cfg.student_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"student loss type {self.cfg.student_loss_type} must be ppo, sft or topr")
+        assert self.cfg.teacher_loss_type in ['ppo', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo or topr")
+        if self.cfg.student_loss_type == 'sft':
+            # Keep only correct samples for SFT, regardless of origin
+            keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
+            dropped = len(initial_scores) - len(keep_idx)
+            logger.info(f"SFT filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
+            if len(keep_idx) == 0:
+                # No valid samples this round
+                return
+            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+            outputs = [outputs[i] for i in keep_idx]
+            custom_rewards = [custom_rewards[i] for i in keep_idx]
+            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+            answer_indices = [answer_indices[i] for i in keep_idx]
+            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+            initial_scores = [initial_scores[i] for i in keep_idx]
+            teacher_generated = [teacher_generated[i] for i in keep_idx]
 
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
         self.writer.add_scalar("teacher_generated_frac", teacher_generated.mean(), self.global_step)
@@ -825,14 +859,16 @@ class RayPPOTrainer:
                     teacher_score = initial_teacher_scores[teacher_prompt_idx]
                     ss_tokens_offset = 0
                     kl_token_offset = 6
+                    answer_tokens_offset = 3
 
                     if teacher_score and final_answer_start is not None and final_answer_start < final_answer_end:
-
-                        # s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
 
                         # logger.info(f'final_answer_start {final_answer_start-answer_tokens_offset}, final_answer_end {final_answer_end+answer_tokens_offset}, na {na}')
                         # final_answer_start_offset, final_answer_end_offset = offset + final_answer_start, offset + final_answer_end
                         final_answer_start_offset, final_answer_end_offset = offset + final_answer_start - ss_tokens_offset, offset + final_answer_end + ss_tokens_offset
+
+                        final_answer_start_prob_offset = offset + final_answer_start - answer_tokens_offset
+                        final_answer_end_prob_offset = offset + final_answer_end + answer_tokens_offset
 
                         final_answer_log_propbs = student_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset].clone()
                         # logger.info(f'student_exp.action_log_probs: {student_exp.action_log_probs.shape} {final_answer_start} {final_answer_end} {s_final_answer_start} {s_final_answer_end}')
@@ -841,7 +877,9 @@ class RayPPOTrainer:
                         # check if we find indices correctly
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
                         # logger.info(f"start end: {s_final_answer_start, s_final_answer_end}, vis_final_answer: {vis_final_answer} final_answer_log_propbs {final_answer_log_propbs}")
-                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-answer_tokens_offset:s_final_answer_end+answer_tokens_offset])
+
+                        # s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                        # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-kl_token_offset:s_final_answer_end+answer_tokens_offset])
                         # logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}")
 
                         ss_reward_mean = final_answer_log_propbs.mean().item()
@@ -876,7 +914,6 @@ class RayPPOTrainer:
                     assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
                     if teacher_score:
                         final_teacher_reward = self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward
-                        # logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]} final_teacher_reward {final_teacher_reward}, ss_reward {ss_reward_list[-1]}, kl_reward {kl_reward}, match_reward {match_reward}, ss_reward_mean {ss_reward_mean}, ss_reward_min {ss_reward_min}, kl_mean {kl_mean}, kl_max {kl_max}, kl_sum {kl_sum}")
                         final_reward_list.append(final_teacher_reward.item())
                     else:
                         final_reward_list.append(-2.0)
@@ -888,21 +925,25 @@ class RayPPOTrainer:
                     kl_sum_list.append(kl_sum.item())
                     match_reward_list.append(match_reward.item())
 
+                    student_exp.info['loss_type'] = self.cfg.student_loss_type
+                    teacher_exp.info['loss_type'] = self.cfg.teacher_loss_type
+
                     # compute ratio_clipped_0_1 for TOPR
-                    if self.cfg.use_topr:
+                    if self.cfg.student_loss_type == 'topr':
                         if teacher_generated[teacher_prompt_idx]:
-                            teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
                             student_ratio_clipped_0_1_scalar = torch.exp((student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
                             student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
                         else:
                             student_ratio_clipped_0_1_scalar = torch.tensor(1)
-                            teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
-                            teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
-
-                        student_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
-                        teacher_exp.info['use_topr'] = torch.tensor(1.).unsqueeze(0)
-                        teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
                         student_ratio_clipped_0_1_list.append(student_ratio_clipped_0_1_scalar.item())
+
+                    if self.cfg.teacher_loss_type == 'topr':
+                        if teacher_generated[teacher_prompt_idx]:
+                            teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
+                        else:
+                            teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                            teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
+                        teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 
                     if not teacher_generated[teacher_prompt_idx]:
                         if self.cfg.replace_teacher_logprops_w_student:
@@ -919,9 +960,9 @@ class RayPPOTrainer:
                         if self.cfg.teacher_explain_only:
                             # logger.info(f'teacher_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset] {teacher_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset]}')
                             # logger.info(f'ratio {(teacher_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset] - 100).exp()}')
-                            # teacher_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset] = 0
                             if teacher_generated[teacher_prompt_idx]:
-                                student_exp.action_log_probs[:, final_answer_start_offset:final_answer_end_offset] = 0
+                                # we programatically add the final answer, so the log prob should be 0
+                                student_exp.action_log_probs[:, final_answer_start_prob_offset:final_answer_end_prob_offset] = 0
 
                     offset += na
                     teacher_prompt_idx += 1
@@ -993,10 +1034,10 @@ class RayPPOTrainer:
                 incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
                 correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
                 incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
-                teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[cc])
-                teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(teacher_ratio_clipped_0_1_list[ic])
-                student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[cc])
-                student_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.use_topr else np.array(student_ratio_clipped_0_1_list[ic])
+                teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.teacher_loss_type == 'topr' else np.array(teacher_ratio_clipped_0_1_list[cc])
+                teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.teacher_loss_type == 'topr' else np.array(teacher_ratio_clipped_0_1_list[ic])
+                student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.student_loss_type == 'topr' else np.array(student_ratio_clipped_0_1_list[cc])
+                student_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.student_loss_type == 'topr' else np.array(student_ratio_clipped_0_1_list[ic])
 
                 prefix = f"{prefix}/" if prefix != "" else prefix
                 log_dict.update(
@@ -1340,7 +1381,7 @@ class RayPPOTrainer:
                     torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
                     info,
                     kl,
-                    torch.ones_like(action_log_probs[i]) if self.cfg.use_topr else None,
+                    torch.ones_like(action_log_probs[i]) if self.cfg.student_loss_type == 'topr' or self.cfg.teacher_loss_type == 'topr' else None,
                 )
             )
         return experiences

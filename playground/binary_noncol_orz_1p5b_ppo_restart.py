@@ -70,12 +70,12 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-base-iter104-explain-v0-{randint}'
+    e_name = f'grpo-base-iter50-explain-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -166,6 +166,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
+    initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 10000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
@@ -179,9 +180,13 @@ class PPOExpConfig(BasePPOExpConfig):
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
+    synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
+
+    student_loss_type: str = "sft"
+    teacher_loss_type: str = "ppo"
 
 
 if __name__ == "__main__":

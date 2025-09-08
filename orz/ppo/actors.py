@@ -129,20 +129,23 @@ class PolicyLoss(nn.Module):
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
         ratio_clipped_0_1: Optional[torch.Tensor] = None,
-        use_topr: bool = False,
+        loss_type: str = 'ppo',
     ) -> torch.Tensor:
-        if not use_topr:
+        if loss_type == 'ppo':
             ratio = (log_probs - old_log_probs).exp()
             surr1 = ratio * advantages
             surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
             loss = -torch.min(surr1, surr2)
             loss = masked_mean(loss, action_mask, dim=-1).mean()
-        else:
+        elif loss_type == 'topr':
             # Importance ratio for negatives: π(y|x)/µ(y|x) = exp(logp_online - logp_base)
             # Clip to [0, 1]. Using clamp(max=0) before exp avoids overflow and ensures <= 1.
             alpha = torch.where(advantages < 0, ratio_clipped_0_1, torch.ones_like(advantages)).detach()
             per_example_loss = -(alpha * advantages * log_probs)
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
+        elif loss_type == 'sft':
+            ratio = -log_probs * advantages
+            loss = masked_mean(ratio, action_mask, dim=-1).mean()
 
         return loss
 
@@ -710,8 +713,8 @@ class PolicyRayActorBase(RayActor):
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
 
-        use_topr = self.args.use_topr and int(experience.info['use_topr'][0].item())
-        ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if use_topr else None
+        loss_type = experience.info['loss_type'][0].item()
+        ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if loss_type == 'topr' else None
 
         # actor loss
         action_log_probs, output = self.model(
@@ -724,14 +727,14 @@ class PolicyRayActorBase(RayActor):
 
         # loss function
         # TODO: recompute advantages
-        logger.info(f'use_topr {use_topr}')
+        logger.info(f'loss_type {loss_type}')
         actor_loss = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
             action_mask=experience.action_mask,
             ratio_clipped_0_1=ratio_clipped_0_1,
-            use_topr=use_topr,
+            loss_type=loss_type,
         )
         # clip ratio
         with torch.no_grad():
