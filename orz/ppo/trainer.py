@@ -525,7 +525,12 @@ class RayPPOTrainer:
                 combined_final_answers.extend(final_answers)
                 combined_correct_formattings.extend(correct_formattings)
 
-        if self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student:
+        generate_with_teacher = True
+        if self.train_teacher and self.cfg.train_teacher_on_student_data_only:
+            generate_with_teacher = False
+            logger.info("Skipping teacher generation since only training teacher on student data")
+
+        if generate_with_teacher and self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student:
 
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
@@ -767,7 +772,7 @@ class RayPPOTrainer:
             teacher_generated = [teacher_generated[i] for i in keep_idx]
         elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
             # Keep only correct samples for SFT, regardless of origin
-            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
+            keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
             if len(keep_idx) == 0:
@@ -1125,12 +1130,15 @@ class RayPPOTrainer:
                         assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
                         for i in range(len(teacher_exp.num_actions[0])):
                             # teacher
-                            prompt = all_teacher_prompts[prompt_idx]
-                            teacher_score = final_reward_list[prompt_idx].item()
-                            teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
-                            # logger.info(f"teacher_generated {teacher_generated[prompt_idx]} teacher_pass_at_n_dict[prompt] {teacher_pass_at_n_dict[prompt]}")
-                            if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-                                teacher_score /= teacher_std
+                            if self.train_teacher and self.cfg.teacher_loss_type == 'sft':
+                                teacher_score = 1
+                            else:
+                                prompt = all_teacher_prompts[prompt_idx]
+                                teacher_score = final_reward_list[prompt_idx].item()
+                                teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
+                                # logger.info(f"teacher_generated {teacher_generated[prompt_idx]} teacher_pass_at_n_dict[prompt] {teacher_pass_at_n_dict[prompt]}")
+                                if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                                    teacher_score /= teacher_std
 
                             teacher_score_sum += teacher_score
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
@@ -1163,7 +1171,7 @@ class RayPPOTrainer:
                     avg_pass_at_n =  sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict)
                     self.writer.add_scalar("avg_teacher_reward_normalized", teacher_score_sum / len(all_teacher_prompts), self.global_step)
                     self.writer.add_scalar("avg_student_reward_normalized", score_sum / len(all_student_prompts), self.global_step)
-                    self.writer.add_scalar("avg_pass_at_n", avg_pass_at_n, self.global_step)
+                    self.writer.add_scalar("avg_pass_at_n_combined", avg_pass_at_n, self.global_step)
                     logger.info(f"avg_teacher_reward: {teacher_score_sum / len(all_teacher_prompts)}, avg_student_reward: {score_sum / len(all_student_prompts)}, avg_pass_at_n: {avg_pass_at_n}")
 
 
