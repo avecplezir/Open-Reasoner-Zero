@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-aug-wrongonly-iter50-explain-sft-v0-{randint}'
+    e_name = f'grpo-aug-wrongonly-iter50-explain-sft-in50-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -172,8 +172,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = True
+    augment_only_wrong: bool = True
+    correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
 
     separate_teacher_model: bool = True
@@ -184,9 +184,10 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = False
     filter_student_for_teacher: bool = True
+    train_teacher_on_student_data_only: bool = True
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":
@@ -210,3 +211,4 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
+
