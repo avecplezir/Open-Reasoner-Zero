@@ -70,18 +70,17 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'base-iter50-sft-v0-{randint}'
+    e_name = f'grpo-aug-wrongonly-iter50-explain-sft-in50-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
-    # MathTrain dataset and Math500 eval dataset
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
@@ -124,7 +123,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
     eval_teacher: bool = False
 
@@ -151,8 +150,8 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.01
-    kl_mean_coef: float = 1.
+    kl_max_coef: float = 0.1
+    kl_mean_coef: float = 2.
     reward_kl_coef: float = 1.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
@@ -166,28 +165,29 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 10000  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = 5
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
-    augment_only_wrong: bool = False
+    augment_student_generation_with_teacher: bool = True
+    augment_only_wrong: bool = True
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    use_teacher_only_data_for_teacher: bool = False
     filter_student_for_teacher: bool = True
+    train_teacher_on_student_data_only: bool = True
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":
@@ -211,3 +211,4 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
+

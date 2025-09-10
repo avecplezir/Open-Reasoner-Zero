@@ -425,11 +425,11 @@ class RayPPOTrainer:
                     dp_tasks = []
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
-                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings = await reward_fn(
+                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = await reward_fn(
                         all_student_prompts, outputs, all_extras, prefix='student/')
                     assert len(all_student_prompts) == len(outputs), "generate objects number after custom reward function must be equal to all inputs number"
             else:
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None, None
 
             # create teacher prompts from student prompts
             if self.tokenizer.bos_token_id is None:
@@ -669,12 +669,12 @@ class RayPPOTrainer:
                     dp_tasks = []
                     reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                     # Use student prompts for reward calculation since that's what the model will be trained on
-                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, _, _, correct_formattings = await reward_fn(
+                    all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, _, _, correct_formattings, _ = await reward_fn(
                         all_student_prompts, outputs, all_extras, prefix='teacher/')
                     assert len(all_student_prompts) == len(outputs) == len(
                         all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
-                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, correct_formattings = all_student_prompts, outputs, None, None, None, None, None, None, None
+                all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None
 
             # Log corresponding teacher generation examples to wandb
             if wandb.run is not None and len(all_teacher_prompts) > 0:
@@ -813,7 +813,8 @@ class RayPPOTrainer:
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
         self.writer.add_scalar("teacher_generated_frac", teacher_generated.mean(), self.global_step)
         logger.info(f"all_student_prompts: {len(all_student_prompts)}, all_teacher_prompts: {len(all_teacher_prompts)}")
-        assert len(all_student_prompts) == len(all_teacher_prompts) == len(teacher_generated), logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}")
+        assert len(all_student_prompts) == len(all_teacher_prompts) == len(teacher_generated) == len(initial_scores) == len(initial_teacher_scores) == len(answer_indices) == len(outputs), (
+logger.info(f"student and teacher prompts must be equal in length {len(all_student_prompts)} {len(all_teacher_prompts)}"))
 
         # empty data
         if len(all_student_prompts) == 0:

@@ -123,7 +123,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
     eval_teacher: bool = False
 

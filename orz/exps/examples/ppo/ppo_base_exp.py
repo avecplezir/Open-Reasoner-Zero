@@ -104,6 +104,14 @@ class BasePPOExpConfig(BaseConfig):
     freezing_actor_steps: int = -1
     n_samples_per_prompt: int = 1
 
+    # student generation retry logic
+    # When enabled, generate multiple rounds with the student and
+    # re-queue prompts that have fewer than the required number of
+    # successful trajectories for additional generations.
+    generate_student_retry_enabled: bool = False
+    student_success_min_per_prompt: int = 0
+    student_retry_max_rounds: int = 0
+
     kl_target: Optional[float] = None
     init_kl_coef: float = 0.01
     use_kl_estimator_k3: bool = False

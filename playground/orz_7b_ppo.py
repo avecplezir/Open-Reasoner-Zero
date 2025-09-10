@@ -313,23 +313,6 @@ class CustomRewardTrainer(RayPPOTrainer):
 
         initial_scores = copy.deepcopy(scores)
         initial_teacher_scores = copy.deepcopy(teacher_scores)
-        # GRPO
-        # if self.cfg.use_grpo:
-            # self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
-            # self.writer.add_scalar("grpo_teacher_raw_reward", np.mean(teacher_scores), self.global_step)
-            # grpo student reward normalization
-            # for i, prompt in enumerate(prompts):
-            #     if not self.cfg.remove_student_grpo_normalization:
-            #         scores[i] -= np.mean(pass_at_n_dict[prompt])
-            #         if std := np.std(pass_at_n_dict[prompt]) > 0:
-            #             scores[i] /= std
-            #     else:
-                    # transform scores to -1, 1 if student_grpo_normalization is removed
-                    # scores[i] = 2 * (scores[i] - 0.5)
-            #
-            # if self.cfg.use_minus_plus_one_teacher_reward:
-            #     for i, prompt in enumerate(prompts):
-            #         teacher_scores[i] = 2 * (teacher_scores[i] - 0.5)
 
         def dump_results(prompts, outputs, scores):
             saved = []
@@ -352,8 +335,8 @@ class CustomRewardTrainer(RayPPOTrainer):
             f"{prefix}avg_repeat_score": sum(repeat_scores) / len(prompts),
             f"{prefix}avg_reflection_pattern_score": sum(reflection_pattern_scores) / len(prompts),
             f"{prefix}accuracy": np.mean(scores_arr).item(),
-            "avg_pass_at_n": sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict),
-            # "avg_teacher_pass_at_n": sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict),
+            f"{prefix}avg_pass_at_n": sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict),
+            f"{prefix}avg_teacher_pass_at_n": sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict),
             f"{prefix}avg_num_tokens": np.mean(num_tokens_arr).item(),
             f"{prefix}std_num_tokens": np.std(num_tokens_arr).item(),
             f"{prefix}avg_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.mean(correct_tokens_arr).item(),
@@ -414,7 +397,7 @@ class CustomRewardTrainer(RayPPOTrainer):
 
 
         return (res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors,
-                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, stop_reasons)
+                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, stop_reasons, pass_at_n_dict)
 
     @override
     @torch.no_grad()
