@@ -108,7 +108,6 @@ class BasePPOExpConfig(BaseConfig):
     # When enabled, generate multiple rounds with the student and
     # re-queue prompts that have fewer than the required number of
     # successful trajectories for additional generations.
-    generate_student_retry_enabled: bool = False
     student_success_min_per_prompt: int = 0
     student_retry_max_rounds: int = 0
 

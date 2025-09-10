@@ -70,17 +70,18 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'grpo-aug-wrongonly-iter50-explain-sft-in50-v0-{randint}'
+    e_name = f'base-iter50-sft-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
+    # MathTrain dataset and Math500 eval dataset
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
@@ -165,9 +166,9 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 5
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = 0
+    student_training_rounds: int = 10000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
@@ -188,6 +189,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "sft"
+
+    student_retry_max_rounds: int = 5
+    student_success_min_per_prompt: int = 3
 
 
 if __name__ == "__main__":
@@ -211,4 +215,3 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
-

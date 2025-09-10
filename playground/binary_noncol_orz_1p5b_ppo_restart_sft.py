@@ -124,7 +124,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
     eval_teacher: bool = False
 
@@ -172,8 +172,8 @@ class PPOExpConfig(BasePPOExpConfig):
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
-    augment_only_wrong: bool = False
+    augment_student_generation_with_teacher: bool = True
+    augment_only_wrong: bool = True
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
 
@@ -183,11 +183,12 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
-    filter_student_for_teacher: bool = True
+    use_teacher_only_data_for_teacher: bool = False
+    filter_student_for_teacher: bool = False
+    train_teacher_on_student_data_only: bool = True
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":

@@ -150,8 +150,8 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.1
-    kl_mean_coef: float = 2.
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1.
     reward_kl_coef: float = 1.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
@@ -165,7 +165,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 50
+    initial_teacher_training_rounds: int = 5
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True

@@ -531,6 +531,117 @@ class RayPPOTrainer:
                 combined_final_answers.extend(final_answers)
                 combined_correct_formattings.extend(correct_formattings)
 
+            # Optional retry rounds based on per-prompt success counts (pass@N)
+            if self.cfg.student_retry_max_rounds > 0  and self.cfg.student_success_min_per_prompt > 0:
+                # Initialize success counts from the first round
+                success_counts = defaultdict(int)
+                for p in original_prompts:
+                    success_counts[p] = int(sum(pass_at_n_dict.get(p, [])))
+
+                # Build list of prompts to retry
+                to_retry_keys = [p for p in original_prompts if success_counts[p] < self.cfg.student_success_min_per_prompt]
+                current_prompts = [(p, prompt_to_extra[p]) for p in to_retry_keys]
+
+                for round_idx in range(self.cfg.student_retry_max_rounds):
+                    if len(current_prompts) == 0:
+                        break
+
+                    logger.info(f'round {round_idx} with {len(to_retry_keys)} keys')
+
+                    # Duplicate prompts for this round
+                    paired_data = []
+                    for p, e in current_prompts:
+                        for _ in range(self.cfg.n_samples_per_prompt):
+                            paired_data.append((p, e))
+
+                    rng = random.Random(4242 + round_idx)
+                    rng.shuffle(paired_data)
+
+                    retry_student_prompts = [p for p, _ in paired_data]
+                    retry_extras = [e for _, e in paired_data]
+
+                    # Generate sequences via vLLM
+                    retry_outputs = []
+                    num_vllm_dp_gruops = len(self.vllm_engines)
+                    async with Timer(f"Generate retry student sequences via vllm engines (round {round_idx + 1})"):
+                        dp_prompt_size = (len(retry_student_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+                        dp_tasks = []
+                        for dp_rank in range(num_vllm_dp_gruops):
+                            dp_inputs = retry_student_prompts[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                            dp_extras = retry_extras[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                            if len(dp_inputs) == 0:
+                                continue
+                            gen_func = self._get_generate_function(dp_rank)
+                            dp_tasks.append(self.generate_vllm(gen_func, dp_inputs, extras=dp_extras, teacher=False, **generate_kwargs))
+
+                        local_responses = await asyncio.gather(*dp_tasks)
+                        retry_outputs.extend(sum(local_responses, []))
+
+                    if len(retry_outputs) == 0:
+                        break
+
+                    # Score retries
+                    reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
+                    (
+                        retry_student_prompts,
+                        retry_outputs,
+                        retry_custom_rewards,
+                        retry_teacher_custom_rewards,
+                        retry_answer_indices,
+                        retry_initial_scores,
+                        retry_initial_teacher_scores,
+                        retry_final_answers,
+                        retry_teacher_yes,
+                        retry_teacher_no,
+                        retry_correct_formattings,
+                        retry_pass_at_n_dict,
+                    ) = await reward_fn(retry_student_prompts, retry_outputs, retry_extras, prefix=f'student_{round_idx+2}/')
+
+                    # Update counts and decide next retries
+                    for p, vals in retry_pass_at_n_dict.items():
+                        success_counts[p] += int(sum(vals))
+
+                    # Create teacher prompts for retries (for parity/logging)
+                    retry_teacher_prompts = []
+                    for i, (extra, student_score, teacher_score) in enumerate(zip(retry_extras, retry_initial_scores, retry_initial_teacher_scores)):
+                        if teacher_score:
+                            if retry_teacher_yes[i]:
+                                student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                            elif retry_teacher_no[i]:
+                                student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                            else:
+                                student_answer = "yes"
+                        else:
+                            student_answer = ("\\boxed{yes}" if self.cfg.boxed_pattern else "yes") if random.random() > 0.5 else ("\\boxed{no}" if self.cfg.boxed_pattern else "no")
+
+                        if self.cfg.teacher_explain_only:
+                            teacher_prompt = create_teacher_explain_only_prompt_from_answer(extra["dialogue"], student_answer, bos_token)
+                        else:
+                            teacher_prompt = create_teacher_prompt_from_answer(extra["dialogue"], student_answer, bos_token)
+                        retry_teacher_prompts.append(teacher_prompt)
+
+                    # Append to combined containers
+                    teacher_generated.extend([False] * len(retry_student_prompts))
+                    combined_all_student_prompts.extend(retry_student_prompts)
+                    combined_all_teacher_prompts.extend(retry_teacher_prompts)
+                    combined_outputs.extend(retry_outputs)
+                    combined_custom_rewards.extend(retry_custom_rewards)
+                    combined_teacher_custom_rewards.extend(retry_teacher_custom_rewards)
+                    combined_answer_indices.extend(retry_answer_indices)
+                    combined_initial_scores.extend(retry_initial_scores)
+                    combined_initial_teacher_scores.extend(retry_initial_teacher_scores)
+                    combined_final_answers.extend(retry_final_answers)
+                    combined_correct_formattings.extend(retry_correct_formattings)
+
+                    # Prepare next-round retry list
+                    to_retry_keys = [p for p in original_prompts if success_counts[p] < self.cfg.student_success_min_per_prompt]
+                    current_prompts = [(p, prompt_to_extra[p]) for p in to_retry_keys]
+
+                    pass_at_n_retry =  sum(1 for v in success_counts.values() if np.sum(v) > 0) / len(pass_at_n_dict)
+                    logger.info(f"pass_at_n_retry {round_idx} {pass_at_n_retry}")
+                    self.writer.add_scalar(f"pass_at_n_retry_{round_idx+2}", pass_at_n_retry, self.global_step)
+
+
         generate_with_teacher = True
         if self.train_teacher and self.cfg.train_teacher_on_student_data_only:
             generate_with_teacher = False
@@ -799,7 +910,8 @@ class RayPPOTrainer:
             if self.train_student:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
-        if self.cfg.filter_student_for_teacher and self.train_teacher and (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting):
+        if self.cfg.filter_student_for_teacher and self.train_teacher:
+            assert (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting), logger.info(f"Teacher filter only works with augment_only_wrong or correct_answer_augmenting")
             keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"Augmentation teacher filter: dropping {dropped}/{len(initial_scores)} incorrect student samples")

@@ -150,8 +150,8 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.1
-    kl_mean_coef: float = 2.
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1.
     reward_kl_coef: float = 1.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
