@@ -772,9 +772,9 @@ class RayPPOTrainer:
             teacher_generated = [teacher_generated[i] for i in keep_idx]
         elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
             # Keep only correct samples for SFT, regardless of origin
-            keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
+            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
+            logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_teacher_scores)} incorrect samples")
             if len(keep_idx) == 0:
                 # No valid samples this round
                 return
