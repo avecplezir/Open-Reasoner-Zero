@@ -177,7 +177,7 @@ class PPOExpConfig(BasePPOExpConfig):
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1

@@ -364,6 +364,17 @@ class RayPPOTrainer:
         teacher_generated, combined_correct_formattings = [], []
 
         if self.cfg.generate_with_student:
+
+            # Prepare BOS token for logging
+            if self.tokenizer.bos_token_id is None:
+                bos_token = ""
+            else:
+                bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+
+            # Generate with student; optionally retry prompts with too few successes.
+            prompt_to_extra = {p: e for p, e in all_inputs}
+            original_prompts = list(set(prompt_to_extra.keys()))
+
             # the same, but now generate data with student prompts
             # Create paired data (positive/negative for each prompt)
             paired_data = []
@@ -432,11 +443,6 @@ class RayPPOTrainer:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None, None
 
             # create teacher prompts from student prompts
-            if self.tokenizer.bos_token_id is None:
-                bos_token = ""
-            else:
-                bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
-
             all_teacher_prompts = []
             indices_incorrect = []
             for i, (all_extra, final_answer, student_score, teacher_score) in enumerate(zip(all_extras, final_answers, initial_scores, initial_teacher_scores)):
