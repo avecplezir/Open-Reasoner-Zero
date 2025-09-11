@@ -172,12 +172,12 @@ class PPOExpConfig(BasePPOExpConfig):
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = True
+    augment_student_generation_with_teacher: bool = False
+    augment_only_wrong: bool = False
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
 
-    separate_teacher_model: bool = True
+    separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1

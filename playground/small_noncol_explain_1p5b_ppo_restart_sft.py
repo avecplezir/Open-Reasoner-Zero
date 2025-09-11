@@ -123,7 +123,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
     eval_teacher: bool = False
 
@@ -165,7 +165,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 50
+    initial_teacher_training_rounds: int = 5
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
@@ -183,10 +183,13 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = False
-    filter_student_for_teacher: bool = True
+    filter_student_for_teacher: bool = False
+    train_teacher_on_student_data_only: bool = True
+
+    weight_by_ss_reward: bool = True
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":
@@ -210,3 +213,4 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
+

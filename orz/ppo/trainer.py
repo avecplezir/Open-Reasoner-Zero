@@ -442,6 +442,14 @@ class RayPPOTrainer:
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None, None
 
+            # Keep a per-prompt FIFO list of student responses and final answers
+            student_responses_by_prompt = defaultdict(list)
+            student_final_answers_by_prompt = defaultdict(list)
+            student_response_ptr = defaultdict(int)
+            for sp, sresp, sfinal in zip(all_student_prompts, outputs, final_answers):
+                student_responses_by_prompt[sp].append(sresp)
+                student_final_answers_by_prompt[sp].append(sfinal)
+
             # create teacher prompts from student prompts
             all_teacher_prompts = []
             indices_incorrect = []
@@ -792,6 +800,47 @@ class RayPPOTrainer:
                         all_teacher_prompts), "generate objects number after custom reward function must be equal to all inputs number"
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None
+
+            # Log student/teacher paired generations for the same student prompt
+            if wandb.run is not None and len(all_teacher_prompts) > 0:
+                paired_table = []
+                # Use at most 10 pairs for readability
+                max_pairs = min(10, len(all_teacher_prompts))
+                for i in range(max_pairs):
+                    s_prompt = all_student_prompts[i]
+                    t_prompt = all_teacher_prompts[i]
+                    t_resp = outputs[i]
+                    t_final = final_answers[i]
+                    # fetch next student response for this prompt if available
+                    if 'student_responses_by_prompt' in locals():
+                        s_list = student_responses_by_prompt.get(s_prompt, [])
+                        s_final_list = student_final_answers_by_prompt.get(s_prompt, [])
+
+                        idx = student_response_ptr[s_prompt]
+                        s_resp = s_list[idx] if idx < len(s_list) else ""
+                        s_final = s_final_list[idx] if idx < len(s_final_list) else ""
+                        student_response_ptr[s_prompt] = idx + 1
+                    else:
+                        s_resp = ""
+                        s_final = ""
+                    correct_answer = all_extras[i].get("answer", "")
+                    paired_table.append([s_prompt, s_resp, s_final, t_prompt, t_resp, t_final, correct_answer])
+
+                wandb.log({
+                    "step": self.global_step,
+                    "paired_generation_examples": wandb.Table(
+                        columns=[
+                            "student_prompt",
+                            "student_response",
+                            "student_final_answer",
+                            "teacher_prompt",
+                            "teacher_response",
+                            "teacher_final_answer",
+                            "correct_answer",
+                        ],
+                        data=paired_table,
+                    ),
+                })
 
             # Log corresponding teacher generation examples to wandb
             if wandb.run is not None and len(all_teacher_prompts) > 0:
@@ -1270,7 +1319,11 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                                 if std := np.std(pass_at_n_dict[prompt]) > 0:
                                     score /= std
                             else:
-                                score = initial_scores[prompt_idx]
+                                if self.cfg.weight_by_ss_reward:
+                                    score = np.exp(ss_reward_mean_list[prompt_idx])
+                                    # logger.info(f"weighting score {score}")
+                                else:
+                                    score = initial_scores[prompt_idx]
 
                             student_exp.info['custom_rewards'][i][-1] = score
                             score_sum += score
