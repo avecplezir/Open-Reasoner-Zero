@@ -152,7 +152,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
-    reward_kl_coef: float = 1.
+    reward_kl_coef: float = 3.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
@@ -173,8 +173,9 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = True
+    correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
+    augment_yes_no: bool = True
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
@@ -182,15 +183,15 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = False
+    use_teacher_only_data_for_teacher: bool = True
     filter_student_for_teacher: bool = False
-    train_teacher_on_student_data_only: bool = True
+    train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = True
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "sft"
+    teacher_loss_type: str = "ppo"
 
 
 if __name__ == "__main__":

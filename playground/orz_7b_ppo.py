@@ -425,11 +425,13 @@ class CustomRewardTrainer(RayPPOTrainer):
             skip_special_tokens=False,
             include_stop_str_in_output=True,
             stop=stop,
+            logprobs=1,
         )
-        responses, stop_reasons = await gen_func(
+        responses, stop_reasons, logprops = await gen_func(
             prompts=prompts, sampling_params=sampling_params, use_tqdm=False, truncate_prompt=True
         )
 
+        # logger.info(f'vllm generated logprops {logprops}')
         # Clean teacher responses in explain-only mode: drop stray endoftext markers
         # if kwargs.get("teacher", False) and getattr(self.cfg, "teacher_explain_only", False):
         #     responses = [r.replace("<|endoftext|>", "") for r in responses]
@@ -450,30 +452,33 @@ class CustomRewardTrainer(RayPPOTrainer):
             pattern = re.compile(r"<answer>(.*)</answer>", re.DOTALL)
 
         @ray.remote(num_cpus=1)
-        def extract_final_answers_batch(responses: List[str], tokenizer) -> List[dict]:
+        def extract_final_answers_batch(responses: List[str], tokenizer, logprobs=None) -> List[dict]:
             results = []
-            for response in responses:
-                matches = re.findall(pattern, response)
-                final_answer = matches[-1] if matches else ""
+            for response, logprob in zip(responses, logprobs):
+                # matches = re.findall(pattern, response)
+                matches = list(pattern.finditer(response))
+                if matches:
+                    m = matches[-1]
+                    final_answer = m.group(1)
+                    answer_start, answer_end = m.span(1)
+                else:
+                    final_answer = ""
+                    answer_start = answer_end = None
+
+                # final_answer = matches[-1] if matches else ""
                 
                 # Compute begin and end indices of final answer in tokenized response
                 answer_begin_idx, answer_end_idx = None, None
                 if final_answer:
                     # Find the position of <answer> and </answer> tags
-                    answer_start = response.find("<answer>")
-                    answer_end = response.find("</answer>")
                     if answer_start != -1 and answer_end != -1:
-                        # Extract just the content between tags
-                        answer_content_start = answer_start + len("<answer>")
-                        # answer_content = response[answer_content_start:answer_end]
-                        # # Tokenize the full response to get token indices
-                        # tokenized_full = tokenizer.encode(response, add_special_tokens=False)
-                        
                         # Find where the answer content starts and ends by tokenizing segments
-                        prefix = response[:answer_content_start]
+                        prefix = response[:answer_start]
                         prefix_tokens = tokenizer.encode(prefix, add_special_tokens=False)
                         answer_begin_idx = len(prefix_tokens)
-                        
+
+                        tokens = tokenizer.encode(response, add_special_tokens=False)
+
                         # Tokenize prefix + answer content to find end
                         prefix_plus_answer = response[:answer_end] 
                         prefix_plus_answer_tokens = tokenizer.encode(prefix_plus_answer, add_special_tokens=False)
@@ -483,8 +488,8 @@ class CustomRewardTrainer(RayPPOTrainer):
                         # if answer_begin_idx is not None and answer_end_idx is not None:
                         #     answer_tokens = prefix_plus_answer_tokens[answer_begin_idx:answer_end_idx]
                         #     detokenized_answer = tokenizer.decode(answer_tokens, skip_special_tokens=False)
-                        #     # logger.info(f"Original final_answer: '{final_answer}' Answer content: '{prefix_plus_answer}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
-                        #     logger.info(f"Original final_answer: '{final_answer}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
+                        #     # logger.info(f"Original final_answer: '{final_answer}' Answer content: '{prefix_plus_answer}' Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}' Extracted {logprob[answer_begin_idx-1:answer_end_idx]}")
+                        #     logger.info(f"tokens: '{len(tokens)}' logprob {len(logprob)} Original final_answer: '{final_answer}' Extracted: {logprob[answer_begin_idx:answer_end_idx]} Detokenized from indices [{answer_begin_idx}:{answer_end_idx}]: '{detokenized_answer}'")
 
                 results.append({
                     "final_answer": final_answer,
@@ -502,7 +507,8 @@ class CustomRewardTrainer(RayPPOTrainer):
             start_idx = i * BATCH_SIZE
             end_idx = min((i + 1) * BATCH_SIZE, len(responses))
             batch = responses[start_idx:end_idx]
-            extract_tasks.append(extract_final_answers_batch.remote(batch, self.tokenizer))
+            logprobs_batch = logprops[start_idx:end_idx] if logprops is not None else None
+            extract_tasks.append(extract_final_answers_batch.remote(batch, self.tokenizer, logprobs_batch))
         batched_results = await asyncio.gather(*[asyncio.to_thread(ray.get, task) for task in extract_tasks])
         final_answer_items = [item for batch in batched_results for item in batch]
 

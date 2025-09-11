@@ -678,13 +678,14 @@ class RayPPOTrainer:
             # Track which teacher prompts were already added so we can repeat
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
-            assert sum([self.cfg.correct_answer_augmenting, self.cfg.augment_only_wrong, self.cfg.augment_with_opposite_answer]) == 1, "Only one student augmenting strategy can be chosen"
+            assert sum([self.cfg.correct_answer_augmenting, self.cfg.augment_yes_no, self.cfg.augment_only_wrong, self.cfg.augment_with_opposite_answer]) == 1, "Only one student augmenting strategy can be chosen"
 
             for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(
                 zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)
             ):
                 include = True
                 teacher_answer = None
+                teacher_answers = None
 
                 if self.cfg.correct_answer_augmenting:
                     # Always use the dataset's ground-truth answer
@@ -695,6 +696,16 @@ class RayPPOTrainer:
                     else:
                         representative_incorrect = False
                     teacher_answer = extra["answer"]
+
+                elif self.cfg.augment_yes_no:
+                    if not student_score:
+                        # Track a representative incorrect example index; we will
+                        # map it to the start index of the duplicated block below.
+                        representative_incorrect = True
+                    else:
+                        representative_incorrect = False
+
+                    teacher_answers =  ["\\boxed{yes}" if self.cfg.boxed_pattern else "yes", "\\boxed{no}" if self.cfg.boxed_pattern else "no"]
 
                 elif self.cfg.augment_only_wrong:
                     # Only augment when teacher is correct and student is wrong
@@ -729,38 +740,41 @@ class RayPPOTrainer:
                 if not include:
                     continue
 
-                # Build the teacher prompt from the chosen answer
-                if self.cfg.teacher_explain_only:
-                    teacher_prompt = create_teacher_explain_only_prompt_from_answer(
-                        extra["dialogue"], teacher_answer, bos_token
-                    )
-                else:
-                    teacher_prompt = create_teacher_prompt_from_answer(
-                        extra["dialogue"], teacher_answer, bos_token
-                    )
+                teacher_answers = [teacher_answer] if teacher_answers is None else teacher_answers
 
-                # Use prompt string as a stable key for deduplication
-                key = teacher_prompt
-                if key in added_teacher_prompt_keys:
-                    # Already added n_samples_per_prompt copies for this teacher prompt
-                    continue
+                for teacher_answer in teacher_answers:
+                    # Build the teacher prompt from the chosen answer
+                    if self.cfg.teacher_explain_only:
+                        teacher_prompt = create_teacher_explain_only_prompt_from_answer(
+                            extra["dialogue"], teacher_answer, bos_token
+                        )
+                    else:
+                        teacher_prompt = create_teacher_prompt_from_answer(
+                            extra["dialogue"], teacher_answer, bos_token
+                        )
 
-                # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
-                new_extra = dict(extra)
-                new_extra["teacher_answer"] = teacher_answer
+                    # Use prompt string as a stable key for deduplication
+                    key = teacher_prompt
+                    if key in added_teacher_prompt_keys:
+                        # Already added n_samples_per_prompt copies for this teacher prompt
+                        continue
 
-                # Append exactly n_samples_per_prompt copies to keep parity
-                index = len(all_teacher_prompts)
-                all_teacher_prompts.extend([teacher_prompt]*self.cfg.n_samples_per_prompt)
-                aug_all_student_prompts.extend([student_prompt]*self.cfg.n_samples_per_prompt)
-                aug_all_extras.extend([dict(new_extra)]*self.cfg.n_samples_per_prompt)
+                    # IMPORTANT: avoid mutating shared extra dicts (they are reused across pairs)
+                    new_extra = dict(extra)
+                    new_extra["teacher_answer"] = teacher_answer
 
-                # Track representative incorrect indices for logging
-                new_indicess.append(index)
-                if representative_incorrect:
-                    indices_incorrect.append(index)
+                    # Append exactly n_samples_per_prompt copies to keep parity
+                    index = len(all_teacher_prompts)
+                    all_teacher_prompts.extend([teacher_prompt]*self.cfg.n_samples_per_prompt)
+                    aug_all_student_prompts.extend([student_prompt]*self.cfg.n_samples_per_prompt)
+                    aug_all_extras.extend([dict(new_extra)]*self.cfg.n_samples_per_prompt)
 
-                added_teacher_prompt_keys.add(key)
+                    # Track representative incorrect indices for logging
+                    new_indicess.append(index)
+                    if representative_incorrect:
+                        indices_incorrect.append(index)
+
+                    added_teacher_prompt_keys.add(key)
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
             # 1.1 generate sequences via vllm engines
@@ -1111,22 +1125,33 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                         ss_reward = self.cfg.kl_mean_coef * ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
                         start_kl, end_kl, end_full = offset, offset + na, offset + na
 
+                    # logger.info(f'start_kl {start_kl} end_kl {end_kl}')
+
                     ss_reward_mean_list.append(ss_reward_mean)
                     ss_reward_min_list.append(ss_reward_min)
                     ss_reward_list.append(ss_reward)
 
                     if not teacher_generated[teacher_prompt_idx]:
-                        kl_reward = kl_mean = kl_sum = kl_max = torch.tensor(0.)
+                        kl_reward = kl_mean = kl_sum = kl_max = torch.tensor(0., device=kl_div_all.device)
                     else:
-                        kl_episode = kl_div_all[:, start_kl:end_kl].clone()
-                        kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
-                        kl_mean = masked_mean(kl_episode, None, dim=-1)
-                        kl_sum = kl_episode.sum(dim=-1)
-                        if self.cfg.reward_kl_reduction == "mean":
-                            kl_reward = -self.cfg.kl_mean_coef * kl_mean - self.cfg.kl_max_coef * kl_max
-                        elif self.cfg.reward_kl_reduction == "sum":
-                            kl_reward = -self.cfg.kl_mean_coef * kl_sum - self.cfg.kl_max_coef * kl_max
-                        kl_reward = torch.clamp(kl_reward, min=-self.cfg.kl_reward_clamp)
+                        # Compute KL only over the explanation tokens before the final answer.
+                        # Guard against cases where the window is empty (e.g., very short explanations),
+                        # which would make reductions over an empty dimension invalid.
+                        if end_kl <= start_kl:
+                            kl_max = torch.tensor(0., device=kl_div_all.device)
+                            kl_mean = torch.tensor(0., device=kl_div_all.device)
+                            kl_sum = torch.tensor(0., device=kl_div_all.device)
+                            kl_reward = torch.tensor(0., device=kl_div_all.device)
+                        else:
+                            kl_episode = kl_div_all[:, start_kl:end_kl].clone()
+                            kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
+                            kl_mean = masked_mean(kl_episode, None, dim=-1)
+                            kl_sum = kl_episode.sum(dim=-1)
+                            if self.cfg.reward_kl_reduction == "mean":
+                                kl_reward = -self.cfg.kl_mean_coef * kl_mean - self.cfg.kl_max_coef * kl_max
+                            elif self.cfg.reward_kl_reduction == "sum":
+                                kl_reward = -self.cfg.kl_mean_coef * kl_sum - self.cfg.kl_max_coef * kl_max
+                            kl_reward = torch.clamp(kl_reward, min=-self.cfg.kl_reward_clamp)
 
                     match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
                     match_reward = teacher_exp.info['custom_rewards'][i][-1]
@@ -2424,12 +2449,21 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             responses = []
             prompt_logprobs = []
             finish_reasons = []
+            responses_logprobs = []
             for i, prompt in enumerate(prompts):
                 content = outputs[i].outputs[0].text
                 finish_reasons.append(outputs[i].outputs[0].finish_reason)
                 responses.append(content)
                 if outputs[i].prompt_logprobs:
                     prompt_logprobs.append(outputs[i].prompt_logprobs)
+                if outputs[i].outputs[0].logprobs:
+                    responses_logprobs.append(outputs[i].outputs[0].logprobs)
+            if len(responses_logprobs) > 0:
+                return (
+                    responses,
+                    finish_reasons,
+                    responses_logprobs,
+                )
             if len(prompt_logprobs) > 0:
                 return (
                     responses,

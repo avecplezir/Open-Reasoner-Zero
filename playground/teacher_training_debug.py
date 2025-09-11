@@ -173,8 +173,8 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = True
-    augment_with_opposite_answer: bool = False
+    correct_answer_augmenting: bool = False
+    augment_with_opposite_answer: bool = True
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
@@ -184,7 +184,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = False
     filter_student_for_teacher: bool = False
-    train_teacher_on_student_data_only: bool = True
+    train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = True

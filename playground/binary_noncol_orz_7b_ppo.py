@@ -74,7 +74,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # path related settings
     pretrain: Optional[str] = f"{prefix}/Qwen2.5-7B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 50
+    save_interval: int = 10
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'7B-student-data-v0-{randint}'
@@ -90,8 +90,6 @@ class PPOExpConfig(BasePPOExpConfig):
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            # "data/eval_data/math500.json",
-            # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
         ]
@@ -110,7 +108,7 @@ class PPOExpConfig(BasePPOExpConfig):
     update_ref_every_epoch: bool = False
     advantage_normalize: bool = True
 
-    num_episodes: int = 20
+    num_episodes: int = 7
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
@@ -153,33 +151,47 @@ class PPOExpConfig(BasePPOExpConfig):
     gamma: float = 1.0
     lambd: float = 1.0
 
-    kl_max_coef: float = 0.02
-    kl_mean_coef: float = 1
-    reward_kl_coef: float = 1
-    kl_reward_clamp: float = 7
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1.
+    reward_kl_coef: float = 1.
+    kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1.
+    reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.3
+    ss_reward_coef: float = 0.33
 
     use_topr: bool = False
-    train_teacher: bool = False
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    student_teacher_order: bool = False
-    student_training_rounds: int = 300  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = 0
+    student_training_rounds: int = 1000000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_teacher_order: bool = True
 
-    generate_with_teacher: bool = False
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = False
+    augment_only_wrong: bool = False
+    correct_answer_augmenting: bool = False
+    augment_with_opposite_answer: bool = False
 
     separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = "" if separate_teacher_model else pretrain
+    teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
+    synce_teacher_weights_interval: int = -1
+
+    teacher_explain_only: bool = True
+    use_teacher_only_data_for_teacher: bool = False
+    filter_student_for_teacher: bool = False
+    train_teacher_on_student_data_only: bool = False
+
+    weight_by_ss_reward: bool = True
+    skip_student_training_to_debug: bool = False
+
+    student_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":

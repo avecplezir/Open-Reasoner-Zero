@@ -786,6 +786,7 @@ class PolicyRayActorBase(RayActor):
                 r = kl_loss.exp()
                 kl_loss = r - 1.0 - kl_loss
             kl_loss = masked_mean(kl_loss, action_mask, dim=-1).mean()
+            logger.info(f"kl_loss: {kl_loss.item()}")
         else:
             kl_loss = 0
 

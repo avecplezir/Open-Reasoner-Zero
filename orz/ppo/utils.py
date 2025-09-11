@@ -41,6 +41,7 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
+        # "reduce_bucket_size": 2e8,
         # ZeRO++
         "zero_hpz_partition_size": zpg,
         "zero_quantized_weights": False,

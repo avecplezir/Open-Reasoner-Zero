@@ -92,6 +92,7 @@ class DeepSpeedZeRoOffload(object):
         ds_config,
         overlap_comm=True,
         prefetch_bucket_size=50000000,
+        # prefetch_bucket_size=20000000,
         max_reuse_distance=1000000000,
         max_live_parameters=1000000000,
         param_persistence_threshold=100000,
