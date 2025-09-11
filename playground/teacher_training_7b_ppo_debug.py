@@ -188,7 +188,8 @@ class PPOExpConfig(BasePPOExpConfig):
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
-    skip_student_training_to_debug: bool = True
+    skip_student_training_to_debug: bool = False
+    skip_student_first_n_rounds: int = 30
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

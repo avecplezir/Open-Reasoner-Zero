@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 2
+    actor_num = 3
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -69,18 +69,21 @@ class PPOExpConfig(BasePPOExpConfig):
     zero_stage: int = 3
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
+    boxed_pattern: bool = False
+
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-7B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 50
+    save_interval: int = 10
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-iter50-correct-{randint}'
+    e_name = f'7B-student-data-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
+    # MathTrain dataset and Math500 eval dataset
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
@@ -94,17 +97,16 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 256 if not DEBUG_MODE else 256
     actor_learning_rate: float = 1e-6
     critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 5
+    num_warmup_steps: int = 50
     prompt_max_len: int = 2048
 
     enable_prefix_caching: bool = True
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    advantage_normalize: bool = False
+    advantage_normalize: bool = True
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -120,16 +122,16 @@ class PPOExpConfig(BasePPOExpConfig):
     init_kl_coef: float = 0
     # 更换KL loss + k3
     kl_loss_coef: float = 0.0
-    use_kl_loss: bool = True
+    use_kl_loss: bool = False
     use_kl_estimator_k3: bool = True
+    use_ref_model: bool = False
 
-    enable_eval: bool = False if not DEBUG_MODE else False
-    eval_interval: int = 5
-    eval_teacher: bool = False
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
     temperature: float = 1.0
     teacher_temperature: float = 0.7
@@ -138,12 +140,11 @@ class PPOExpConfig(BasePPOExpConfig):
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = True #False
-    remove_student_grpo_normalization: bool = True
+    use_grpo: bool = True
+    remove_student_grpo_normalization: bool = False
     remove_teacher_grpo_normalization: bool = False
     use_minus_plus_one_teacher_reward: bool = False
 
-    use_ref_model: bool = False
     gpu_memory_utilization: float = 0.95
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
@@ -152,7 +153,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
-    reward_kl_coef: float = 3.
+    reward_kl_coef: float = 1.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
@@ -166,16 +167,15 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1000000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = True
+    augment_student_generation_with_teacher: bool = False
     augment_only_wrong: bool = False
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
-    augment_yes_no: bool = True
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
@@ -183,16 +183,15 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    use_teacher_only_data_for_teacher: bool = False
     filter_student_for_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 50
 
     student_loss_type: str = "sft"
-    teacher_loss_type: str = "ppo"
+    teacher_loss_type: str = "sft"
 
 
 if __name__ == "__main__":
@@ -216,4 +215,3 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
-

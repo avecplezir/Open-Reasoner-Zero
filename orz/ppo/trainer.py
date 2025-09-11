@@ -193,7 +193,6 @@ class RayPPOTrainer:
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
 
-
                 if self.train_teacher and not self.train_student:
                         train_set = zip([self.teacher_replay_buffer], ["teacher"])
                         self.student_replay_buffer.clear()
@@ -208,7 +207,7 @@ class RayPPOTrainer:
                 else:
                     raise ValueError("Either student or teacher must be trained in each iteration")
 
-                if self.train_student and self.cfg.skip_student_training_to_debug:
+                if self.train_student and (self.cfg.skip_student_training_to_debug or self.global_step < self.cfg.skip_student_first_n_rounds):
                     logger.info("Skipping student training to debug")
                     train_set = zip([], [])
                     self.student_replay_buffer.clear()
@@ -283,13 +282,14 @@ class RayPPOTrainer:
                     # 5. set logs
                     logger.info(f'Status {prefix} {status}')
 
+                await self.policy_model.offload_to_cpu()
+                await self.policy_model.async_run_method("empty_cache")
+                await self.policy_model.backload_to_gpu()
+
                 # if train_student and self.cfg.separate_teacher_model:
                 if self.cfg.separate_teacher_model:
                     await self.teacher_model.offload_to_cpu()
                     await self.teacher_model.backload_to_gpu()
-
-                    await self.policy_model.offload_to_cpu()
-                    await self.policy_model.backload_to_gpu()
 
                     if self.cfg.critic_pretrain:
                         await self.critic_model.offload_to_cpu()
@@ -1352,7 +1352,10 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                                     score /= std
                             else:
                                 if self.cfg.weight_by_ss_reward:
-                                    score = np.exp(ss_reward_mean_list[prompt_idx])
+                                    if teacher_generated[prompt_idx]:
+                                        score = np.exp(ss_reward_mean_list[prompt_idx])
+                                    else:
+                                        score = initial_scores[prompt_idx]
                                     # logger.info(f"weighting score {score}")
                                 else:
                                     score = initial_scores[prompt_idx]
