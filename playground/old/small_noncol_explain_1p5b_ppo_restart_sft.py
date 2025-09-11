@@ -165,7 +165,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 5
+    initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
@@ -187,6 +187,7 @@ class PPOExpConfig(BasePPOExpConfig):
     train_teacher_on_student_data_only: bool = True
 
     weight_by_ss_reward: bool = True
+    skip_student_training_to_debug: bool = True
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "sft"

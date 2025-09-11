@@ -192,6 +192,8 @@ class RayPPOTrainer:
                     sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
+
+
                 if self.train_teacher and not self.train_student:
                         train_set = zip([self.teacher_replay_buffer], ["teacher"])
                         self.student_replay_buffer.clear()
@@ -205,6 +207,11 @@ class RayPPOTrainer:
                         train_set = zip([self.teacher_replay_buffer, self.student_replay_buffer], ['teacher', ''])
                 else:
                     raise ValueError("Either student or teacher must be trained in each iteration")
+
+                if self.train_student and self.cfg.skip_student_training_to_debug:
+                    logger.info("Skipping student training to debug")
+                    train_set = zip([], [])
+                    self.student_replay_buffer.clear()
 
                 if self.cfg.critic_pretrain and self.cfg.colocate_critic_policy and self.cfg.offload_critic_policy_colocation:
                     await self.critic_model.offload_to_cpu()
