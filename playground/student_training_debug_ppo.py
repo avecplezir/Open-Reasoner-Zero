@@ -152,7 +152,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
-    reward_kl_coef: float = 3.
+    reward_kl_coef: float = 5.
     kl_reward_clamp: float = 100000
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
@@ -172,13 +172,13 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
+    augment_only_wrong: bool = True
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
-    augment_yes_no: bool = True
+    augment_yes_no: bool = False
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = f"{prefix}/teacher_finetuned_correct_tod/iter50/policy"
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1
 
@@ -189,7 +189,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 5
+    skip_student_first_n_rounds: int = 10
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

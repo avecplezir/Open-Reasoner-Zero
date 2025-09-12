@@ -314,6 +314,8 @@ class RayPPOTrainer:
                     await self.policy_model.async_save_model(self.tokenizer, self.global_step)
                     if self.critic_model is not None:
                         await self.critic_model.async_save_model(self.tokenizer, self.global_step)
+                    if self.cfg.separate_teacher_model:
+                        await self.teacher_model.async_save_model(self.tokenizer, f'teacher-{self.global_step}')
                     logger.info("Successfully save model weights, training continue.")
 
                 if self.cfg.separate_teacher_model and self.cfg.sync_teacher_weights and (self.global_step % self.cfg.synce_teacher_weights_interval) == 0: #(self.student_training_step == self.cfg.student_training_rounds):
@@ -1344,21 +1346,21 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                             # student
-                            if not self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
-                                prompt = all_student_prompts[prompt_idx]
-                                score = initial_scores[prompt_idx]
-                                score -= np.mean(pass_at_n_dict[prompt])
-                                if std := np.std(pass_at_n_dict[prompt]) > 0:
-                                    score /= std
-                            else:
+                            if self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
                                 if self.cfg.weight_by_ss_reward:
                                     if teacher_generated[prompt_idx]:
-                                        score = np.exp(ss_reward_mean_list[prompt_idx])
+                                        score = np.exp(final_reward_list[prompt_idx]) #np.exp(ss_reward_mean_list[prompt_idx])
                                     else:
                                         score = initial_scores[prompt_idx]
                                     # logger.info(f"weighting score {score}")
                                 else:
                                     score = initial_scores[prompt_idx]
+                            else:
+                                prompt = all_student_prompts[prompt_idx]
+                                score = initial_scores[prompt_idx]
+                                score -= np.mean(pass_at_n_dict[prompt])
+                                if std := np.std(pass_at_n_dict[prompt]) > 0:
+                                    score /= std
 
                             student_exp.info['custom_rewards'][i][-1] = score
                             score_sum += score
@@ -1863,8 +1865,10 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             refs = []
             if ref_model is not None:
                 refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            logger.info(f"init policy from {cfg.pretrain}")
             refs.extend(policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             if cfg.separate_teacher_model:
+                logger.info(f"init teacher from {cfg.teacher_pretrain}")
                 refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))
             if cfg.critic_pretrain:
                 refs.extend(critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))

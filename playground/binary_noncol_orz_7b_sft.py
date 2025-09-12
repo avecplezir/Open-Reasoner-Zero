@@ -106,7 +106,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enforce_eager: bool = False
 
     update_ref_every_epoch: bool = False
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
@@ -126,7 +126,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_estimator_k3: bool = True
     use_ref_model: bool = False
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
     # generate related settings
@@ -186,6 +186,7 @@ class PPOExpConfig(BasePPOExpConfig):
     use_teacher_only_data_for_teacher: bool = False
     filter_student_for_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
+    augment_yes_no: bool = False
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
