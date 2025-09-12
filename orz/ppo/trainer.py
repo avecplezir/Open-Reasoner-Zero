@@ -1344,7 +1344,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                             # student
-                            if not self.cfg.remove_student_grpo_normalization:
+                            if not self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
                                 prompt = all_student_prompts[prompt_idx]
                                 score = initial_scores[prompt_idx]
                                 score -= np.mean(pass_at_n_dict[prompt])
