@@ -1074,7 +1074,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                 kl_div_all = compute_approx_kl(
                     teacher_exp.action_log_probs,
                     student_exp.action_log_probs if not self.cfg.reward_kl_toward_ref_model else student_exp.base_action_log_probs,
-                    action_mask=student_exp.action_mask,
+                    action_mask=None,#student_exp.action_mask,
                     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
                     use_abs_kl=self.cfg.use_abs_kl,
                 )
@@ -1176,7 +1176,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == 'topr':
-                        if teacher_generated[teacher_prompt_idx]:
+                        if teacher_generated[teacher_prompt_idx] and start_kl < end_full:
                             student_ratio_clipped_0_1_scalar = torch.exp((student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
                             student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
                         else:
@@ -1187,24 +1187,25 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                         if teacher_generated[teacher_prompt_idx]:
                             teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
                         else:
-                            teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
-                            teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
+                            if start_kl < end_full:
+                                teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                                teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 
-                    if self.cfg.replace_all_teacher_base_logprops_w_student:
+                    if self.cfg.replace_all_teacher_base_logprops_w_student and start_kl < end_full:
                         teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:,start_kl:end_full]
                     # if self.cfg.replace_all_student_base_logprops_w_teacher:
                     #     student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:,start_kl:end_full]
 
                     if not teacher_generated[teacher_prompt_idx]:
-                        if self.cfg.replace_teacher_logprops_w_student:
+                        if self.cfg.replace_teacher_logprops_w_student and start_kl < end_full:
                             teacher_exp.action_log_probs[:, start_kl:end_full] = student_exp.action_log_probs[:, start_kl:end_full]
-                        if self.cfg.replace_teacher_base_logprops_w_student and not teacher_generated[teacher_prompt_idx]:
+                        if self.cfg.replace_teacher_base_logprops_w_student and start_kl < end_full:
                             teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:, start_kl:end_full]
                     else:
-                        if self.cfg.replace_student_logprops_w_teacher:
+                        if self.cfg.replace_student_logprops_w_teacher and start_kl < end_full:
                             student_exp.action_log_probs[:, start_kl:end_full] = teacher_exp.action_log_probs[:, start_kl:end_full]
-                        if self.cfg.replace_student_base_logprops_w_teacher:
+                        if self.cfg.replace_student_base_logprops_w_teacher and start_kl < end_full:
                             student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:, start_kl:end_full]
 
                     if teacher_score and final_answer_start is not None and final_answer_start < final_answer_end:

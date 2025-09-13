@@ -119,7 +119,7 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.004
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
@@ -164,6 +164,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
+    replace_all_teacher_base_logprops_w_student: bool = True
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
@@ -189,7 +190,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 10
+    skip_student_first_n_rounds: int = 20
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

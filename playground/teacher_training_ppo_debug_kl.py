@@ -179,7 +179,8 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_with_opposite_answer: bool = False
     augment_yes_no: bool = False
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = TrueR2D2sound@
+
     teacher_pretrain: Optional[str] = pretrain
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1
