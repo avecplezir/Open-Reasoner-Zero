@@ -72,7 +72,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # path related settings
     pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 50
+    save_interval: int = 10
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'7b-iter50-v0-{randint}'
@@ -106,7 +106,7 @@ class PPOExpConfig(BasePPOExpConfig):
     update_ref_every_epoch: bool = False
     advantage_normalize: bool = False
 
-    num_episodes: int = 20
+    num_episodes: int = 7
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
@@ -123,8 +123,8 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = False if not DEBUG_MODE else False
-    eval_interval: int = 5
+    enable_eval: bool = True if not DEBUG_MODE else False
+    eval_interval: int = 10
     eval_teacher: bool = False
 
     # generate related settings
@@ -188,8 +188,8 @@ class PPOExpConfig(BasePPOExpConfig):
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
-    skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 30
+    skip_student_training_to_debug: bool = True
+    skip_student_first_n_rounds: int = 0
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

@@ -1191,6 +1191,11 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                             teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 
+                    if self.cfg.replace_all_teacher_base_logprops_w_student:
+                        teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:,start_kl:end_full]
+                    # if self.cfg.replace_all_student_base_logprops_w_teacher:
+                    #     student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:,start_kl:end_full]
+
                     if not teacher_generated[teacher_prompt_idx]:
                         if self.cfg.replace_teacher_logprops_w_student:
                             teacher_exp.action_log_probs[:, start_kl:end_full] = student_exp.action_log_probs[:, start_kl:end_full]

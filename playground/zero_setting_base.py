@@ -38,6 +38,12 @@ The reasoning process is enclosed within <think> </think> and answer is enclosed
 Assistant: <think>\
 """
 
+STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
+If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
+Assistant: <think>{{previous_reasoning}\
+"""
+
 # prompt_template_jinja = """\
 # {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
 # The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
@@ -48,6 +54,38 @@ Assistant: <think>\
 # This is the problem:
 # {{prompt}}
 # """
+
+def create_student_prompt(dialogue: List, bos_token: str = "", previous_reasoning: str = "" ) -> str:
+    """Create a student prompt with optional previously generated reasoning chains.
+
+    The prompt instructs the student to either reason from scratch or continue
+    the provided prior reasoning, then produce a final answer inside <answer> tags.
+
+    Args:
+        dialogue: Two-message list (user question + ground truth/metadata entry).
+        bos_token: Model BOS token to prefix if present.
+        previous_thinks: Optional list of strings that contain only the content
+            of prior <think>...</think> blocks (without the tags).
+
+    Returns:
+        Rendered student prompt string.
+    """
+    prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
+
+    assert len(dialogue) == 2, "dialogue must contain 2 items"
+
+    prompt_instruction_template = Template(prompt_instruction_template_jinja)
+    prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
+    prompt_template = Template(prompt_template_jinja)
+
+    rendered = prompt_template.render(
+        bos_token=bos_token,
+        prompt=prompt_instruction,
+        previous_reasoning=previous_reasoning if previous_reasoning else "",
+    )
+    return rendered
+
 
 def create_teacher_prompt_from_answer(dialogue: List, answer: str = "", bos_token: str = ""):
     """Create teacher prompt with student answer."""

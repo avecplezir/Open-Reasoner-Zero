@@ -119,7 +119,7 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.001
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
@@ -164,7 +164,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_student_base_logprops_w_teacher: bool = False
     replace_teacher_logprops_w_student: bool = False
     replace_teacher_base_logprops_w_student: bool = False
-    replace_all_teacher_base_logprops_w_student: bool = False
+    replace_all_teacher_base_logprops_w_student: bool = True
     # replace_all_student_base_logprops_w_teacher: bool = False
 
     initial_teacher_training_rounds: int = 0
@@ -174,10 +174,10 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
+    augment_only_wrong: bool = True
     correct_answer_augmenting: bool = False
     augment_with_opposite_answer: bool = False
-    augment_yes_no: bool = True
+    augment_yes_no: bool = False
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
@@ -190,8 +190,8 @@ class PPOExpConfig(BasePPOExpConfig):
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
-    skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 50
+    skip_student_training_to_debug: bool = True
+    skip_student_first_n_rounds: int = 0
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
