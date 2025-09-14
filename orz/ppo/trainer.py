@@ -627,7 +627,7 @@ class RayPPOTrainer:
                             elif retry_teacher_no[i]:
                                 student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
                             else:
-                                student_answer = "yes"
+                                assert False, f"final_answer must be yes or no"
                         else:
                             student_answer = ("\\boxed{yes}" if self.cfg.boxed_pattern else "yes") if random.random() > 0.5 else ("\\boxed{no}" if self.cfg.boxed_pattern else "no")
 

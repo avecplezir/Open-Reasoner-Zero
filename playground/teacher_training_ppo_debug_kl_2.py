@@ -119,7 +119,7 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.001
+    kl_loss_coef: float = 0.01
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 

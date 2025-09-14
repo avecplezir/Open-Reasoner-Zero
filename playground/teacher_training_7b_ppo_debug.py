@@ -70,12 +70,12 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 10
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'7b-iter50-v0-{randint}'
+    e_name = f'7b-iter20-correct-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -164,6 +164,7 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True
     replace_teacher_base_logprops_w_student: bool = True
+    replace_all_teacher_base_logprops_w_student: bool = True
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
@@ -173,9 +174,9 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = False
+    correct_answer_augmenting: bool = True
     augment_with_opposite_answer: bool = False
-    augment_yes_no: bool = True
+    augment_yes_no: bool = False
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
