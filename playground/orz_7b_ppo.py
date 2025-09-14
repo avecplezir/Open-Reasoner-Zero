@@ -414,8 +414,9 @@ class CustomRewardTrainer(RayPPOTrainer):
         temperature = self.cfg.teacher_temperature if kwargs.get("teacher", False) else self.cfg.temperature
         logger.info(f"Using temperature: {temperature} (teacher={kwargs.get('teacher', False)})")
         # Build teacher-only stop list to halt at </think>
-        stop = list(self.cfg.stop)
-        stop = ["User:", "Human:", "Assistant:", "</think>"] if kwargs.get("teacher", False) and self.cfg.teacher_explain_only else stop
+        stop = self.cfg.stop
+        stop = ListConfig(["User:", "Human:", "Assistant:", "</answer>", "</think>"]) if kwargs.get("teacher", False) and self.cfg.teacher_explain_only else stop
+        logger.info(f"Using stop tokens: {stop} (teacher={kwargs.get('teacher', False)})")
 
         sampling_params = SamplingParams(
             temperature=temperature,

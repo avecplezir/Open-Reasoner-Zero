@@ -987,6 +987,7 @@ class RayPPOTrainer:
             keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"Augmentation teacher filter: dropping {dropped}/{len(initial_scores)} incorrect student samples")
+            self.writer.add_scalar("teacher_training_dropped_samples", dropped/len(initial_scores), self.global_step)
             if len(keep_idx) == 0:
                 # No valid samples this round
                 return
@@ -1059,6 +1060,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             kl_max_list = []
             kl_mean_list = []
             kl_sum_list = []
+            kl_reward_list = []
             match_reward_list = []
             ss_reward_mean_list = []
             ss_reward_min_list = []
@@ -1092,7 +1094,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
                     teacher_score = initial_teacher_scores[teacher_prompt_idx]
-                    ss_tokens_offset = 3
+                    ss_tokens_offset = 0
                     kl_token_offset = 6
                     answer_tokens_offset = 3
 
@@ -1166,6 +1168,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1])
                     pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(initial_scores[teacher_prompt_idx])
 
+                    kl_reward_list.append(kl_reward.item())
                     kl_max_list.append(kl_max.item())
                     kl_mean_list.append(kl_mean.item())
                     kl_sum_list.append(kl_sum.item())
@@ -1233,6 +1236,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             # Log average KL divergence between student and teacher
             final_reward_list = np.array(final_reward_list)
             kl_mean_list = np.array(kl_mean_list)
+            kl_reward_list = np.array(kl_reward_list)
             kl_sum_list = np.array(kl_sum_list)
             kl_max_list = np.array(kl_max_list)
             ss_reward_mean_list = np.array(ss_reward_mean_list)
@@ -1241,6 +1245,8 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             match_reward_list = np.array(match_reward_list)
             teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
             student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
+
+            kl_ss_reward_ratio = kl_reward_list / ss_reward_list
 
             log_dict = {}
 
@@ -1254,10 +1260,13 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
 
                 logger.info(f"{prefix} slice {slice.sum()} samples")
 
+                avg_kl_ss_reward_ratio = kl_ss_reward_ratio[slice].mean()
+
                 avg_student_reward = initial_scores[slice].mean()
                 avg_teacher_reward = final_reward_list[slice].mean()
 
-                avg_student_teacher_kl = kl_mean_list[slice].mean()
+                avg_student_teacher_kl = kl_reward_list[slice].mean()
+                avg_student_teacher_kl_mean = kl_mean_list[slice].mean()
                 avg_student_teacher_kl_max = kl_max_list[slice].mean()
 
                 avg_match_reward = match_reward_list[slice].mean()
@@ -1296,9 +1305,11 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                 prefix = f"{prefix}/" if prefix != "" else prefix
                 log_dict.update(
                     {
+                    f"{prefix}avg_kl_ss_reward_ratio": avg_kl_ss_reward_ratio,
                     f"{prefix}avg_student_reward": avg_student_reward,
                     f"{prefix}avg_teacher_reward": avg_teacher_reward,
                     f"{prefix}avg_student_teacher_kl": avg_student_teacher_kl,
+                    f"{prefix}avg_student_teacher_kl_mean": avg_student_teacher_kl_mean,
                     f"{prefix}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
                     f"{prefix}avg_match_reward": avg_match_reward,
                     f"{prefix}avg_correct_match_reward": avg_correct_match_reward,

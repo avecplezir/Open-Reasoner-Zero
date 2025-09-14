@@ -147,7 +147,9 @@ class PolicyLoss(nn.Module):
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
         elif loss_type == 3: #'sft':
             logger.info(f"Using sft loss")
-            ratio = -log_probs * advantages
+            # ratio = -log_probs * advantages
+            oldprobs = torch.exp(old_log_probs)
+            ratio = -oldprobs * log_probs * advantages
             loss = masked_mean(ratio, action_mask, dim=-1).mean()
 
         return loss
