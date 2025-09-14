@@ -153,7 +153,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
     reward_kl_coef: float = 3.
-    kl_reward_clamp: float = 100000
+    kl_reward_clamp: float = 10
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
@@ -185,7 +185,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
-    filter_student_for_teacher: bool = False
+    filter_student_for_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True

@@ -1092,7 +1092,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
                     teacher_score = initial_teacher_scores[teacher_prompt_idx]
-                    ss_tokens_offset = 0
+                    ss_tokens_offset = 3
                     kl_token_offset = 6
                     answer_tokens_offset = 3
 

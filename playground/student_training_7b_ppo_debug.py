@@ -185,7 +185,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
-    filter_student_for_teacher: bool = False
+    filter_student_for_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
     weight_by_ss_reward: bool = True
