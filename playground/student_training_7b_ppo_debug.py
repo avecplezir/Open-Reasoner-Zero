@@ -196,6 +196,8 @@ class PPOExpConfig(BasePPOExpConfig):
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
 
+    adversarial_training: bool = False
+
 
 if __name__ == "__main__":
     exp = PPOExp().set_cfg(PPOExpConfig())

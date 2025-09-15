@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-iter50-correct-{randint}'
+    e_name = f'aug-iter50-correct-longrun-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -195,6 +195,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
+
+    adversarial_training: bool = False
 
 
 if __name__ == "__main__":

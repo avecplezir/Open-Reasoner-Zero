@@ -672,6 +672,10 @@ class RayPPOTrainer:
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
                     await self._major_sync_teacher_weights_to_vllm()
+            elif not self.cfg.generate_with_student:
+                # Sync student (policy) model weights to VLLM engines before generation
+                async with Timer("Sync policy weights to VLLM engines for teacher generation (there is no separate teacher model)"):
+                    await self._major_sync_policy_weights_to_vllm()
 
             # create the complementary teacher prompt(s) and collect data with it
             all_teacher_prompts = []
