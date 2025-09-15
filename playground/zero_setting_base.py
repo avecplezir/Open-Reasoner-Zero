@@ -128,6 +128,7 @@ def create_teacher_explain_only_prompt_from_answer(dialogue: List, answer: str =
 
     return teacher_prompt_answer
 
+
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
         # Optional flag to control teacher prompt style

@@ -3,6 +3,7 @@ import json
 import math
 import os
 import random
+import re
 from functools import partial
 from heapq import heapify, heappop, heappush
 from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
@@ -37,6 +38,7 @@ from orz.ppo.utils import (
 from playground.zero_setting_base import (
     create_teacher_prompt_from_answer,
     create_teacher_explain_only_prompt_from_answer,
+    create_student_prompt,
 )
 
 
@@ -372,39 +374,39 @@ class RayPPOTrainer:
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
         teacher_generated, combined_correct_formattings = [], []
 
-        if self.cfg.generate_with_student:
+        # Prepare BOS token for logging
+        if self.tokenizer.bos_token_id is None:
+            bos_token = ""
+        else:
+            bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
 
-            # Prepare BOS token for logging
-            if self.tokenizer.bos_token_id is None:
-                bos_token = ""
-            else:
-                bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+        # the same, but now generate data with student prompts
+        # Create paired data (positive/negative for each prompt)
+        paired_data = []
+        for prompt in all_inputs:
+            for _ in range(self.cfg.n_samples_per_prompt):
+                paired_data.append((
+                    prompt[0],  # student prompt
+                    prompt[1]  # extra info
+                ))
+
+        # Shuffle the pairs to randomize order, but keep pairs together
+        rng = random.Random(42)
+        rng.shuffle(paired_data)
+
+        # Flatten into separate lists, ensuring each pair stays together
+        all_student_prompts = []
+        all_extras = []
+        for student, extra in paired_data:
+            # Add both positive and negative examples
+            all_student_prompts.extend([student])
+            all_extras.extend([extra])
+
+        if self.cfg.generate_with_student:
 
             # Generate with student; optionally retry prompts with too few successes.
             prompt_to_extra = {p: e for p, e in all_inputs}
             original_prompts = list(set(prompt_to_extra.keys()))
-
-            # the same, but now generate data with student prompts
-            # Create paired data (positive/negative for each prompt)
-            paired_data = []
-            for prompt in all_inputs:
-                for _ in range(self.cfg.n_samples_per_prompt):
-                    paired_data.append((
-                        prompt[0],  # student prompt
-                        prompt[1]  # extra info
-                    ))
-
-            # Shuffle the pairs to randomize order, but keep pairs together
-            rng = random.Random(42)
-            rng.shuffle(paired_data)
-
-            # Flatten into separate lists, ensuring each pair stays together
-            all_student_prompts = []
-            all_extras = []
-            for student, extra in paired_data:
-                # Add both positive and negative examples
-                all_student_prompts.extend([student])
-                all_extras.extend([extra])
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
             # 1.1 generate sequences via vllm engines
@@ -664,7 +666,7 @@ class RayPPOTrainer:
             generate_with_teacher = False
             logger.info("Skipping teacher generation since only training teacher on student data")
 
-        if generate_with_teacher and self.cfg.augment_student_generation_with_teacher and self.cfg.generate_with_student:
+        if generate_with_teacher and self.cfg.augment_student_generation_with_teacher:
 
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
@@ -681,6 +683,8 @@ class RayPPOTrainer:
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
             assert sum([self.cfg.correct_answer_augmenting, self.cfg.augment_yes_no, self.cfg.augment_only_wrong, self.cfg.augment_with_opposite_answer]) == 1, "Only one student augmenting strategy can be chosen"
+            if self.cfg.augment_only_wrong or self.cfg.augment_with_opposite_answer:
+                assert self.cfg.generate_with_student, "These two augmenting strategies require student generation to be enabled"
 
             for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(
                 zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)
@@ -918,6 +922,63 @@ class RayPPOTrainer:
             combined_initial_teacher_scores.extend(initial_teacher_scores)
             combined_final_answers.extend(final_answers)
             combined_correct_formattings.extend(correct_formattings)
+
+            # Optional third-round adversarial student generation using teacher explanations
+            if self.cfg.adversarial_training:
+                # Extract prior reasoning up to </think> and create continuation student prompts
+                extracted_reasonings: List[str] = []
+                teacher_responses = outputs
+                for resp in teacher_responses:
+                    m = re.search(r"(.*?)</think>", resp, re.DOTALL)
+                    prev = m.group(1).strip() if m else resp.strip()
+                    extracted_reasonings.append(prev)
+
+                # Construct prompts; keep one new prompt per teacher sample (already repeated for GRPO)
+                adv_student_prompts = []
+                adv_extras = []
+                for extra, prev_r in zip(all_extras, extracted_reasonings):
+                    new_prompt = create_student_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r)
+                    for _ in range(self.cfg.n_samples_per_prompt):
+                        adv_student_prompts.append(new_prompt)
+                        adv_extras.append(extra)
+
+                # Sync student weights and generate adversarial student responses
+                async with Timer("Sync policy weights to VLLM engines for adversarial student gen"):
+                    await self._major_sync_policy_weights_to_vllm()
+
+                adv_outputs_local: List[str] = []
+                num_vllm_dp_gruops = len(self.vllm_engines)
+                async with Timer("Generate adversarial student sequences via vllm engines"):
+                    dp_prompt_size = (len(adv_student_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+                    dp_tasks = []
+                    for dp_rank in range(num_vllm_dp_gruops):
+                        dp_inputs = adv_student_prompts[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                        dp_extras = adv_extras[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                        if len(dp_inputs) == 0:
+                            continue
+                        gen_func = self._get_generate_function(dp_rank)
+                        dp_tasks.append(self.generate_vllm(gen_func, dp_inputs, extras=dp_extras, teacher=False, **generate_kwargs))
+                    local_responses = await asyncio.gather(*dp_tasks)
+                    adv_outputs_local.extend(sum(local_responses, []))
+
+                reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
+                (
+                    adv_student_prompts,
+                    adv_outputs,
+                    adv_custom_rewards,
+                    adv_teacher_custom_rewards,
+                    adv_answer_indices,
+                    adv_initial_scores,
+                    adv_initial_teacher_scores,
+                    adv_final_answers,
+                    adv_teacher_yes,
+                    adv_teacher_no,
+                    adv_correct_formattings,
+                    adv_pass_at_n_dict,
+                ) = await reward_fn(adv_student_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
+
+                # Stash to third-round containers; we will convert to experiences later
+                adv_teacher_prompts = adv_student_prompts
 
         # offload vllm engines when colocate all models
         if self.cfg.colocate_all:
@@ -1199,8 +1260,6 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
 
                     if self.cfg.replace_all_teacher_base_logprops_w_student and start_kl < end_full:
                         teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:,start_kl:end_full]
-                    # if self.cfg.replace_all_student_base_logprops_w_teacher:
-                    #     student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:,start_kl:end_full]
 
                     if not teacher_generated[teacher_prompt_idx]:
                         if self.cfg.replace_teacher_logprops_w_student and start_kl < end_full:
@@ -1404,6 +1463,66 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
 
 
         self.writer.flush()
+
+        # If adversarial generation is enabled, convert third-round samples into student experiences only
+        if self.cfg.adversarial_training:
+            async with Timer("Adversarial third-round: pack and student inference"):
+                (
+                    adv_ret_sequences,
+                    adv_ret_attention_masks,
+                    adv_ret_num_actions,
+                    adv_ret_packed_seq_lens,
+                    adv_ret_custom_rewards,
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                ) = self._convert_prompts_outputs_to_batch_tensors_packing(
+                    adv_student_prompts,
+                    adv_teacher_prompts,
+                    adv_outputs,
+                    adv_custom_rewards,
+                    adv_teacher_custom_rewards,
+                    self.cfg.packing_max_len,
+                )
+
+                adv_action_masks = None
+                adv_student_experiences = await self.inference_and_calculates(
+                    adv_ret_sequences,
+                    adv_ret_attention_masks,
+                    adv_action_masks,
+                    adv_ret_num_actions,
+                    adv_ret_packed_seq_lens,
+                    adv_ret_custom_rewards,
+                )
+
+                # Apply GRPO normalization to adversarial student experiences, mirroring student normalization
+                if self.cfg.use_grpo and len(adv_student_experiences) > 0:
+                    prompt_idx = 0
+                    adv_score_sum = 0
+                    for adv_exp in adv_student_experiences:
+                        assert len(adv_exp.info['custom_rewards']) == len(adv_exp.num_actions[0]), "adv_exp.info['custom_rewards'] must equal adv_exp.num_actions[0]"
+                        for i in range(len(adv_exp.num_actions[0])):
+                            if self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
+                                score = adv_initial_scores[prompt_idx]
+                            else:
+                                prompt = adv_student_prompts[prompt_idx]
+                                score = adv_initial_scores[prompt_idx]
+                                score -= np.mean(adv_pass_at_n_dict[prompt])
+                                if std := np.std(adv_pass_at_n_dict[prompt]) > 0:
+                                    score /= std
+                            adv_exp.info['custom_rewards'][i][-1] = score
+                            adv_score_sum += score
+                            prompt_idx += 1
+
+                    # Log average normalized score for adversarial samples
+                    if prompt_idx > 0:
+                        self.writer.add_scalar("adv_student_reward_normalized", adv_score_sum / prompt_idx, self.global_step)
+
+                # Append only to student experiences; exclude from teacher training
+                student_experiences.extend(adv_student_experiences)
+                logger.info(f"Adversarial third-round added {len(adv_student_prompts)} student samples")
 
         # 3. calculate advantages and returns / along with tensorboard logging
         for experiences, buffer, prefix in zip([student_experiences, teacher_experiences],
