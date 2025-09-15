@@ -834,6 +834,7 @@ class RayPPOTrainer:
                     t_prompt = all_teacher_prompts[i]
                     t_resp = outputs[i]
                     t_final = final_answers[i]
+                    t_score = bool(initial_teacher_scores[i])
                     # fetch next student response for this prompt if available
                     if 'student_responses_by_prompt' in locals():
                         s_list = student_responses_by_prompt.get(s_prompt, [])
@@ -847,7 +848,7 @@ class RayPPOTrainer:
                         s_resp = ""
                         s_final = ""
                     correct_answer = all_extras[i].get("answer", "")
-                    paired_table.append([s_prompt, s_resp, s_final, t_prompt, t_resp, t_final, correct_answer])
+                    paired_table.append([s_prompt, s_resp, s_final, t_prompt, t_resp, t_final, correct_answer, t_score])
 
                 wandb.log({
                     "step": self.global_step,
@@ -860,6 +861,7 @@ class RayPPOTrainer:
                             "teacher_response",
                             "teacher_final_answer",
                             "correct_answer",
+                            "teacher_correct",
                         ],
                         data=paired_table,
                     ),
@@ -944,7 +946,7 @@ class RayPPOTrainer:
         assert self.cfg.teacher_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo, sft or topr")
         if self.train_student and self.cfg.student_loss_type == 'sft':
             # Keep only correct samples for SFT, regardless of origin
-            keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
+            keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc) and bool(tsc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"SFT student filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
             if len(keep_idx) == 0:
@@ -1094,7 +1096,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     # computing answer alignment reward
                     final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
                     teacher_score = initial_teacher_scores[teacher_prompt_idx]
-                    ss_tokens_offset = 0
+                    ss_tokens_offset = self.cfg.ss_tokens_offset
                     kl_token_offset = 6
                     answer_tokens_offset = 3
 
@@ -1599,7 +1601,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     action_log_probs, rewards = results[0], results[1:]
 
         if not self.cfg.use_ref_model:
-            base_log_probs = action_log_probs
+            base_log_probs = [logprobs.clone() for logprobs in action_log_probs]
 
         r = torch.stack(rewards).sum(dim=0) if len(rewards) > 0 else None
         if not self.cfg.colocate_all:

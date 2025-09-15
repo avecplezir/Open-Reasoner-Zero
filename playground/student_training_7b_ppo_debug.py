@@ -152,12 +152,13 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
-    reward_kl_coef: float = 3.
-    kl_reward_clamp: float = 100000
+    reward_kl_coef: float = 1.
+    kl_reward_clamp: float = 10
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.33
+    ss_reward_coef: float = 0.1
+    ss_tokens_offset: int = 0
 
     use_topr: bool = False
     replace_student_logprops_w_teacher: bool = True
@@ -168,7 +169,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
@@ -190,7 +191,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 5
+    skip_student_first_n_rounds: int = 6
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
