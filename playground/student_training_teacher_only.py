@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 3
+    actor_num = 2
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -70,12 +70,12 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/teacher_training_7b_ppo_kl_debug_7b-iter20-correct-v0-438/iter90/policy" #f"{prefix}/teacher_training_7b_ppo_debug_7b-iter50-v0-403/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 10
+    save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'7b-iter20-correct-v0-{randint}'
+    e_name = f'aug-iter50-correct-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -106,7 +106,7 @@ class PPOExpConfig(BasePPOExpConfig):
     update_ref_every_epoch: bool = False
     advantage_normalize: bool = False
 
-    num_episodes: int = 7
+    num_episodes: int = 20
     rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
     micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
@@ -119,12 +119,12 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.001
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
-    enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 5
     eval_teacher: bool = False
 
     # generate related settings
@@ -168,19 +168,19 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_all_teacher_base_logprops_w_student: bool = True
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
-    generate_with_student: bool = True
+    generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_only_wrong: bool = False
     correct_answer_augmenting: bool = True
     augment_with_opposite_answer: bool = False
     augment_yes_no: bool = False
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = pretrain
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
     sync_teacher_weights: bool = False
     synce_teacher_weights_interval: int = -1
 
@@ -189,9 +189,9 @@ class PPOExpConfig(BasePPOExpConfig):
     filter_student_for_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
-    weight_by_ss_reward: bool = True
+    weight_by_ss_reward: bool = False
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 2
+    skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

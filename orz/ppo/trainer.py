@@ -690,12 +690,12 @@ class RayPPOTrainer:
             if self.cfg.augment_only_wrong or self.cfg.augment_with_opposite_answer:
                 assert self.cfg.generate_with_student, "These two augmenting strategies require student generation to be enabled"
 
-            for i, (teacher_score, student_score, final_answer, extra, student_prompt) in enumerate(
-                zip(initial_teacher_scores, initial_scores, final_answers, all_extras, all_student_prompts)
-            ):
+            for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
                 include = True
                 teacher_answer = None
                 teacher_answers = None
+
+                teacher_score, student_score, final_answer = (initial_teacher_scores[i], initial_scores[i], final_answers[i]) if self.cfg.generate_with_student else (None, None, None)
 
                 if self.cfg.correct_answer_augmenting:
                     # Always use the dataset's ground-truth answer
@@ -1050,7 +1050,7 @@ class RayPPOTrainer:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
         if self.cfg.filter_student_for_teacher and self.train_teacher:
-            assert (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting), logger.info(f"Teacher filter only works with augment_only_wrong or correct_answer_augmenting")
+            # assert (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting), logger.info(f"Teacher filter only works with augment_only_wrong or correct_answer_augmenting")
             keep_idx = [i for i, sc in enumerate(initial_scores) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"Augmentation teacher filter: dropping {dropped}/{len(initial_scores)} incorrect student samples")
@@ -1311,7 +1311,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
             student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
 
-            kl_ss_reward_ratio = kl_reward_list / ss_reward_list
+            kl_ss_reward_ratio = np.clip(kl_reward_list / ss_reward_list,a_min=None, a_max=1)
 
             log_dict = {}
 
@@ -1326,6 +1326,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                 logger.info(f"{prefix} slice {slice.sum()} samples")
 
                 avg_kl_ss_reward_ratio = kl_ss_reward_ratio[slice].mean()
+                # logger.info(f"{prefix} avg_kl_ss_reward_ratio {kl_ss_reward_ratio[slice][:5]} \n kl_reward_list {kl_reward_list[slice][:5]} \n ss_reward_list {ss_reward_list[slice][:5]}" )
 
                 avg_student_reward = initial_scores[slice].mean()
                 avg_teacher_reward = final_reward_list[slice].mean()

@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 10
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'7b-iter20-correct-v0-{randint}'
+    e_name = f'7b-iter90-correct-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
@@ -168,11 +168,11 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_all_teacher_base_logprops_w_student: bool = True
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
-    generate_with_student: bool = True
+    generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_only_wrong: bool = False
     correct_answer_augmenting: bool = True
@@ -189,9 +189,9 @@ class PPOExpConfig(BasePPOExpConfig):
     filter_student_for_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
-    weight_by_ss_reward: bool = True
+    weight_by_ss_reward: bool = False
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 2
+    skip_student_first_n_rounds: int = 0
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

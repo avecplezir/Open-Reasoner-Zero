@@ -169,7 +169,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 5  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True

@@ -70,7 +70,7 @@ class PPOExpConfig(BasePPOExpConfig):
     vllm_sync_backend: str = "gloo"  # nccl or gloo
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/teacher_training_7b_ppo_debug_7b-iter50-v0-403/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter20/policy" #f"{prefix}/teacher_training_7b_ppo_debug_7b-iter50-v0-403/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 10
     # current date and time
@@ -193,8 +193,10 @@ class PPOExpConfig(BasePPOExpConfig):
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = 0
 
-    student_loss_type: str = "ppo"
+    student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
+
+    adversarial_training: bool = False
 
 
 if __name__ == "__main__":

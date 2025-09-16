@@ -119,7 +119,7 @@ class PPOExpConfig(BasePPOExpConfig):
     freezing_actor_steps: int = -1
     init_kl_coef: float = 0
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.004
+    kl_loss_coef: float = 0.001
     use_kl_loss: bool = True
     use_kl_estimator_k3: bool = True
 
@@ -152,12 +152,13 @@ class PPOExpConfig(BasePPOExpConfig):
 
     kl_max_coef: float = 0.01
     kl_mean_coef: float = 1.
-    reward_kl_coef: float = 5.
-    kl_reward_clamp: float = 100000
+    reward_kl_coef: float = 1.
+    kl_reward_clamp: float = 10
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.33
+    ss_reward_coef: float = 0.1
+    ss_tokens_offset: int = 0
 
     use_topr: bool = False
     replace_student_logprops_w_teacher: bool = True
@@ -166,16 +167,16 @@ class PPOExpConfig(BasePPOExpConfig):
     replace_teacher_base_logprops_w_student: bool = True
     replace_all_teacher_base_logprops_w_student: bool = True
 
-    initial_teacher_training_rounds: int = 0
+    initial_teacher_training_rounds: int = 10
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = True
+    augment_only_wrong: bool = False
     correct_answer_augmenting: bool = False
-    augment_with_opposite_answer: bool = False
+    augment_with_opposite_answer: bool = True
     augment_yes_no: bool = False
 
     separate_teacher_model: bool = True
@@ -185,15 +186,17 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
-    filter_student_for_teacher: bool = False
+    filter_student_for_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
-    weight_by_ss_reward: bool = True
+    weight_by_ss_reward: bool = False
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 20
+    skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
+
+    adversarial_training: bool = False
 
 
 if __name__ == "__main__":
