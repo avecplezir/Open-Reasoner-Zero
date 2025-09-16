@@ -686,9 +686,15 @@ class RayPPOTrainer:
             # Track which teacher prompts were already added so we can repeat
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
-            assert sum([self.cfg.correct_answer_augmenting, self.cfg.augment_yes_no, self.cfg.augment_only_wrong, self.cfg.augment_with_opposite_answer]) == 1, "Only one student augmenting strategy can be chosen"
-            if self.cfg.augment_only_wrong or self.cfg.augment_with_opposite_answer:
-                assert self.cfg.generate_with_student, "These two augmenting strategies require student generation to be enabled"
+            strategy = getattr(self.cfg, "augment_strategy", "correct")
+            allowed_strategies = {"correct", "yes_no", "only_wrong", "opposite"}
+            assert (
+                strategy in allowed_strategies
+            ), f"augment_strategy must be one of {allowed_strategies}, got {strategy}"
+            if strategy in {"only_wrong", "opposite"}:
+                assert (
+                    self.cfg.generate_with_student
+                ), "'only_wrong' and 'opposite' strategies require student generation to be enabled"
 
             for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
                 include = True
@@ -697,7 +703,7 @@ class RayPPOTrainer:
 
                 teacher_score, student_score, final_answer = (initial_teacher_scores[i], initial_scores[i], final_answers[i]) if self.cfg.generate_with_student else (None, None, None)
 
-                if self.cfg.correct_answer_augmenting:
+                if strategy == "correct":
                     # Always use the dataset's ground-truth answer
                     if not student_score:
                         # Track a representative incorrect example index; we will
@@ -707,7 +713,7 @@ class RayPPOTrainer:
                         representative_incorrect = False
                     teacher_answer = extra["answer"]
 
-                elif self.cfg.augment_yes_no:
+                elif strategy == "yes_no":
                     if not student_score:
                         # Track a representative incorrect example index; we will
                         # map it to the start index of the duplicated block below.
@@ -717,7 +723,7 @@ class RayPPOTrainer:
 
                     teacher_answers =  ["\\boxed{yes}" if self.cfg.boxed_pattern else "yes", "\\boxed{no}" if self.cfg.boxed_pattern else "no"]
 
-                elif self.cfg.augment_only_wrong:
+                elif strategy == "only_wrong":
                     # Only augment when teacher is correct and student is wrong
                     if teacher_score and (not student_score):
                         representative_incorrect = True
@@ -731,7 +737,7 @@ class RayPPOTrainer:
                         include = False
                         representative_incorrect = False
 
-                elif self.cfg.augment_with_opposite_answer:
+                elif strategy == "opposite":
                     # When teacher is correct, use the opposite label
                     if teacher_score:
                         representative_incorrect = not bool(student_score)
@@ -888,7 +894,7 @@ class RayPPOTrainer:
                         bool(initial_scores[new_indicess[i]]),
                         bool(initial_teacher_scores[new_indicess[i]]),
                     ])
-                if not self.cfg.augment_only_wrong:
+                if strategy != "only_wrong":
                     n = min(5, len(indices_incorrect))
                     for i in range(n):
                         idx = indices_incorrect[i]
@@ -1429,7 +1435,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                             # student
-                            if self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
+                            if self.cfg.student_loss_type == 'sft':
                                 if self.cfg.weight_by_ss_reward:
                                     if teacher_generated[prompt_idx]:
                                         score = np.exp(final_reward_list[prompt_idx]) #np.exp(ss_reward_mean_list[prompt_idx])
@@ -1509,7 +1515,7 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     for adv_exp in adv_student_experiences:
                         assert len(adv_exp.info['custom_rewards']) == len(adv_exp.num_actions[0]), "adv_exp.info['custom_rewards'] must equal adv_exp.num_actions[0]"
                         for i in range(len(adv_exp.num_actions[0])):
-                            if self.cfg.remove_student_grpo_normalization or self.cfg.student_loss_type == 'sft':
+                            if self.cfg.student_loss_type == 'sft':
                                 score = adv_initial_scores[prompt_idx]
                             else:
                                 prompt = adv_student_prompts[prompt_idx]

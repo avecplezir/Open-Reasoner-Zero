@@ -174,10 +174,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = False
-    augment_with_opposite_answer: bool = True
-    augment_yes_no: bool = False
+    augment_strategy: str = "opposite"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
@@ -220,4 +217,3 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
-

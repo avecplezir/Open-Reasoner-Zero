@@ -33,13 +33,13 @@ class BasePPOExpConfig(BaseConfig):
     colocate_all: bool = False
     vllm_num_engines: int = 4
     vllm_tensor_parallel_size: int = 1
-    vllm_sync_backend: str = "nccl" #"gloo" #"nccl"
+    vllm_sync_backend: str = "gloo" #"gloo" #"nccl"
     local_rank: int = -1
 
     # path related settings
     pretrain: Optional[str] = "example_path"
     critic_pretrain: Optional[str] = "example_path"
-    reward_pretrain: Optional[str] = "example_path"
+    reward_pretrain: Optional[str] = None
     ckpt_path: str = "example_path"
     save_path: str = "example_path"
     tensorboard_log_dir: str = "example_path"
@@ -52,7 +52,7 @@ class BasePPOExpConfig(BaseConfig):
 
     bf16: bool = True
     zpg: int = 1
-    adam_offload: bool = True
+    adam_offload: bool = False
     flash_attn: bool = True
     grad_accum_dtype: Optional[str] = None
     disable_trace_cache: bool = False
@@ -62,7 +62,7 @@ class BasePPOExpConfig(BaseConfig):
     target_modules: str = "all-linear"
 
     # inference realted settings
-    enable_prefix_caching: bool = False
+    enable_prefix_caching: bool = True
     enable_chunked_prefill: bool = False
     max_num_batched_tokens: int = 2048
     enforce_eager: bool = False
@@ -74,20 +74,22 @@ class BasePPOExpConfig(BaseConfig):
     save_interval: int = 100
 
     # ppo related settings
-    actor_learning_rate: float = 5e-7
-    critic_learning_rate: float = 9e-6
+    actor_learning_rate: float = 1e-6
+    critic_learning_rate: float = 5e-6
     num_episodes: int = 1
     max_epochs: int = 1
     prompt_max_len: int = 1024
     generate_max_len: int = 1024
+    critic_update_steps: int = 12
+    micro_train_batch_size: int = 1
+    micro_forward_batch_size: int = 1
+    freezing_actor_steps: int = -1
+
 
     train_batch_size: int = 256
-    micro_train_batch_size: int = 8
-    rollout_batch_size: int = 256
-    micro_rollout_batch_size: int = 32
-    micro_forward_batch_size: int = 32
-    policy_update_steps: int = 4
-    critic_update_steps: int = 4
+    rollout_batch_size: int = 128
+    micro_rollout_batch_size: int = 128
+    policy_update_steps: int = 1
     max_len: Optional[int] = None
     max_norm: float = 1.0
     num_warmup_steps: int = 5
@@ -101,8 +103,10 @@ class BasePPOExpConfig(BaseConfig):
     normalize_reward: bool = True
     top_p: float = 1.0
     temperature: float = 1.0
-    freezing_actor_steps: int = -1
     n_samples_per_prompt: int = 1
+    teacher_temperature: float = 0.7
+    top_k: int = -1
+    stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # student generation retry logic
     # When enabled, generate multiple rounds with the student and
@@ -112,10 +116,11 @@ class BasePPOExpConfig(BaseConfig):
     student_retry_max_rounds: int = 0
 
     kl_target: Optional[float] = None
-    init_kl_coef: float = 0.01
-    use_kl_estimator_k3: bool = False
+    init_kl_coef: float = 0.
+    use_kl_estimator_k3: bool = True
+
     use_abs_kl: bool = False
-    use_kl_loss: bool = False
+    use_kl_loss: bool = True
     kl_loss_coef: float = 0.0
     adam_betas: tuple = (0.9, 0.95)
     reward_clip_range: tuple = (-10, 10)
@@ -131,6 +136,51 @@ class BasePPOExpConfig(BaseConfig):
     update_ref_every_epoch: bool = False
 
     boxed_pattern: bool = False
+
+    kl_max_coef: float = 0.01
+    kl_mean_coef: float = 1.
+    reward_kl_coef: float = 1.
+    kl_reward_clamp: float = 10
+    reward_kl_reduction: str = "mean"  # "mean" or "sum"
+    reward_match_coef: float = 0.
+    reward_kl_toward_ref_model: bool = False
+    ss_reward_coef: float = 0.1
+    ss_tokens_offset: int = 0
+
+    use_ref_model: bool = False
+
+    use_topr: bool = False
+    replace_student_logprops_w_teacher: bool = True
+    replace_student_base_logprops_w_teacher: bool = True
+    replace_teacher_logprops_w_student: bool = True
+    replace_teacher_base_logprops_w_student: bool = True
+    replace_all_teacher_base_logprops_w_student: bool = True
+
+    student_teacher_order: bool = True
+
+    sync_teacher_weights: bool = False
+    synce_teacher_weights_interval: int = -1
+
+    teacher_explain_only: bool = True
+    use_teacher_only_data_for_teacher: bool = True
+    filter_student_for_teacher: bool = True
+    train_teacher_on_student_data_only: bool = False
+
+    eval_teacher: bool = False
+
+    # Student augmentation strategy used when
+    # cfg.augment_student_generation_with_teacher is True.
+    # Options: "correct" (use dataset ground truth),
+    #          "yes_no" (augment both yes and no),
+    #          "only_wrong" (only when teacher correct and student wrong, use opposite),
+    #          "opposite" (when teacher correct, always use opposite).
+    augment_strategy: str = "correct"
+
+    adversarial_training: bool = False
+
+    student_loss_type: str = "sft"
+    teacher_loss_type: str = "ppo"
+
 
 
 class BasePPOExp(BaseExp):

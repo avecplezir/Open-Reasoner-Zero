@@ -166,10 +166,6 @@ class PPOExpConfig(BasePPOExpConfig):
     packing_max_len: int = 16384
     generate_max_len: int = 8000  # TODO: change to larger later
     max_len: int = 8192  # TODO: change to larger later
-    temperature: float = 1.0
-    top_p: float = 1.0
-    top_k: int = -1
-    stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
     use_grpo: bool = False
@@ -177,10 +173,6 @@ class PPOExpConfig(BasePPOExpConfig):
     gpu_memory_utilization: float = 0.75 if use_grpo else 0.7 if not DEBUG_MODE else 0.5
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    gamma: float = 1.0
-    lambd: float = 1.0
-
-    teacher_explain_only: bool = False
 
 
 class CustomRewardTrainer(RayPPOTrainer):

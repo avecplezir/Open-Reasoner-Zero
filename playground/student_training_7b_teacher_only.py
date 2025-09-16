@@ -174,10 +174,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
-    augment_only_wrong: bool = False
-    correct_answer_augmenting: bool = True
-    augment_with_opposite_answer: bool = False
-    augment_yes_no: bool = False
+    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
@@ -220,4 +217,3 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
-
