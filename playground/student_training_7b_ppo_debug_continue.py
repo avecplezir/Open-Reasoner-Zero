@@ -132,7 +132,6 @@ class PPOExpConfig(BasePPOExpConfig):
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
 
-    weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = 0
 

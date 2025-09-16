@@ -102,7 +102,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_coef: float = 0.001
 
     enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    eval_interval: int = 5
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -119,14 +119,15 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
 
-    weight_by_ss_reward: bool = True
     skip_student_training_to_debug: bool = True
     skip_student_first_n_rounds: int = 0
+
+    student_loss_type: str = "ppo"
 
 
 if __name__ == "__main__":

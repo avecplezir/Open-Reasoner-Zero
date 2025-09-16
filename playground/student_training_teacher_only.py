@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_coef: float = 0.0
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 10
+    eval_interval: int = 5
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -122,7 +122,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
@@ -130,6 +130,7 @@ class PPOExpConfig(BasePPOExpConfig):
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
+    student_loss_type: str = "topr"
 
 
 if __name__ == "__main__":

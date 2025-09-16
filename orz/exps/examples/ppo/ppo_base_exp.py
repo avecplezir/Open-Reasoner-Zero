@@ -149,7 +149,6 @@ class BasePPOExpConfig(BaseConfig):
 
     use_ref_model: bool = False
 
-    use_topr: bool = False
     replace_student_logprops_w_teacher: bool = True
     replace_student_base_logprops_w_teacher: bool = True
     replace_teacher_logprops_w_student: bool = True

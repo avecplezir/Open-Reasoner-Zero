@@ -76,8 +76,17 @@ class RayPPOTrainer:
             packing_samples=True,
         )
 
+        # Note: yes/no tokens are provided via methods `yes_token`/`no_token`
+
     def __del__(self):
         self.writer.close()
+
+    # Provide YES/NO tokens based on current configuration
+    def yes_token(self) -> str:
+        return "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+
+    def no_token(self) -> str:
+        return "\\boxed{no}" if self.cfg.boxed_pattern else "no"
 
     async def eval(self):
         raise NotImplementedError("Eval function should be implemented in user's exp")
@@ -290,12 +299,14 @@ class RayPPOTrainer:
                     await self.policy_model.backload_to_gpu()
 
                 # if train_student and self.cfg.separate_teacher_model:
-                if self.cfg.separate_teacher_model:
+                if not self.cfg.colocate_all and self.cfg.separate_teacher_model:
                     await self.teacher_model.offload_to_cpu()
+                    await self.teacher_model.async_run_method("empty_cache")
                     await self.teacher_model.backload_to_gpu()
 
                     if self.cfg.critic_pretrain:
                         await self.critic_model.offload_to_cpu()
+                        await self.critic_model.async_run_method("empty_cache")
                         await self.critic_model.backload_to_gpu()
 
                 if self.cfg.separate_teacher_model:
@@ -469,17 +480,17 @@ class RayPPOTrainer:
 
                 if teacher_score:
                     if teacher_yes[i]:
-                        student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                        student_answer = self.yes_token()
                     elif teacher_no[i]:
-                        student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                        student_answer = self.no_token()
                     else:
                         assert False, f"final_answer {final_answer} must be yes or no"
 
                 else:
                     if random.random() > 0.5:
-                        student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                        student_answer = self.yes_token()
                     else:
-                        student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                        student_answer = self.no_token()
 
                 if self.cfg.teacher_explain_only:
                     teacher_prompt = create_teacher_explain_only_prompt_from_answer(
@@ -626,13 +637,13 @@ class RayPPOTrainer:
                     for i, (extra, student_score, teacher_score) in enumerate(zip(retry_extras, retry_initial_scores, retry_initial_teacher_scores)):
                         if teacher_score:
                             if retry_teacher_yes[i]:
-                                student_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                                student_answer = self.yes_token()
                             elif retry_teacher_no[i]:
-                                student_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                                student_answer = self.no_token()
                             else:
                                 assert False, f"final_answer must be yes or no"
                         else:
-                            student_answer = ("\\boxed{yes}" if self.cfg.boxed_pattern else "yes") if random.random() > 0.5 else ("\\boxed{no}" if self.cfg.boxed_pattern else "no")
+                            student_answer = self.yes_token() if random.random() > 0.5 else self.no_token()
 
                         if self.cfg.teacher_explain_only:
                             teacher_prompt = create_teacher_explain_only_prompt_from_answer(extra["dialogue"], student_answer, bos_token)
@@ -687,12 +698,11 @@ class RayPPOTrainer:
             # Track which teacher prompts were already added so we can repeat
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
-            strategy = getattr(self.cfg, "augment_strategy", "correct")
             allowed_strategies = {"correct", "yes_no", "only_wrong", "opposite"}
             assert (
-                strategy in allowed_strategies
-            ), f"augment_strategy must be one of {allowed_strategies}, got {strategy}"
-            if strategy in {"only_wrong", "opposite"}:
+                self.cfg.augment_strategy in allowed_strategies
+            ), f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
+            if self.cfg.augment_strategy in {"only_wrong", "opposite"}:
                 assert (
                     self.cfg.generate_with_student
                 ), "'only_wrong' and 'opposite' strategies require student generation to be enabled"
@@ -704,7 +714,8 @@ class RayPPOTrainer:
 
                 teacher_score, student_score, final_answer = (initial_teacher_scores[i], initial_scores[i], final_answers[i]) if self.cfg.generate_with_student else (None, None, None)
 
-                if strategy == "correct":
+                if self.cfg.augment_strategy == "correct":
+                    # logger.info("Using 'correct' augmentation strategy")
                     # Always use the dataset's ground-truth answer
                     if not student_score:
                         # Track a representative incorrect example index; we will
@@ -714,7 +725,8 @@ class RayPPOTrainer:
                         representative_incorrect = False
                     teacher_answer = extra["answer"]
 
-                elif strategy == "yes_no":
+                elif self.cfg.augment_strategy == "yes_no":
+                    # logger.info("Using 'yes_no' augmentation strategy")
                     if not student_score:
                         # Track a representative incorrect example index; we will
                         # map it to the start index of the duplicated block below.
@@ -722,30 +734,32 @@ class RayPPOTrainer:
                     else:
                         representative_incorrect = False
 
-                    teacher_answers =  ["\\boxed{yes}" if self.cfg.boxed_pattern else "yes", "\\boxed{no}" if self.cfg.boxed_pattern else "no"]
+                    teacher_answers =  [self.yes_token(), self.no_token()]
 
-                elif strategy == "only_wrong":
+                elif self.cfg.augment_strategy == "only_wrong":
+                    # logger.info("Using 'only_wrong' augmentation strategy")
                     # Only augment when teacher is correct and student is wrong
                     if teacher_score and (not student_score):
                         representative_incorrect = True
                         if teacher_yes[i]:
-                            teacher_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                            teacher_answer = self.no_token()
                         elif teacher_no[i]:
-                            teacher_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                            teacher_answer = self.yes_token()
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
                     else:
                         include = False
                         representative_incorrect = False
 
-                elif strategy == "opposite":
+                elif self.cfg.augment_strategy == "opposite":
+                    # logger.info("Using 'opposite' augmentation strategy")
                     # When teacher is correct, use the opposite label
                     if teacher_score:
                         representative_incorrect = not bool(student_score)
                         if teacher_yes[i]:
-                            teacher_answer = "\\boxed{no}" if self.cfg.boxed_pattern else "no"
+                            teacher_answer = self.no_token()
                         elif teacher_no[i]:
-                            teacher_answer = "\\boxed{yes}" if self.cfg.boxed_pattern else "yes"
+                            teacher_answer = self.yes_token()
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
                     else:
@@ -814,7 +828,7 @@ class RayPPOTrainer:
                     dp_tasks.append(
                         self.generate_vllm(gen_func, dp_teacher_inputs, extras=dp_extras, teacher=True, **generate_kwargs))
 
-                logger.info("start generation from complimentary teacher prompts")
+                logger.info("start generation from teacher prompts")
                 local_responses = await asyncio.gather(*dp_tasks)
                 outputs.extend(sum(local_responses, []))
                 logger.info("generate local rollout batch done")
@@ -895,7 +909,7 @@ class RayPPOTrainer:
                         bool(initial_scores[new_indicess[i]]),
                         bool(initial_teacher_scores[new_indicess[i]]),
                     ])
-                if strategy != "only_wrong":
+                if self.cfg.augment_strategy != "only_wrong":
                     n = min(5, len(indices_incorrect))
                     for i in range(n):
                         idx = indices_incorrect[i]
@@ -1270,18 +1284,18 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 
                     if self.cfg.replace_all_teacher_base_logprops_w_student and start_kl < end_full:
-                        teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:,start_kl:end_full]
+                        teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:,start_kl:end_full].clone()
 
                     if not teacher_generated[teacher_prompt_idx]:
                         if self.cfg.replace_teacher_logprops_w_student and start_kl < end_full:
-                            teacher_exp.action_log_probs[:, start_kl:end_full] = student_exp.action_log_probs[:, start_kl:end_full]
+                            teacher_exp.action_log_probs[:, start_kl:end_full] = student_exp.action_log_probs[:, start_kl:end_full].clone()
                         if self.cfg.replace_teacher_base_logprops_w_student and start_kl < end_full:
-                            teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:, start_kl:end_full]
+                            teacher_exp.base_action_log_probs[:, start_kl:end_full] = student_exp.base_action_log_probs[:, start_kl:end_full].clone()
                     else:
                         if self.cfg.replace_student_logprops_w_teacher and start_kl < end_full:
-                            student_exp.action_log_probs[:, start_kl:end_full] = teacher_exp.action_log_probs[:, start_kl:end_full]
+                            student_exp.action_log_probs[:, start_kl:end_full] = teacher_exp.action_log_probs[:, start_kl:end_full].clone()
                         if self.cfg.replace_student_base_logprops_w_teacher and start_kl < end_full:
-                            student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:, start_kl:end_full]
+                            student_exp.base_action_log_probs[:, start_kl:end_full] = teacher_exp.base_action_log_probs[:, start_kl:end_full].clone()
 
                     if teacher_score and final_answer_start is not None and final_answer_start < final_answer_end:
                         if self.cfg.teacher_explain_only:
@@ -1360,16 +1374,18 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                 cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), slice)
                 ii = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 0), slice)
 
-                correct_kl_sum_list = np.array([]) if np.all(ic) else np.array(kl_sum_list[cc])
-                incorrect_kl_sum_list = np.array([]) if np.all(cc) else np.array(kl_sum_list[ic])
-                correct_kl_mean_list = np.array([]) if np.all(ic) else np.array(kl_mean_list[cc])
-                incorrect_kl_mean_list = np.array([]) if np.all(cc) else np.array(kl_mean_list[ic])
-                correct_kl_max_list = np.array([]) if np.all(ic) else np.array(kl_max_list[cc])
-                incorrect_kl_max_list = np.array([]) if np.all(cc) else np.array(kl_max_list[ic])
-                correct_ss_reward_mean_list = np.array([]) if np.all(ic) else np.array(ss_reward_mean_list[cc])
-                incorrect_ss_reward_mean_list = np.array([]) if np.all(cc) else np.array(ss_reward_mean_list[ic])
-                correct_ss_reward_min_list = np.array([]) if np.all(ic) else np.array(ss_reward_min_list[cc])
-                incorrect_ss_reward_min_list = np.array([]) if np.all(cc) else np.array(ss_reward_min_list[ic])
+                logger.info(f"{prefix} {ic.mean()} ic, {cc.mean()} cc, {ii.mean()} ii")
+
+                avg_correct_kl_sum = kl_sum_list[cc].mean()
+                avg_incorrect_kl_sum = kl_sum_list[ic].mean()
+                avg_correct_kl_mean = kl_mean_list[cc].mean()
+                avg_incorrect_kl_mean = kl_mean_list[ic].mean()
+                avg_correct_kl_max = kl_max_list[cc].mean()
+                avg_incorrect_kl_max = kl_max_list[ic].mean()
+                avg_correct_ss_reward_mean = ss_reward_mean_list[cc].mean()
+                avg_incorrect_ss_reward_mean = ss_reward_mean_list[ic].mean()
+                avg_correct_ss_reward_min = ss_reward_min_list[cc].mean()
+                avg_incorrect_ss_reward_min = ss_reward_min_list[ic].mean()
                 teacher_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.teacher_loss_type == 'topr' else np.array(teacher_ratio_clipped_0_1_list[cc])
                 teacher_incorrect_ratio_clipped_0_1_list = np.array([]) if np.all(cc) or not self.cfg.teacher_loss_type == 'topr' else np.array(teacher_ratio_clipped_0_1_list[ic])
                 student_correct_ratio_clipped_0_1_list = np.array([]) if np.all(ic) or not self.cfg.student_loss_type == 'topr' else np.array(student_ratio_clipped_0_1_list[cc])
@@ -1390,16 +1406,16 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     f"{prefix}avg_ss_reward_mean": avg_ss_reward_mean,
                     f"{prefix}avg_ss_reward_min": avg_ss_reward_min,
                     f"{prefix}avg_ss_reward": avg_ss_reward,
-                    f"{prefix}avg_correct_kl_mean": 0 if len(correct_kl_mean_list) == 0 else np.mean(correct_kl_mean_list).item(),
-                    f"{prefix}avg_incorrect_kl_mean": 0 if len(incorrect_kl_mean_list) == 0 else np.mean(incorrect_kl_mean_list).item(),
-                    f"{prefix}avg_correct_kl_sum": 0 if len(correct_kl_sum_list) == 0 else np.mean(correct_kl_sum_list).item(),
-                    f"{prefix}avg_incorrect_kl_sum": 0 if len(incorrect_kl_sum_list) == 0 else np.mean(incorrect_kl_sum_list).item(),
-                    f"{prefix}avg_correct_kl_max": 0 if len(correct_kl_max_list) == 0 else np.mean(correct_kl_max_list).item(),
-                    f"{prefix}avg_incorrect_kl_max": 0 if len(incorrect_kl_max_list) == 0 else np.mean(incorrect_kl_max_list).item(),
-                    f"{prefix}avg_correct_ss_reward_mean": 0 if len(correct_ss_reward_mean_list) == 0 else np.mean(correct_ss_reward_mean_list).item(),
-                    f"{prefix}avg_incorrect_ss_reward_mean": 0 if len(incorrect_ss_reward_mean_list) == 0 else np.mean(incorrect_ss_reward_mean_list).item(),
-                    f"{prefix}avg_correct_ss_reward_min": 0 if len(correct_ss_reward_min_list) == 0 else np.mean(correct_ss_reward_min_list).item(),
-                    f"{prefix}avg_incorrect_ss_reward_min": 0 if len(incorrect_ss_reward_min_list) == 0 else np.mean(incorrect_ss_reward_min_list).item(),
+                    f"{prefix}avg_correct_kl_mean": avg_correct_kl_mean,
+                    f"{prefix}avg_incorrect_kl_mean": avg_incorrect_kl_mean,
+                    f"{prefix}avg_correct_kl_sum": avg_correct_kl_sum,
+                    f"{prefix}avg_incorrect_kl_sum": avg_incorrect_kl_sum,
+                    f"{prefix}avg_correct_kl_max": avg_correct_kl_max,
+                    f"{prefix}avg_incorrect_kl_max": avg_incorrect_kl_max,
+                    f"{prefix}avg_correct_ss_reward_mean": avg_correct_ss_reward_mean,
+                    f"{prefix}avg_incorrect_ss_reward_mean": avg_incorrect_ss_reward_mean,
+                    f"{prefix}avg_correct_ss_reward_min": avg_correct_ss_reward_min,
+                    f"{prefix}avg_incorrect_ss_reward_min": avg_incorrect_ss_reward_min,
                     f"{prefix}avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
                     f"{prefix}avg_teacher_correct_alpha": 0 if len(teacher_correct_ratio_clipped_0_1_list) == 0 else np.mean(teacher_correct_ratio_clipped_0_1_list).item(),
                     f"{prefix}avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1_list) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1_list).item(),
@@ -1408,6 +1424,8 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
                     }
                 )
                 logger.info(f"{prefix} avg_teacher_reward: {avg_teacher_reward} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_match_reward {avg_match_reward}")
+                logger.info(f"{prefix} avg_correct_ss_reward_mean: {avg_correct_ss_reward_mean} avg_incorrect_ss_reward_mean: {avg_incorrect_ss_reward_mean}")
+                logger.info(f"{prefix} avg_correct_kl_mean: {avg_correct_kl_mean} avg_incorrect_kl_mean: {avg_incorrect_kl_mean} avg_correct_kl_max: {avg_correct_kl_max} avg_incorrect_kl_max: {avg_incorrect_kl_max}")
 
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.global_step)
