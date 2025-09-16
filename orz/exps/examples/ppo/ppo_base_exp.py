@@ -181,6 +181,8 @@ class BasePPOExpConfig(BaseConfig):
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
 
+    weight_by_ss_reward: bool = False
+
 
 
 class BasePPOExp(BaseExp):

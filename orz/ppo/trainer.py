@@ -194,7 +194,6 @@ class RayPPOTrainer:
                     sfp = await self.policy_model.async_run_method("_weight_fingerprint")
                     tfp = await self.teacher_model.async_run_method("_weight_fingerprint")
 
-
                 if self.train_teacher and not self.train_student:
                         train_set = zip([self.teacher_replay_buffer], ["teacher"])
                         self.student_replay_buffer.clear()
@@ -284,9 +283,11 @@ class RayPPOTrainer:
                     # 5. set logs
                     logger.info(f'Status {prefix} {status}')
 
-                await self.policy_model.offload_to_cpu()
-                await self.policy_model.async_run_method("empty_cache")
-                await self.policy_model.backload_to_gpu()
+
+                if not self.cfg.colocate_all:
+                    await self.policy_model.offload_to_cpu()
+                    await self.policy_model.async_run_method("empty_cache")
+                    await self.policy_model.backload_to_gpu()
 
                 # if train_student and self.cfg.separate_teacher_model:
                 if self.cfg.separate_teacher_model:
@@ -2029,7 +2030,8 @@ logger.info(f"student and teacher prompts must be equal in length {len(all_stude
             if cfg.separate_teacher_model:
                 await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
         else:
-            await asyncio.gather(*ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            if ref_model is not None:
+                await asyncio.gather(*ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             await asyncio.gather(*policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
             await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
             await policy_model.offload_to_cpu()

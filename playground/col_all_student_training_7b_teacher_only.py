@@ -37,7 +37,6 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 executor = ThreadPoolExecutor(max_workers=64)
 
 prefix = '/home/a/anokhin/links/scratch'
-project_prefix = '/home/a/anokhin/links/projects/aip-irina/anokhin/adv_reasoner'
 # prefix = '/home/anokhin/scratch'
 
 @dataclass
@@ -49,34 +48,33 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 2
     # resource related settings
-    ref_num_nodes: int = actor_num
+    ref_num_nodes: int = total_num_nodes
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = actor_num
+    actor_num_nodes: int = total_num_nodes
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = actor_num
+    critic_num_nodes: int = total_num_nodes
     critic_num_gpus_per_node: int = 1
-    reward_num_nodes: int = actor_num
+    reward_num_nodes: int = total_num_nodes
     reward_num_gpus_per_node: int = 1
-    colocate_all: bool = False
+    colocate_all: bool = True
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
-    gpu_memory_utilization: float = 0.95
+    vllm_num_engines: int = total_num_nodes
+    gpu_memory_utilization: float = 0.3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_7b_ppo_kl_debug_7b-iter20-correct-v0-438/iter90/policy" #f"{prefix}/teacher_training_7b_ppo_debug_7b-iter50-v0-403/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 50
+    save_interval: int = 30
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-st-iter50-t-iter50-{randint}'
+    e_name = f'7b-iter90-correct-check-for-speed-v0-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
-    save_path: str = ckpt_path
+    save_path: str =ckpt_path
     tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
     # data related settings
@@ -98,12 +96,14 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
+    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.0
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
     # generate related settings
@@ -119,17 +119,17 @@ class PPOExpConfig(BasePPOExpConfig):
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_teacher_order: bool = True
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = pretrain #f"{prefix}/checkpoints/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter20/policy" #pretrain
 
     skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = initial_teacher_training_rounds
-
+    skip_student_first_n_rounds: int = 0
 
 
 if __name__ == "__main__":
