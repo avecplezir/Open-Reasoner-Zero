@@ -941,6 +941,8 @@ class RayPPOTrainer:
             combined_all_teacher_prompts.extend(all_teacher_prompts)
             combined_outputs.extend(outputs)
             combined_custom_rewards.extend(custom_rewards)
+            # Remember where this teacher block starts in the combined teacher rewards list
+            teacher_block_start = len(combined_teacher_custom_rewards)
             combined_teacher_custom_rewards.extend(teacher_custom_rewards)
             combined_answer_indices.extend(answer_indices)
             combined_initial_scores.extend(initial_scores)
@@ -1004,6 +1006,58 @@ class RayPPOTrainer:
 
                 # Stash to third-round containers; we will convert to experiences later
                 adv_teacher_prompts = adv_student_prompts
+
+                # Log a few adversarial examples to wandb
+                if wandb.run is not None and len(adv_student_prompts) > 0:
+                    n = min(5, len(adv_student_prompts))
+                    table_data = []
+                    for i in range(n):
+                        resp_obj = adv_outputs[i]
+                        # Be robust to different custom_reward_fn payloads
+                        resp_text = resp_obj.get("response", str(resp_obj)) if isinstance(resp_obj, dict) else str(resp_obj)
+                        final_ans = resp_obj.get("final_answer", "") if isinstance(resp_obj, dict) else ""
+                        s_ok = bool(adv_initial_scores[i])
+                        t_ok = bool(adv_initial_teacher_scores[i])
+                        teacher_ans = adv_extras[i].get("teacher_answer", "") if i < len(adv_extras) else ""
+                        table_data.append([
+                            adv_student_prompts[i],
+                            resp_text,
+                            final_ans,
+                            teacher_ans,
+                            s_ok,
+                            t_ok,
+                        ])
+                    wandb.log({
+                        "adversarial_examples": wandb.Table(
+                            columns=[
+                                "adv_student_prompt",
+                                "adv_response",
+                                "adv_final_answer",
+                                "teacher_answer",
+                                "student_correct",
+                                "teacher_correct",
+                            ],
+                            data=table_data,
+                        )
+                    }, step=self.global_step)
+
+                teacher_adv_match_rewards = []
+                # If we have generated adversarial responses for each teacher prompt, compute
+                # teacher rewards as the average agreement of adversarial final answers with
+                # the teacher-declared answer embedded in the prompts. This averages over
+                # multiple adversarial responses per teacher prompt instance.
+                # Each teacher prompt instance produced cfg.n_samples_per_prompt adversarial responses
+                assert len(adv_initial_teacher_scores) == len(all_teacher_prompts) * self.cfg.n_samples_per_prompt, (
+                    "Expected adv_initial_teacher_scores to be teacher_instances * n_samples_per_prompt"
+                )
+
+                # Overwrite the teacher custom rewards block we appended earlier
+                for i in range(len(all_teacher_prompts)):
+                    start = i * self.cfg.n_samples_per_prompt
+                    end = (i + 1) * self.cfg.n_samples_per_prompt
+                    avg_match = float(np.mean(adv_initial_teacher_scores[start:end]))
+                    teacher_adv_match_rewards.append(avg_match)
+                    combined_teacher_custom_rewards[teacher_block_start + i] = torch.tensor([avg], dtype=torch.float32)
 
         # offload vllm engines when colocate all models
         if self.cfg.colocate_all:
