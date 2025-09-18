@@ -90,13 +90,14 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
+    train_batch_size: int = 32
     num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001

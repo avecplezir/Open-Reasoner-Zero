@@ -960,7 +960,7 @@ class RayPPOTrainer:
                 for resp in teacher_responses:
                     m = re.search(r"(.*?)</think>", resp, re.DOTALL)
                     prev = m.group(1).strip() if m else resp.strip()
-                    extracted_reasonings.append(prev + '</think>')
+                    extracted_reasonings.append(prev + '</think> <think>')
 
                 # Construct prompts; keep one new prompt per teacher sample (already repeated for GRPO)
                 adv_student_prompts = []

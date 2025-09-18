@@ -68,7 +68,7 @@ class PPOExpConfig(BasePPOExpConfig):
     gpu_memory_utilization: float = 0.95
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
@@ -111,24 +111,26 @@ class PPOExpConfig(BasePPOExpConfig):
     max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
+    use_grpo: bool = True  # False
+
     # grpo related settings
-    critic_pretrain: Optional[str] = "" if use_grpo else pretrain
+    critic_pretrain: Optional[str] = pretrain
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = True
+    augment_student_generation_with_teacher: bool = False
     augment_strategy: str = "opposite"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
-    student_loss_type: str = "grpo"
+    student_loss_type: str = "topr"
 
 
 if __name__ == "__main__":
