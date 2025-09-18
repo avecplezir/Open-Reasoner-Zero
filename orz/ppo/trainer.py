@@ -128,6 +128,9 @@ class RayPPOTrainer:
         self.global_step = consumed_samples // self.cfg.rollout_batch_size
         self.student_training_step = 0
         self.teacher_training_step = 0
+        # Cumulative counters across the whole run (never reset)
+        self.student_steps_total = 0
+        self.teacher_steps_total = 0
         # Warmup counter for initial teacher-only training rounds. This is used
         # when cfg.initial_teacher_training_rounds > 0 to force a number of
         # teacher updates before the regular teacher/student alternation.
@@ -167,22 +170,28 @@ class RayPPOTrainer:
                     )
                     self.train_teacher = True
                     self.initial_teacher_training_step += 1
+                    self.teacher_steps_total += 1
                 else:
                     if self.cfg.student_training_rounds > 0:
                         if self.teacher_training_step < self.cfg.teacher_training_rounds:
                             logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
                             self.train_teacher = True
                             self.teacher_training_step += 1
+                            self.teacher_steps_total += 1
                         elif self.student_training_step < self.cfg.student_training_rounds:
                             logger.info(f'training student model, {self.global_step} global step, {self.student_training_step} student step')
                             self.train_student = True
                             self.student_training_step += 1
+                            self.student_steps_total += 1
                             if self.student_training_step == self.cfg.student_training_rounds:
                                 self.student_training_step = 0
                                 self.teacher_training_step = 0
                     else:
+                        # Train both teacher and student in the same global step
                         self.train_teacher = True
                         self.train_student = True
+                        self.teacher_steps_total += 1
+                        self.student_steps_total += 1
 
                 logger.info(f'train_teacher {self.train_teacher}, train_student {self.train_student}')
 
@@ -322,6 +331,18 @@ class RayPPOTrainer:
                 self.writer.add_scalar("episode_idx", episode, self.global_step)
                 self.writer.add_scalar("teacher_training", self.train_teacher, self.global_step)
                 self.writer.add_scalar("student_training", self.train_student, self.global_step)
+                # Log counters (current round counters and cumulative) to TB and W&B
+                self.writer.add_scalar("teacher_training_step", self.teacher_training_step, self.global_step)
+                self.writer.add_scalar("student_training_step", self.student_training_step, self.global_step)
+                self.writer.add_scalar("teacher_steps_total", self.teacher_steps_total, self.global_step)
+                self.writer.add_scalar("student_steps_total", self.student_steps_total, self.global_step)
+                if wandb.run is not None:
+                    wandb.log({
+                        "teacher_training_step": self.teacher_training_step,
+                        "student_training_step": self.student_training_step,
+                        "teacher_steps_total": self.teacher_steps_total,
+                        "student_steps_total": self.student_steps_total,
+                    }, step=self.global_step)
                 self.global_step += 1
                 if self.global_step % self.cfg.save_interval == 0:
                     await self.policy_model.async_save_model(self.tokenizer, self.global_step)
