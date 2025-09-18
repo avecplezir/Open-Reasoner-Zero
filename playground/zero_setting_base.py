@@ -41,8 +41,10 @@ Assistant: <think>\
 STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
 {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
 If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
-Assistant: <think>{{previous_reasoning}\
+Assistant: <think>{{previous_reasoning}}\
 """
+
+STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
 
 # prompt_template_jinja = """\
 # {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \

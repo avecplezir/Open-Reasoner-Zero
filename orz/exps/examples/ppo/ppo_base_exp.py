@@ -162,7 +162,7 @@ class BasePPOExpConfig(BaseConfig):
 
     teacher_explain_only: bool = True
     use_teacher_only_data_for_teacher: bool = True
-    filter_student_for_teacher: bool = True
+    filter_for_correct_formatting: bool = True
     train_teacher_on_student_data_only: bool = False
 
     eval_teacher: bool = False
