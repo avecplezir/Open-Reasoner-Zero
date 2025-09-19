@@ -161,7 +161,11 @@ class BasePPOExpConfig(BaseConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    # When training the teacher, use only teacher-generated data
+    # (replaces deprecated use_teacher_only_data_for_teacher)
+    train_teacher_on_teacher_data_only: bool = True
+    # When training the student, include only teacher-generated data
+    train_student_on_teacher_data_only: bool = False
     filter_for_correct_formatting: bool = True
     train_teacher_on_student_data_only: bool = False
 

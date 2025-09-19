@@ -183,7 +183,7 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = False
+    train_teacher_on_teacher_data_only: bool = False
     filter_student_for_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
     augment_yes_no: bool = False

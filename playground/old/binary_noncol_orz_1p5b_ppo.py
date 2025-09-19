@@ -181,7 +181,7 @@ class PPOExpConfig(BasePPOExpConfig):
     sync_teacher_weights: bool = False
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    train_teacher_on_teacher_data_only: bool = True
 
 
 if __name__ == "__main__":

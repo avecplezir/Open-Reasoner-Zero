@@ -183,7 +183,7 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    train_teacher_on_teacher_data_only: bool = True
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"

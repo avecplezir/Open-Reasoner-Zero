@@ -5,31 +5,30 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 
-PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
-This is the problem:
-{{prompt}}
-"""
-
-# PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED = """\
-# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'yes' or 'no', your final answer must be '\\boxed{yes}' or '\\boxed{no}'.
+# Base prompt instruction template used in all variants
+# PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
 # This is the problem:
 # {{prompt}}
 # """
-# PROMPT_INSTRUCTION_TEMPLATE_JNJA = PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED
 
-TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs the reasoning process in the mind that leads to this asnwer, and then recstate the User's final answer. \
-The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}} The final answer is {{answer}}. 
-Assistant: <think>\
-"""
+# # student variant: explanation + answer (both <think> and <answer> in the output)
+# STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
+# The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
+# Assistant: <think>\
+# """
 
-# Teacher variant: explanation only (no <answer> in the output). We will append
-# the provided answer programmatically after generation.
-TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA = """\
-{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs only the reasoning process in the mind that leads to this answer. \
-Output only the reasoning process inside <think> </think> tags and DO NOT output the <answer> tag. User: {{prompt}} The final answer is {{answer}}. 
-Assistant: <think>\
+# STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
+# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
+# If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
+# Assistant: <think>{{previous_reasoning}}\
+# """
+
+PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. 
+This is the problem:
+{{prompt}}
 """
 
 STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
@@ -44,18 +43,28 @@ If prior reasoning is provided, continue it to arrive at the answer. The reasoni
 Assistant: <think>{{previous_reasoning}}\
 """
 
-# STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
+# Teacher variant: explanation + answer (both <think> and <answer> in the output)
+TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs the reasoning process in the mind that leads to this asnwer, and then recstate the User's final answer. \
+The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
 
-# prompt_template_jinja = """\
-# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
-# The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
-# Assistant: <think>\
-# """
-#         prompt_instruction_template_jinja = """\
-# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag.
+# Teacher variant: explanation only (no <answer> in the output). We will append
+# the provided answer programmatically after generation.
+TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs only the reasoning process in the mind that leads to this answer. \
+Output only the reasoning process inside <think> </think> tags and DO NOT output the <answer> tag. User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
+
+
+# PROMPT_INSTRUCTION_TEMPLATE_JNJA_BOXED = """\
+# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\boxed{} tag. If the question can be answered with 'yes' or 'no', your final answer must be '\\boxed{yes}' or '\\boxed{no}'.
 # This is the problem:
 # {{prompt}}
 # """
+
 
 def create_student_prompt(
     dialogue: List,

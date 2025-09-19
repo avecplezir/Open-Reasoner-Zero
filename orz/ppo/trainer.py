@@ -562,8 +562,13 @@ class RayPPOTrainer:
                     ),
                 })
 
-            if not self.train_student and self.train_teacher and self.cfg.use_teacher_only_data_for_teacher:
-                logger.info("Only using teacher generated data for teacher training as configured")
+            # Optionally skip student-generated data when configured to train only on
+            # teacher-generated data for either teacher-only or student-only runs.
+            if (
+                (not self.train_student and self.train_teacher and self.cfg.train_teacher_on_teacher_data_only)
+                or (self.train_student and not self.train_teacher and self.cfg.train_student_on_teacher_data_only)
+            ):
+                logger.info(f"Skipping student-generated data due to {self.cfg.train_teacher_on_teacher_data_only} {self.cfg.train_student_on_teacher_data_only} flags")
             else:
                 teacher_generated.extend([False] * len(all_student_prompts))
                 combined_all_student_prompts.extend(all_student_prompts)
@@ -686,7 +691,6 @@ class RayPPOTrainer:
                     logger.info(f"pass_at_n_retry {round_idx} {pass_at_n_retry}")
                     self.writer.add_scalar(f"pass_at_n_retry_{round_idx+2}", pass_at_n_retry, self.global_step)
 
-
         generate_with_teacher = True
         if self.train_teacher and self.cfg.train_teacher_on_student_data_only:
             generate_with_teacher = False
@@ -712,14 +716,22 @@ class RayPPOTrainer:
             # Track which teacher prompts were already added so we can repeat
             # each unique prompt exactly n_samples_per_prompt times.
             added_teacher_prompt_keys = set()
-            allowed_strategies = {"correct", "yes_no", "only_wrong", "opposite"}
-            assert (
-                self.cfg.augment_strategy in allowed_strategies
-            ), f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
-            if self.cfg.augment_strategy in {"only_wrong", "opposite"}:
-                assert (
-                    self.cfg.generate_with_student
-                ), "'only_wrong' and 'opposite' strategies require student generation to be enabled"
+            # Added "correct_incorrect" to support general answers: pair correct
+            # ground-truth with an incorrect answer (from student or pool)
+            allowed_strategies = {"correct", "yes_no", "only_wrong", "opposite", "correct_incorrect"}
+            assert self.cfg.augment_strategy in allowed_strategies, f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
+            if self.cfg.augment_strategy in {"only_wrong", "opposite", "correct_incorrect"}:
+                assert self.cfg.generate_with_student, f"{self.cfg.augment_strategy} strategy require student generation to be enabled"
+
+            if self.cfg.augment_strategy == "correct_incorrect":
+                # Pre-compute candidate negative answers across the batch to use when
+                # a student's wrong final answer is not available.
+                candidate_student_negs = defaultdict(list)
+                for sp, ex, fa, sc in zip(all_student_prompts, all_extras, final_answers, initial_scores):
+                    if not sc and len(fa) > 0:
+                        candidate_student_negs[sp].append(fa)
+
+                dataset_answer_pool = {ex.get("answer", "") for ex in all_extras if len(ex.get("answer", "")) > 0}
 
             for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
                 include = True
@@ -738,6 +750,36 @@ class RayPPOTrainer:
                     else:
                         representative_incorrect = False
                     teacher_answer = extra["answer"]
+
+                elif self.cfg.augment_strategy == "correct_incorrect":
+                    # Pair each prompt with both the correct and an incorrect answer.
+                    # Prefer the student's wrong final answer as a hard negative; otherwise
+                    # pick a different answer from the batch pool.
+                    representative_incorrect = not bool(student_score)
+
+                    # Always include ground-truth
+                    correct_ans = extra.get("answer", "")
+                    neg_ans = None
+
+                    # Use student's wrong answer if available
+                    if self.cfg.generate_with_student and len(final_answer) > 0 and (not student_score):
+                        neg_ans = final_answer
+                    else:
+                        if self.cfg.generate_with_student:
+                            # Otherwise pick any candidate that differs from ground-truth
+                            neg_cands = candidate_student_negs.get(student_prompt, [])
+                            if len(neg_cands) > 0:
+                                neg_ans = neg_cands[-1]
+                        # Fallback: sample a different dataset answer
+                        if neg_ans is None:
+                            logger.info("Falling back to dataset answer pool for negative")
+                            neg_ans = dataset_answer_pool[-1]
+
+                    # If we still couldn't find a negative, skip adding incorrect variant
+                    if neg_ans is not None:
+                        teacher_answers = [correct_ans, neg_ans]
+                    else:
+                        teacher_answers = [correct_ans]
 
                 elif self.cfg.augment_strategy == "yes_no":
                     # logger.info("Using 'yes_no' augmentation strategy")
@@ -779,6 +821,7 @@ class RayPPOTrainer:
                     else:
                         include = False
                         representative_incorrect = False
+
                 else:
                     assert False, "One student augmenting strategy must be chosen"
 

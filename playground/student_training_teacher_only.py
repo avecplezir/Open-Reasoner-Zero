@@ -87,7 +87,9 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
+            # "data/eval_data/strategyqa_train.json",
+            "data/eval_data/math500.json",
+            "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -121,9 +123,10 @@ class PPOExpConfig(BasePPOExpConfig):
     student_training_rounds: int = 5  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_student: bool = False
+    generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
+    train_student_on_teacher_data_only: bool = True
+    augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"

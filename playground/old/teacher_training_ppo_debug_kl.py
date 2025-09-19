@@ -185,7 +185,7 @@ class PPOExpConfig(BasePPOExpConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
-    use_teacher_only_data_for_teacher: bool = True
+    train_teacher_on_teacher_data_only: bool = True
     filter_student_for_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
 
@@ -218,4 +218,3 @@ if __name__ == "__main__":
     asyncio.run(exp.run())
 
     run.finish()
-
