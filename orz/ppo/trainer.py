@@ -1082,19 +1082,6 @@ class RayPPOTrainer:
                     if self.train_teacher:
                         combined_teacher_custom_rewards[teacher_idx][-1] = avg_match
 
-                # if self.train_student:
-                #     teacher_generated.extend([False] * len(adv_student_prompts))
-                #     combined_all_student_prompts.extend(adv_student_prompts)
-                #     combined_all_teacher_prompts.extend(adv_teacher_prompts)
-                #     combined_outputs.extend(adv_outputs)
-                #     combined_custom_rewards.extend(adv_custom_rewards)
-                #     combined_teacher_custom_rewards.extend(adv_teacher_custom_rewards)
-                #     combined_answer_indices.extend(adv_answer_indices)
-                #     combined_initial_scores.extend(adv_initial_scores)
-                #     combined_initial_teacher_scores.extend(adv_initial_teacher_scores)
-                #     combined_final_answers.extend(adv_final_answers)
-                #     combined_correct_formattings.extend(adv_correct_formattings)
-
                 # Log a few adversarial examples to wandb
                 if wandb.run is not None and len(adv_student_prompts) > 0:
                     n = min(16, len(adv_student_prompts))
@@ -1145,8 +1132,9 @@ class RayPPOTrainer:
         initial_scores = [initial_scores[i] for i in indices]
         initial_teacher_scores = [initial_teacher_scores[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
+        # Keep correct_formattings aligned with the shuffle for downstream filtering
+        correct_formattings = [correct_formattings[i] for i in indices]
 
-        del correct_formattings
         del final_answers
 
         assert self.cfg.student_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"student loss type {self.cfg.student_loss_type} must be ppo, sft or topr")
@@ -1168,6 +1156,7 @@ class RayPPOTrainer:
             initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
             initial_scores = [initial_scores[i] for i in keep_idx]
             teacher_generated = [teacher_generated[i] for i in keep_idx]
+            correct_formattings = [correct_formattings[i] for i in keep_idx]
         elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
             # Keep only correct samples for SFT, regardless of origin
             keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
@@ -1185,6 +1174,7 @@ class RayPPOTrainer:
             initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
             initial_scores = [initial_scores[i] for i in keep_idx]
             teacher_generated = [teacher_generated[i] for i in keep_idx]
+            correct_formattings = [correct_formattings[i] for i in keep_idx]
         else:
             if self.train_teacher:
                 logger.info(f"Using {self.cfg.teacher_loss_type} to train teacher")
@@ -1192,11 +1182,11 @@ class RayPPOTrainer:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
         if self.cfg.filter_for_correct_formatting and self.train_teacher:
-            # assert (self.cfg.augment_only_wrong or self.cfg.correct_answer_augmenting), logger.info(f"Teacher filter only works with augment_only_wrong or correct_answer_augmenting")
-            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
-            dropped = len(initial_teacher_scores) - len(keep_idx)
-            logger.info(f"Augmentation teacher filter: dropping {dropped}/{len(initial_teacher_scores)} incorrect student samples")
-            self.writer.add_scalar("teacher_training_dropped_samples", dropped/len(initial_teacher_scores), self.global_step)
+            # Filter strictly by formatting correctness, not by teacher correctness.
+            keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
+            dropped = len(correct_formattings) - len(keep_idx)
+            logger.info(f"Formatting filter: dropping {dropped}/{len(correct_formattings)} samples with bad formatting")
+            self.writer.add_scalar("teacher_training_dropped_samples", dropped/len(correct_formattings), self.global_step)
             if len(keep_idx) == 0:
                 # No valid samples this round
                 return
@@ -1209,6 +1199,7 @@ class RayPPOTrainer:
             initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
             initial_scores = [initial_scores[i] for i in keep_idx]
             teacher_generated = [teacher_generated[i] for i in keep_idx]
+            correct_formattings = [correct_formattings[i] for i in keep_idx]
 
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
         self.writer.add_scalar("teacher_generated_frac", teacher_generated.mean(), self.global_step)

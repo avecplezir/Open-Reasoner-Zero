@@ -372,7 +372,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         final_answers = []
         teacher_yes = []
         teacher_no = []
-        stop_reasons = []
+        # stop_reasons = []
         for prompt, response, output, score_tensor, teacher_score_tensor in zip(prompts, responses, outputs, score_tensors, teacher_score_tensors):
             response = response if len(response) > 0 else "<empty response>"
             res_prompts.append(prompt)
@@ -386,11 +386,11 @@ class CustomRewardTrainer(RayPPOTrainer):
             final_answers.append(output.get('final_answer', ''))
             teacher_yes.append(output['teacher_yes'])
             teacher_no.append(output['teacher_no'])
-            stop_reasons.append(output['stop_reason'])
+            # stop_reasons.append(output['stop_reason'])
 
 
         return (res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors,
-                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, stop_reasons, pass_at_n_dict)
+                res_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, formatting_oks, pass_at_n_dict)
 
     @override
     @torch.no_grad()
