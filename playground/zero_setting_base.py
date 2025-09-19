@@ -63,6 +63,7 @@ def create_student_prompt(
     previous_reasoning: Optional[str] = None,
     *,
     template: str = "default",
+    eval: bool = False,
 ) -> str:
     """Create a student prompt using a selectable template.
 
@@ -75,7 +76,9 @@ def create_student_prompt(
     Returns:
         Rendered student prompt string.
     """
-    assert len(dialogue) == 2, "dialogue must contain 2 items"
+
+    if not eval:
+        assert len(dialogue) == 2, "dialogue must contain 2 items"
 
     prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
     if template == "continue":
@@ -83,8 +86,9 @@ def create_student_prompt(
     else:
         prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
+    prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
-    prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
+    prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     prompt_template = Template(prompt_template_jinja)
 
     if template == "continue":
@@ -156,8 +160,6 @@ class CustomDataset(PromptDataset):
 
     def process_dialogue(self, dialogue: List):
 
-        assert len(dialogue) == 2, "dialogue must contain 2 items"
-
         if self.tokenizer.bos_token_id is None:
             bos_token = ""
         else:
@@ -176,8 +178,8 @@ class CustomDataset(PromptDataset):
 
 class EvalCustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
         self.student_prompt_template = kwargs.pop("student_prompt_template", None)
+        super().__init__(*args, **kwargs)
 
     def process_dialogue(self, dialogue: dict):
 
@@ -191,7 +193,7 @@ class EvalCustomDataset(PromptDataset):
         else:
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
 
-        prompt = create_student_prompt(dialogue, bos_token=bos_token, template=self.student_prompt_template)
+        prompt = create_student_prompt(dialogue, bos_token=bos_token, template=self.student_prompt_template, eval=True)
 
         extra = {"answer": dialogue["final_answer"], "file_name": dialogue["file_name"]}
 

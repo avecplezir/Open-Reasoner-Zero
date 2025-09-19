@@ -90,7 +90,7 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 32
+    train_batch_size: int = 128
     num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
