@@ -184,12 +184,16 @@ class BasePPOExpConfig(BaseConfig):
     # Student prompt template for dataset/student prompts:
     # - "default": regular student template
     # - "continue": continuation template that can include previous reasoning
+    # - "default_yesno"
+    # - "continue_yesno"
     student_prompt_template: str = "default"
 
     adversarial_training: bool = False
 
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
+    topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif
+    topr_temperature: float = 1.0
 
     weight_by_ss_reward: bool = False
 

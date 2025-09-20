@@ -37,7 +37,7 @@ from orz.ppo.utils import (
 
 from playground.zero_setting_base import (
     create_teacher_prompt_from_answer,
-    create_student_adv_prompt,
+    create_student_prompt,
 )
 
 
@@ -509,7 +509,11 @@ class RayPPOTrainer:
                     student_answer = final_answer
 
                 teacher_prompt = create_teacher_prompt_from_answer(
-                    all_extra["dialogue"], student_answer, bos_token, explain_only=self.cfg.teacher_explain_only
+                    all_extra["dialogue"],
+                    student_answer,
+                    bos_token,
+                    explain_only=self.cfg.teacher_explain_only,
+                    student_template=self.cfg.student_prompt_template,
                 )
 
                 all_teacher_prompts.append(teacher_prompt)
@@ -662,7 +666,11 @@ class RayPPOTrainer:
                             student_answer = self.yes_token() if random.random() > 0.5 else self.no_token()
 
                         teacher_prompt = create_teacher_prompt_from_answer(
-                            extra["dialogue"], student_answer, bos_token, explain_only=self.cfg.teacher_explain_only
+                            extra["dialogue"],
+                            student_answer,
+                            bos_token,
+                            explain_only=self.cfg.teacher_explain_only,
+                            student_template=self.cfg.student_prompt_template,
                         )
                         retry_teacher_prompts.append(teacher_prompt)
 
@@ -827,7 +835,11 @@ class RayPPOTrainer:
                 for teacher_answer in teacher_answers:
                     # Build the teacher prompt from the chosen answer
                     teacher_prompt = create_teacher_prompt_from_answer(
-                        extra["dialogue"], teacher_answer, bos_token, explain_only=self.cfg.teacher_explain_only
+                        extra["dialogue"],
+                        teacher_answer,
+                        bos_token,
+                        explain_only=self.cfg.teacher_explain_only,
+                        student_template=self.cfg.student_prompt_template,
                     )
 
                     # Use prompt string as a stable key for deduplication
@@ -1019,7 +1031,7 @@ class RayPPOTrainer:
                 adv_teacher_prompts = []
                 adv_extras = []
                 for t_propmpt, extra, prev_r in zip(all_teacher_prompts, all_extras, extracted_reasonings):
-                    new_prompt = create_student_adv_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r)
+                    new_prompt = create_student_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, template=self.cfg.student_prompt_template)
                     for _ in range(self.cfg.n_samples_per_prompt):
                         adv_student_prompts.append(new_prompt)
                         adv_teacher_prompts.append(t_propmpt)
@@ -1379,7 +1391,7 @@ class RayPPOTrainer:
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == 'topr':
                         if teacher_generated[teacher_prompt_idx] and start_kl < end_full:
-                            student_ratio_clipped_0_1_scalar = torch.exp((student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                            student_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
                             student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
                         else:
                             student_ratio_clipped_0_1_scalar = torch.tensor(1)
@@ -1390,7 +1402,7 @@ class RayPPOTrainer:
                             teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
                         else:
                             if start_kl < end_full:
-                                teacher_ratio_clipped_0_1_scalar = torch.exp((teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                                teacher_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
                                 teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 

@@ -5,25 +5,27 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 
-# Base prompt instruction template used in all variants
-# PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-# You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
-# This is the problem:
-# {{prompt}}
-# """
+"""
+This module provides prompt templates and helpers for student/teacher prompts.
 
-# # student variant: explanation + answer (both <think> and <answer> in the output)
-# STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
-# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. \
-# The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
-# Assistant: <think>\
-# """
+It supports selecting a stricter instruction variant that forces "yes"/"no"
+answers by encoding it into the `template` string used by callers.
+Accepted student templates:
+- "default": general instruction
+- "continue": continuation instruction
+- "default_yesno": general instruction + yes/no constraint
+- "continue_yesno": continuation instruction + yes/no constraint
+Teacher prompts mirror the yes/no selection by passing the student's
+template string when creating teacher prompts.
+"""
 
-# STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
-# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
-# If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
-# Assistant: <think>{{previous_reasoning}}\
-# """
+# Base prompt instruction templates used in all variants
+# Variant with explicit yes/no guidance (previously commented out)
+PROMPT_INSTRUCTION_TEMPLATE_JNJA_YESNO = """\
+You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. If the question can be answered with 'yes' or 'no', your answer must be 'yes' or 'no'.
+This is the problem:
+{{prompt}}
+"""
 
 PROMPT_INSTRUCTION_TEMPLATE_JNJA = """\
 You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. 
@@ -89,8 +91,11 @@ def create_student_prompt(
     if not eval:
         assert len(dialogue) == 2, "dialogue must contain 2 items"
 
-    prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
-    if template == "continue":
+    # Decide which instruction header to use (general vs yes/no)
+    prompt_instruction_template_jinja = get_instruction_template(template)
+
+    # Map template to the student prompt body variant
+    if template in {"continue", "continue_yesno"}:
         prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
     else:
         prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
@@ -117,16 +122,13 @@ def create_student_prompt(
 
     return rendered
 
-
-def create_student_adv_prompt(dialogue: List, bos_token: str = "", previous_reasoning: str = "" ) -> str:
-    """Backward-compatible helper for adversarial continuation prompts."""
-    return create_student_prompt(
-        dialogue,
-        bos_token=bos_token,
-        previous_reasoning=previous_reasoning,
-        template="continue",
-    )
-
+def get_instruction_template(template: str):
+    # Mirror the student's yes/no choice (if provided)
+    if template in {"default_yesno", "continue_yesno"}:
+        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA_YESNO
+    else:
+        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    return prompt_instruction_template_jinja
 
 def create_teacher_prompt_from_answer(
     dialogue: List,
@@ -134,6 +136,7 @@ def create_teacher_prompt_from_answer(
     bos_token: str = "",
     *,
     explain_only: bool = False,
+    student_template: str = 'default',
 ):
     """Create a teacher prompt from a dialogue and provided answer.
 
@@ -142,9 +145,9 @@ def create_teacher_prompt_from_answer(
     (the caller may append the answer programmatically). Otherwise, the template
     asks for both reasoning and the final <answer>.
     """
-    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    prompt_instruction_template_jinja = get_instruction_template(student_template)
 
-    prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
     assert len(dialogue) == 2, "dialogue must contain 2 items"
 
