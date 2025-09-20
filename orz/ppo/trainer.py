@@ -225,7 +225,7 @@ class RayPPOTrainer:
                 else:
                     raise ValueError("Either student or teacher must be trained in each iteration")
 
-                if self.train_student and (self.cfg.skip_student_training_to_debug or self.global_step < self.cfg.skip_student_first_n_rounds):
+                if self.train_student and (self.cfg.skip_student_training_to_pretrain_teacher or self.global_step < self.cfg.skip_student_first_n_rounds):
                     logger.info("Skipping student training to debug")
                     train_set = zip([], [])
                     self.student_replay_buffer.clear()
@@ -731,7 +731,7 @@ class RayPPOTrainer:
                     if not sc and len(fa) > 0:
                         candidate_student_negs[sp].append(fa)
 
-                dataset_answer_pool = {ex.get("answer", "") for ex in all_extras if len(ex.get("answer", "")) > 0}
+                dataset_answer_pool = [ex.get("answer", "") for ex in all_extras if len(ex.get("answer", "")) > 0]
 
             for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
                 include = True
@@ -770,6 +770,7 @@ class RayPPOTrainer:
                             neg_cands = candidate_student_negs.get(student_prompt, [])
                             if len(neg_cands) > 0:
                                 neg_ans = neg_cands[-1]
+                                logger.info("Using student-generated negative")
                         # Fallback: sample a different dataset answer
                         if neg_ans is None:
                             logger.info("Falling back to dataset answer pool for negative")
@@ -861,8 +862,15 @@ class RayPPOTrainer:
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
             # 1.1 generate sequences via vllm engines
+            if self.cfg.augment_strategy in ["correct", "opposite"]:
+                assert len(all_extras) == len(aug_all_extras), "extras must match augmented extras in length"
+            elif self.cfg.augment_strategy in ["yes_no", "correct_incorrect"]:
+                assert 2 * len(all_extras) == len(aug_all_extras), "extras must match augmented extras in length"
+
             all_extras = aug_all_extras
             all_student_prompts = aug_all_student_prompts
+
+
             outputs = []
             num_vllm_dp_gruops = len(self.vllm_engines)
 

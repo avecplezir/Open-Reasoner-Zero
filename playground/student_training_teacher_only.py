@@ -131,7 +131,7 @@ class PPOExpConfig(BasePPOExpConfig):
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
-    skip_student_training_to_debug: bool = False
+    skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
     student_loss_type: str = "topr"
