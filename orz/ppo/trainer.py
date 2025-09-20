@@ -300,7 +300,6 @@ class RayPPOTrainer:
                     # 5. set logs
                     logger.info(f'Status {prefix} {status}')
 
-
                 if not self.cfg.colocate_all:
                     await self.policy_model.offload_to_cpu()
                     await self.policy_model.async_run_method("empty_cache")
@@ -376,7 +375,7 @@ class RayPPOTrainer:
                 self.writer.add_scalar("sync_teacher_weigts", sync_teacher_weigts, self.global_step)
 
                 if self.cfg.colocate_all:
-                    async with Timer("Backload vllm engines to gpu and sync policy weights after training"):
+                    async with Timer("Backload vllm engines to gpu"):
                         await self._backload_vllm_engines()
 
             if self.cfg.update_ref_every_epoch and self.cfg.use_ref_model:
@@ -507,10 +506,7 @@ class RayPPOTrainer:
                         assert False, f"final_answer {final_answer} must be yes or no"
 
                 else:
-                    if random.random() > 0.5:
-                        student_answer = self.yes_token()
-                    else:
-                        student_answer = self.no_token()
+                    student_answer = final_answer
 
                 teacher_prompt = create_teacher_prompt_from_answer(
                     all_extra["dialogue"], student_answer, bos_token, explain_only=self.cfg.teacher_explain_only
@@ -568,7 +564,7 @@ class RayPPOTrainer:
                 (not self.train_student and self.train_teacher and self.cfg.train_teacher_on_teacher_data_only)
                 or (self.train_student and not self.train_teacher and self.cfg.train_student_on_teacher_data_only)
             ):
-                logger.info(f"Skipping student-generated data due to {self.cfg.train_teacher_on_teacher_data_only} {self.cfg.train_student_on_teacher_data_only} flags")
+                logger.info(f"Skipping student-generated data due to train_teacher_on_teacher_data_only={self.cfg.train_teacher_on_teacher_data_only} and train_teacher_on_teacher_data_only={self.cfg.train_student_on_teacher_data_only} flags")
             else:
                 teacher_generated.extend([False] * len(all_student_prompts))
                 combined_all_student_prompts.extend(all_student_prompts)
@@ -728,10 +724,10 @@ class RayPPOTrainer:
                 # a student's wrong final answer is not available.
                 candidate_student_negs = defaultdict(list)
                 for sp, ex, fa, sc in zip(all_student_prompts, all_extras, final_answers, initial_scores):
-                    if not sc and len(fa) > 0:
+                    if not sc and len(fa.strip()) > 0:
                         candidate_student_negs[sp].append(fa)
 
-                dataset_answer_pool = [ex.get("answer", "") for ex in all_extras if len(ex.get("answer", "")) > 0]
+                dataset_answer_pool = [ex["answer"] for ex in all_extras if len(ex["answer"]) > 0]
 
             for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
                 include = True
@@ -758,29 +754,26 @@ class RayPPOTrainer:
                     representative_incorrect = not bool(student_score)
 
                     # Always include ground-truth
-                    correct_ans = extra.get("answer", "")
+                    correct_ans = extra["answer"]
                     neg_ans = None
 
                     # Use student's wrong answer if available
-                    if self.cfg.generate_with_student and len(final_answer) > 0 and (not student_score):
-                        neg_ans = final_answer
-                    else:
-                        if self.cfg.generate_with_student:
-                            # Otherwise pick any candidate that differs from ground-truth
-                            neg_cands = candidate_student_negs.get(student_prompt, [])
-                            if len(neg_cands) > 0:
-                                neg_ans = neg_cands[-1]
-                                logger.info("Using student-generated negative")
-                        # Fallback: sample a different dataset answer
-                        if neg_ans is None:
-                            logger.info("Falling back to dataset answer pool for negative")
-                            neg_ans = dataset_answer_pool[-1]
+                    # if self.cfg.generate_with_student and len(final_answer) > 0 and (not student_score):
+                    #     neg_ans = final_answer
+                    if self.cfg.generate_with_student:
+                        # Otherwise pick any candidate that differs from ground-truth
+                        neg_cands = candidate_student_negs.get(student_prompt, [])
+                        if len(neg_cands) > 0:
+                            neg_ans = neg_cands[-1]
+                            logger.info(f"Using student-generated negative {neg_ans} {neg_cands}")
+                    # Fallback: sample a different dataset answer
+                    if neg_ans is None:
+                        neg_ans = dataset_answer_pool[-1]
+                        logger.info(f"Falling back to dataset answer pool for negative {neg_ans}")
 
-                    # If we still couldn't find a negative, skip adding incorrect variant
-                    if neg_ans is not None:
-                        teacher_answers = [correct_ans, neg_ans]
-                    else:
-                        teacher_answers = [correct_ans]
+                    assert neg_ans is not None, "Negative answer must be not None by now"
+
+                    teacher_answers = [correct_ans, neg_ans]
 
                 elif self.cfg.augment_strategy == "yes_no":
                     # logger.info("Using 'yes_no' augmentation strategy")
@@ -862,14 +855,13 @@ class RayPPOTrainer:
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
             # 1.1 generate sequences via vllm engines
-            if self.cfg.augment_strategy in ["correct", "opposite"]:
-                assert len(all_extras) == len(aug_all_extras), "extras must match augmented extras in length"
-            elif self.cfg.augment_strategy in ["yes_no", "correct_incorrect"]:
-                assert 2 * len(all_extras) == len(aug_all_extras), "extras must match augmented extras in length"
+            if self.cfg.augment_strategy in ["correct", "opposite"] and  len(all_extras) != len(aug_all_extras):
+                logger.warning(f"extras don't match augmented extras in length, {len(all_extras)} {len(aug_all_extras)}")
+            elif self.cfg.augment_strategy in ["yes_no", "correct_incorrect"] and 2 * len(all_extras) != len(aug_all_extras):
+                logger.warning(f"double extras don't match augmented extras in length, {2*len(all_extras)} {len(aug_all_extras)}")
 
             all_extras = aug_all_extras
             all_student_prompts = aug_all_student_prompts
-
 
             outputs = []
             num_vllm_dp_gruops = len(self.vllm_engines)

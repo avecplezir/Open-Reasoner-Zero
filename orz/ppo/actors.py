@@ -162,6 +162,18 @@ class RayActor(BasePPORole):
     def empty_cache(self) -> None:
         torch.cuda.empty_cache()
 
+    def _wait_until(self, ts: float):
+        """Block this actor until wall-clock time reaches `ts` (UNIX seconds).
+
+        This provides a simple time-based barrier across actors so they can
+        begin a coordinated operation (e.g., weight broadcast) at the same
+        time. Uses blocking sleep to avoid requiring an asyncio actor.
+        """
+        import time as _time
+        delay = float(ts) - _time.time()
+        if delay > 0:
+            _time.sleep(delay)
+
     def _weight_fingerprint(
         self,
         checkpoint_path: Optional[str] = None,

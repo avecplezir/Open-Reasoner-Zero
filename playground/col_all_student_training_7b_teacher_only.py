@@ -96,15 +96,14 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
+    rollout_batch_size: int = 128 if not DEBUG_MODE else 32
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.0
 
-    enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_interval: int = 1
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -121,15 +120,18 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
     student_teacher_order: bool = True
 
-    generate_with_student: bool = False
+    generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
+    train_student_on_teacher_data_only: bool = True
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain #f"{prefix}/checkpoints/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter20/policy" #pretrain
 
-    skip_student_training_to_debug: bool = False
-    skip_student_first_n_rounds: int = 0
+    skip_student_training_to_pretrain_teacher: bool = False
+    skip_student_first_n_rounds: int = initial_teacher_training_rounds
+
+    student_loss_type: str = "topr"
 
 
 if __name__ == "__main__":
