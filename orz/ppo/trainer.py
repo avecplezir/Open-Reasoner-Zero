@@ -513,7 +513,7 @@ class RayPPOTrainer:
                     student_answer,
                     bos_token,
                     explain_only=self.cfg.teacher_explain_only,
-                    student_template=self.cfg.student_prompt_template,
+                    template=self.cfg.student_prompt_template,
                 )
 
                 all_teacher_prompts.append(teacher_prompt)
@@ -670,7 +670,7 @@ class RayPPOTrainer:
                             student_answer,
                             bos_token,
                             explain_only=self.cfg.teacher_explain_only,
-                            student_template=self.cfg.student_prompt_template,
+                            template=self.cfg.student_prompt_template,
                         )
                         retry_teacher_prompts.append(teacher_prompt)
 
@@ -773,11 +773,11 @@ class RayPPOTrainer:
                         neg_cands = candidate_student_negs.get(student_prompt, [])
                         if len(neg_cands) > 0:
                             neg_ans = neg_cands[-1]
-                            logger.info(f"Using student-generated negative {neg_ans} {neg_cands}")
+                            # logger.info(f"Using student-generated negative {neg_ans} {neg_cands}")
                     # Fallback: sample a different dataset answer
                     if neg_ans is None:
                         neg_ans = dataset_answer_pool[-1]
-                        logger.info(f"Falling back to dataset answer pool for negative {neg_ans}")
+                        # logger.info(f"Falling back to dataset answer pool for negative {neg_ans}")
 
                     assert neg_ans is not None, "Negative answer must be not None by now"
 
@@ -839,7 +839,7 @@ class RayPPOTrainer:
                         teacher_answer,
                         bos_token,
                         explain_only=self.cfg.teacher_explain_only,
-                        student_template=self.cfg.student_prompt_template,
+                        template=self.cfg.student_prompt_template,
                     )
 
                     # Use prompt string as a stable key for deduplication
@@ -1391,8 +1391,13 @@ class RayPPOTrainer:
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == 'topr':
                         if teacher_generated[teacher_prompt_idx] and start_kl < end_full:
-                            student_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
-                            student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
+                            if self.cfg.topr_type == 0:
+                                student_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                                student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
+                            elif self.cfg.topr_type == 1:
+                                student_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(student_exp.base_action_log_probs[:, start_kl:end_full] - teacher_exp.action_log_probs[:, start_kl:end_full]).clamp(max=0.0))
+                                student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_clipped_0_1_scalar
+                                student_ratio_clipped_0_1_scalar = student_ratio_clipped_0_1_scalar.mean()
                         else:
                             student_ratio_clipped_0_1_scalar = torch.tensor(1)
                         student_ratio_clipped_0_1_list.append(student_ratio_clipped_0_1_scalar.item())
@@ -1402,8 +1407,13 @@ class RayPPOTrainer:
                             teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
                         else:
                             if start_kl < end_full:
-                                teacher_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
-                                teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
+                                if self.cfg.topr_type == 0:
+                                    teacher_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature*(teacher_exp.action_log_probs[:,start_kl:end_full].sum(-1) - student_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                                    teacher_exp.ratio_clipped_0_1[:,start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
+                                elif self.cfg.topr_type == 1:
+                                    teacher_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature * (teacher_exp.action_log_probs[:, start_kl:end_full] - student_exp.action_log_probs[:, start_kl:end_full]).clamp(max=0.0))
+                                    teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_clipped_0_1_scalar
+                                    teacher_ratio_clipped_0_1_scalar = teacher_ratio_clipped_0_1_scalar.mean()
                         teacher_ratio_clipped_0_1_list.append(teacher_ratio_clipped_0_1_scalar.item())
 
                     if self.cfg.replace_all_teacher_base_logprops_w_student and start_kl < end_full:

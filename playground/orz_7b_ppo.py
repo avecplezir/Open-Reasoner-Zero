@@ -296,6 +296,55 @@ class CustomRewardTrainer(RayPPOTrainer):
             # log num_tokens
             num_tokens.append(response_token)
 
+        # If teacher answers are provided, warn only when formatting is valid and
+        # the prompt-declared answer mismatches extras[i]['teacher_answer'].
+        if extras[0].get("teacher_answer", None) is not None:
+            for i, (prompt, ex, fmt_ok) in enumerate(zip(prompts, extras, formatting_oks)):
+                if not fmt_ok:
+                    continue
+                try:
+                    m = re.search(r"The final answer is\s+(.*?)\.", prompt)
+                    if m:
+                        declared = m.group(1).strip()
+                        declared = solution2answer(declared).strip()
+                        teacher_ans_norm = solution2answer(ex.get("teacher_answer", "")).strip()
+                        if declared != teacher_ans_norm:
+                            logger.warning(
+                                f"Prompt/extras mismatch at index {i}: prompt_declared={declared}, teacher_answer={teacher_ans_norm}"
+                            )
+                except Exception:
+                    pass
+
+        # Teacher-only sanity checks: stop reasons distribution and mismatches (moved here)
+        # Show mismatch warnings only if formatting is valid.
+        if self.cfg.teacher_explain_only and extras[0].get("teacher_answer") is not None:
+            # Stop reasons distribution based on generated outputs
+            stop_reasons = [out["stop_reason"] for out in outputs]
+            counts = dict(Counter(stop_reasons))
+            logger.info(f"Teacher stop reasons distribution: {counts}")
+
+            # Collect a few mismatches where teacher_iscorrect is False and formatting ok
+            mismatches = []
+            for i, (ex, out, fmt_ok) in enumerate(zip(extras, outputs, formatting_oks)):
+                if ex["teacher_answer"] is not None and not out["teacher_iscorrect"] and fmt_ok:
+                    mismatches.append(
+                        (
+                            i,
+                            ex["teacher_answer"],
+                            out["final_answer"],
+                            out["stop_reason"],
+                            out["response"],
+                        )
+                    )
+            if mismatches:
+                max_show = 5
+                for j, (idx, t_ans, got, stop_r, res) in enumerate(mismatches[:max_show]):
+                    logger.warning(
+                        f"Teacher mismatch at idx={idx}: teacher_answer={t_ans} != extracted={got}; stop_reason={stop_r}, response={res}"
+                    )
+                if len(mismatches) > max_show:
+                    logger.warning(f"... {len(mismatches) - max_show} more teacher mismatches omitted")
+
         # must before grpo, for grpo will change scores
         num_tokens_arr = np.array(num_tokens, dtype=np.float32)  # must be float to calculate mean and std
         scores_arr = np.array(scores)
@@ -534,50 +583,6 @@ class CustomRewardTrainer(RayPPOTrainer):
             # put smt here, won't be used
             equal_teacher_results_yes = [False] * len(equal_teacher_results)
             equal_teacher_results_no = [False] * len(equal_teacher_results)
-
-        if extras[0].get("teacher_answer", None) is not None:
-            for i in range(len(equal_teacher_results)):
-                # Sanity check: ensure prompt-embedded answer matches extras[i]['teacher_answer']
-                try:
-                    m = re.search(r"The final answer is\s+(.*?)\.", prompts[i])
-                    if m:
-                        declared = m.group(1).strip()
-                        # Normalize boxed variants
-                        declared = solution2answer(declared)
-                        declared = declared.strip()
-                        teacher_ans_norm = solution2answer(extras[i].get('teacher_answer', '')).strip()
-                        if declared != teacher_ans_norm:
-                            logger.warning(
-                                f"Prompt/extras mismatch at index {i}: prompt_declared={declared}, teacher_answer={teacher_ans_norm}"
-                            )
-                except Exception:
-                    pass
-
-        # Teacher-only sanity checks: stop reasons distribution and mismatches
-        if kwargs.get("teacher", False) and self.cfg.teacher_explain_only:
-            # Log teacher stop reasons distribution
-            try:
-                counts = dict(Counter(stop_reasons))
-                logger.info(f"Teacher stop reasons distribution: {counts}")
-            except Exception:
-                pass
-
-            # Log a few mismatches where teacher_iscorrect is False
-            try:
-                mismatches = []
-                for i, (ex, item, t_ok, res) in enumerate(zip(extras, final_answer_items, equal_teacher_results, responses)):
-                    if ex.get("teacher_answer") is not None and not t_ok:
-                        mismatches.append((i, ex.get("teacher_answer", ""), item.get("final_answer", ""), stop_reasons[i], res))
-                if mismatches:
-                    max_show = 5
-                    for j, (idx, t_ans, got, stop_r, res) in enumerate(mismatches[:max_show]):
-                        logger.warning(
-                            f"Teacher mismatch at idx={idx}: teacher_answer={t_ans} != extracted={got}; stop_reason={stop_r}, response={res}"
-                        )
-                    if len(mismatches) > max_show:
-                        logger.warning(f"... {len(mismatches) - max_show} more teacher mismatches omitted")
-            except Exception:
-                pass
 
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(

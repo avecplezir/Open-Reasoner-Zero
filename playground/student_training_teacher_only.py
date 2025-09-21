@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_coef: float = 0.0
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 10
+    eval_interval: int = 5
 
     # generate related settings
     generate_max_len: int = 12000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -116,7 +116,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 10
+    initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
 
@@ -133,7 +133,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_prompt_template: str = "default_yesno"
     student_loss_type: str = "topr"
-    topr_temperature: float = 10.
+    topr_temperature: float = 0.1
+    topr_type: int = 0
 
 
 if __name__ == "__main__":

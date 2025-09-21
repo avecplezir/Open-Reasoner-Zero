@@ -92,10 +92,13 @@ def create_student_prompt(
         assert len(dialogue) == 2, "dialogue must contain 2 items"
 
     # Decide which instruction header to use (general vs yes/no)
+    assert template in {"default", "continue", "default_yesno", "continue_yesno"}, f"Unknown template: {template}"
+
     prompt_instruction_template_jinja = get_instruction_template(template)
 
     # Map template to the student prompt body variant
-    if template in {"continue", "continue_yesno"}:
+    use_conitinue = template in {"continue", "continue_yesno"}
+    if use_conitinue:
         prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
     else:
         prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
@@ -105,20 +108,18 @@ def create_student_prompt(
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     prompt_template = Template(prompt_template_jinja)
 
-    if template == "continue":
+    if use_conitinue:
         rendered = prompt_template.render(
             bos_token=bos_token,
             prompt=prompt_instruction,
             previous_reasoning=previous_reasoning or "",
         )
 
-    elif template == "default":
+    else:
         rendered = prompt_template.render(
             bos_token=bos_token,
             prompt=prompt_instruction,
         )
-    else:
-        raise ValueError(f"Unknown template: {template}")
 
     return rendered
 
@@ -136,7 +137,7 @@ def create_teacher_prompt_from_answer(
     bos_token: str = "",
     *,
     explain_only: bool = False,
-    student_template: str = 'default',
+    template: str = 'default',
 ):
     """Create a teacher prompt from a dialogue and provided answer.
 
@@ -145,7 +146,9 @@ def create_teacher_prompt_from_answer(
     (the caller may append the answer programmatically). Otherwise, the template
     asks for both reasoning and the final <answer>.
     """
-    prompt_instruction_template_jinja = get_instruction_template(student_template)
+    assert template in {"default", "continue", "default_yesno", "continue_yesno"}, f"Unknown template: {template}"
+
+    prompt_instruction_template_jinja = get_instruction_template(template)
 
     teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 

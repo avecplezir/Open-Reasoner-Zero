@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.001
+    kl_loss_coef: float = 0.00
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 5
@@ -119,17 +119,17 @@ class PPOExpConfig(BasePPOExpConfig):
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 10
-    student_training_rounds: int = 5  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = 0
+    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-584/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
