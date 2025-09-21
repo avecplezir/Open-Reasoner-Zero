@@ -226,7 +226,7 @@ class RayPPOTrainer:
                     raise ValueError("Either student or teacher must be trained in each iteration")
 
                 if self.train_student and (self.cfg.skip_student_training_to_pretrain_teacher or self.global_step < self.cfg.skip_student_first_n_rounds):
-                    logger.info("Skipping student training to debug")
+                    logger.info("Skipping student training because of skip_student_training_to_pretrain_teacher flag")
                     train_set = zip([], [])
                     self.student_replay_buffer.clear()
 
@@ -867,6 +867,8 @@ class RayPPOTrainer:
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence
             # 1.1 generate sequences via vllm engines
+            logger.info(f"extras, double extras, and augmented extras lengths, {len(all_extras)} {2 * len(all_extras)} {len(aug_all_extras)}")
+
             if self.cfg.augment_strategy in ["correct", "opposite"] and  len(all_extras) != len(aug_all_extras):
                 logger.warning(f"extras don't match augmented extras in length, {len(all_extras)} {len(aug_all_extras)}")
             elif self.cfg.augment_strategy in ["yes_no", "correct_incorrect"] and 2 * len(all_extras) != len(aug_all_extras):
@@ -880,6 +882,7 @@ class RayPPOTrainer:
 
             async with Timer("Generate complimentary teacher sequences via vllm engines"):
                 dp_prompt_size = (len(all_teacher_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+                logger.info(f"dp_prompt_size: {dp_prompt_size}")
                 dp_tasks = []
                 for dp_rank in range(num_vllm_dp_gruops):
                     # Use teacher prompts for generation (they have the ground truth answer)
@@ -1377,7 +1380,13 @@ class RayPPOTrainer:
                     else:
                         final_reward_list.append(-2.0)
                     teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1])
-                    pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(initial_scores[teacher_prompt_idx])
+                    # For student normalization, optionally use signed exp(ss_reward)
+                    if self.cfg.use_ss_reward_for_student:
+                        signed = 1.0 if initial_scores[teacher_prompt_idx] == 1 else -1.0
+                        student_norm_score = float(np.exp(ss_reward_list[-1]) * signed)
+                    else:
+                        student_norm_score = float(initial_scores[teacher_prompt_idx])
+                    pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(student_norm_score)
 
                     kl_reward_list.append(kl_reward.item())
                     kl_max_list.append(kl_max.item())
@@ -1588,20 +1597,25 @@ class RayPPOTrainer:
 
                             # student
                             if self.cfg.student_loss_type == 'sft':
-                                if self.cfg.weight_by_ss_reward:
-                                    if teacher_generated[prompt_idx]:
-                                        score = np.exp(final_reward_list[prompt_idx]) #np.exp(ss_reward_mean_list[prompt_idx])
-                                    else:
-                                        score = initial_scores[prompt_idx]
-                                    # logger.info(f"weighting score {score}")
+                                if self.cfg.use_ss_reward_for_student:
+                                    signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
+                                    score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
                                 else:
-                                    score = initial_scores[prompt_idx]
+                                    score = float(initial_scores[prompt_idx])
                             else:
-                                prompt = all_student_prompts[prompt_idx]
-                                score = initial_scores[prompt_idx]
-                                score -= np.mean(pass_at_n_dict[prompt])
-                                if std := np.std(pass_at_n_dict[prompt]) > 0:
-                                    score /= std
+                                if self.cfg.use_ss_reward_for_student:
+                                    prompt = all_student_prompts[prompt_idx]
+                                    signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
+                                    score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
+                                    score -= np.mean(pass_at_n_dict[prompt])
+                                    if std := np.std(pass_at_n_dict[prompt]) > 0:
+                                        score /= std
+                                else:
+                                    prompt = all_student_prompts[prompt_idx]
+                                    score = float(initial_scores[prompt_idx])
+                                    score -= np.mean(pass_at_n_dict[prompt])
+                                    if std := np.std(pass_at_n_dict[prompt]) > 0:
+                                        score /= std
 
                             student_exp.info['custom_rewards'][i][-1] = score
                             score_sum += score

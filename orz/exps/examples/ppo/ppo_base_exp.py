@@ -195,7 +195,8 @@ class BasePPOExpConfig(BaseConfig):
     topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif
     topr_temperature: float = 1.0
 
-    weight_by_ss_reward: bool = False
+    # weight_by_ss_reward: bool = False
+    use_ss_reward_for_student: bool = False
 
 
 

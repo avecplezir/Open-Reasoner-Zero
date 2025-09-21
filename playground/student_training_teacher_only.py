@@ -107,8 +107,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 5
 
     # generate related settings
-    generate_max_len: int = 12000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -133,8 +133,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_prompt_template: str = "default_yesno"
     student_loss_type: str = "topr"
-    topr_temperature: float = 0.1
+    topr_temperature: float = 1
     topr_type: int = 0
+    use_ss_reward_for_student: bool = True
 
 
 if __name__ == "__main__":
