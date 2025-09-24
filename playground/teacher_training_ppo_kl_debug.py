@@ -68,7 +68,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
-    save_interval: int = 50
+    save_interval: int = 30
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'aug-iter50-correct-longrun-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
@@ -109,8 +109,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 12000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 4000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 4192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -124,7 +124,7 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = False
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain

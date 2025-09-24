@@ -95,13 +95,14 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
+    train_batch_size: int = 128
     num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
@@ -135,7 +136,7 @@ class PPOExpConfig(BasePPOExpConfig):
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
     student_loss_type: str = "topr"
-    topr_temperature: float = 1.
+    use_ss_reward_for_student: bool = True
 
 
 if __name__ == "__main__":

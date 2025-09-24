@@ -197,6 +197,7 @@ class BasePPOExpConfig(BaseConfig):
 
     # weight_by_ss_reward: bool = False
     use_ss_reward_for_student: bool = False
+    remove_student_reward_normalization: bool = False
 
 
 

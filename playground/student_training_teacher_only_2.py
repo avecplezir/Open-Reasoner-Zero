@@ -120,7 +120,7 @@ class PPOExpConfig(BasePPOExpConfig):
     student_training_rounds: int = 10  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_student: bool = False
+    generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect

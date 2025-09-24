@@ -1596,7 +1596,7 @@ class RayPPOTrainer:
                             teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                             # student
-                            if self.cfg.student_loss_type == 'sft':
+                            if self.cfg.student_loss_type == 'sft' or self.cfg.remove_student_reward_normalization:
                                 if self.cfg.use_ss_reward_for_student:
                                     signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
                                     score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
