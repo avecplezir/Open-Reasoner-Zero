@@ -1196,7 +1196,7 @@ class RayPPOTrainer:
             if self.train_student:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
-        if self.cfg.filter_for_correct_formatting and self.train_teacher:
+        if self.cfg.filter_for_correct_formatting:
             # Filter strictly by formatting correctness, not by teacher correctness.
             keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
             dropped = len(correct_formattings) - len(keep_idx)
@@ -1333,8 +1333,18 @@ class RayPPOTrainer:
                         # vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start-kl_token_offset:s_final_answer_end+answer_tokens_offset])
                         # logger.info(f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}")
 
-                        ss_reward_mean = final_answer_log_propbs.mean().item()
-                        ss_reward_min = final_answer_log_propbs.min().item()
+                        # Guard against empty window which can occur after applying offsets/clamping
+                        if final_answer_log_propbs.numel() == 0:
+                            s_final_answer_start, s_final_answer_end = seq_offset + prompt_len + final_answer_start, seq_offset + prompt_len + final_answer_end
+                            vis_final_answer = self._detokenize(student_exp.sequences[0][s_final_answer_start:s_final_answer_end])
+                            logger.warning(f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}")
+                            logger.warning(f"final_answer_log_propbs is empty {final_answer_start} {final_answer_end} {final_answer_start_offset} {final_answer_end_offset} {na} {seq_len} {prompt_len} {final_answer_log_propbs}")
+                            # Use the same fallback as the invalid-answer branch
+                            ss_reward_mean, ss_reward_min = -2.7, -11.8
+                        else:
+                            ss_reward_mean = final_answer_log_propbs.mean().item()
+                            # min() on empty tensors errors; above guard ensures non-empty here
+                            ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = self.cfg.kl_mean_coef * ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
 
                         start_kl, end_kl, end_full = offset, offset + final_answer_start - kl_token_offset, offset + na

@@ -122,7 +122,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    train_student_on_teacher_data_only: bool = True
+    train_student_on_teacher_data_only: bool = False
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
