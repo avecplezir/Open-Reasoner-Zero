@@ -1,7 +1,8 @@
 """
 Convert the Hugging Face `tasksource/ruletaker` dataset to ORZ formats
 consistent with StrategyQA converters. Ensures each question ends with '?',
-and includes the example's context before the question.
+includes the example's context before the question, and handles Unknown labels
+via a configurable policy (drop or map to yes/no).
 
 Outputs (default paths):
 - data/ruletaker_train.json            -> ORZ train list[list[dict]]
@@ -18,20 +19,16 @@ Usage examples:
         --train-split train \
         --dev-split dev \
         --train-out data/ruletaker_train.json \
-        --dev-out data/eval_data/ruletaker_dev.json
+        --dev-out data/eval_data/ruletaker_dev.json \
+        --unknown-policy drop
 
 Notes:
 - The prompt is formatted as:
-"""
-
-"""
     Context:
     <context text>
     Question: <question?>
   If no context is found, the prompt is just <question?>.
 """
-
-# from __future__ import annotations
 
 import argparse
 import json
@@ -51,11 +48,12 @@ def ensure_qmark(text: str) -> str:
     return s
 
 
-def coerce_yes_no(value: Any) -> str:
-    """Map various label types to 'yes'/'no'.
+def try_coerce_yes_no(value: Any) -> Optional[str]:
+    """Map labels to 'yes'/'no' where possible; return None for Unknown.
 
-    Accepts: bool, int (1/0), strings ('yes'/'no', 'true'/'false', 'y'/'n'),
-    or dictionaries with 'answer'/'label' keys.
+    Recognizes: bool; int 0/1; strings in yes={yes,y,true,t,1} and no={no,n,false,f,0}.
+    Treats strings like {unknown, both, neither, uncertain, idk, maybe} as Unknown.
+    For dicts, looks into common keys.
     """
     v = value
     if isinstance(v, dict):
@@ -63,18 +61,29 @@ def coerce_yes_no(value: Any) -> str:
             if k in v:
                 v = v[k]
                 break
+    if v is None:
+        return None
     if isinstance(v, bool):
         return "yes" if v else "no"
     if isinstance(v, int):
-        return "yes" if v != 0 else "no"
+        if v in (0, 1):
+            return "yes" if v == 1 else "no"
+        return None
     if isinstance(v, str):
         s = v.strip().lower()
-        if s in {"yes", "y", "true", "t", "1"}:
+        yes_set = {"yes", "y", "true", "t", "1"}
+        no_set = {"no", "n", "false", "f", "0"}
+        unknown_set = {"unknown", "both", "neither", "uncertain", "idk", "maybe"}
+        if s in yes_set:
             return "yes"
-        if s in {"no", "n", "false", "f", "0"}:
+        if s in no_set:
             return "no"
-    # Fallback: truthiness
-    return "yes" if bool(v) else "no"
+        if s in unknown_set:
+            return None
+        if s.isdigit():
+            return "yes" if int(s) == 1 else ("no" if int(s) == 0 else None)
+        return None
+    return None
 
 
 def collect_context(record: Dict[str, Any], context_fields: Optional[List[str]]) -> str:
@@ -161,14 +170,13 @@ def format_prompt(record: Dict[str, Any], question_field: Optional[str], context
     return q
 
 
-def extract_answer(record: Dict[str, Any], label_field: Optional[str]) -> str:
+def extract_answer(record: Dict[str, Any], label_field: Optional[str]) -> Optional[str]:
     if label_field and label_field in record:
-        return coerce_yes_no(record[label_field])
+        return try_coerce_yes_no(record[label_field])
     for key in ("answer", "label", "labels", "target"):
         if key in record:
-            return coerce_yes_no(record[key])
-    # Not found: default to 'no' (conservative)
-    return "no"
+            return try_coerce_yes_no(record[key])
+    return None
 
 
 def to_orz_train(
@@ -176,9 +184,11 @@ def to_orz_train(
     question_field: Optional[str],
     label_field: Optional[str],
     context_fields: Optional[List[str]],
-) -> List[Dict[str, Any]]:
+) -> Optional[List[Dict[str, Any]]]:
     question = format_prompt(record, question_field, context_fields)
     ans = extract_answer(record, label_field)
+    if ans is None:
+        return None
     return [
         {"from": "human", "value": question},
         {"from": "assistant", "ground_truth": {"value": ans}},
@@ -190,9 +200,11 @@ def to_orz_eval(
     question_field: Optional[str],
     label_field: Optional[str],
     context_fields: Optional[List[str]],
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     question = format_prompt(record, question_field, context_fields)
     ans = extract_answer(record, label_field)
+    if ans is None:
+        return None
     return {
         "prompt": [{"from": "user", "value": question}],
         "final_answer": ans,
@@ -204,7 +216,7 @@ def main() -> None:
     parser.add_argument("--dataset", type=str, default="tasksource/ruletaker", help="HF dataset path")
     parser.add_argument("--config", type=str, default=None, help="HF dataset config name (if any)")
     parser.add_argument("--train-split", type=str, default="train", help="Train split name")
-    parser.add_argument("--dev-split", type=str, default="validation", help="Dev/validation split name")
+    parser.add_argument("--dev-split", type=str, default="dev", help="Dev/validation split name")
     parser.add_argument("--question-field", type=str, default=None, help="Override question field name")
     parser.add_argument("--label-field", type=str, default=None, help="Override label/answer field name")
     parser.add_argument(
@@ -212,6 +224,13 @@ def main() -> None:
         type=str,
         default=None,
         help="Comma-separated context field names to include before the question",
+    )
+    parser.add_argument(
+        "--unknown-policy",
+        type=str,
+        default="drop",
+        choices=["drop", "map-yes", "map-no", "keep"],
+        help="How to handle Unknown labels: drop (default), map-yes, map-no, or keep (sets answer to 'unknown').",
     )
     parser.add_argument(
         "--train-out", type=Path, default=Path("data/ruletaker_train.json"), help="Output train JSON path"
@@ -242,16 +261,44 @@ def main() -> None:
     context_fields: Optional[List[str]] = (
         [s.strip() for s in args.context_fields.split(",") if s.strip()] if args.context_fields else None
     )
-    train_out: List[List[Dict[str, Any]]] = [
-        to_orz_train(rec, args.question_field, args.label_field, context_fields) for rec in ds_train
-    ]
+    train_out: List[List[Dict[str, Any]]] = []
+    for rec in ds_train:
+        ans = extract_answer(rec, args.label_field)
+        if ans is None:
+            if args.unknown_policy == "map-yes":
+                ans = "yes"
+            elif args.unknown_policy == "map-no":
+                ans = "no"
+            elif args.unknown_policy == "keep":
+                ans = "unknown"
+            else:
+                continue
+        q = format_prompt(rec, args.question_field, context_fields)
+        train_out.append([
+            {"from": "human", "value": q},
+            {"from": "assistant", "ground_truth": {"value": ans}},
+        ])
     with args.train_out.open("w", encoding="utf-8") as f:
         json.dump(train_out, f, ensure_ascii=False)
 
     # Convert and save dev
-    dev_out: List[Dict[str, Any]] = [
-        to_orz_eval(rec, args.question_field, args.label_field, context_fields) for rec in ds_dev
-    ]
+    dev_out: List[Dict[str, Any]] = []
+    for rec in ds_dev:
+        ans = extract_answer(rec, args.label_field)
+        if ans is None:
+            if args.unknown_policy == "map-yes":
+                ans = "yes"
+            elif args.unknown_policy == "map-no":
+                ans = "no"
+            elif args.unknown_policy == "keep":
+                ans = "unknown"
+            else:
+                continue
+        q = format_prompt(rec, args.question_field, context_fields)
+        dev_out.append({
+            "prompt": [{"from": "user", "value": q}],
+            "final_answer": ans,
+        })
     with args.dev_out.open("w", encoding="utf-8") as f:
         json.dump(dev_out, f, ensure_ascii=False)
 
