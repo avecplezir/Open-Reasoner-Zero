@@ -79,15 +79,15 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        # "data/strategyqa.json",
-        "data/orz_math_57k_collected.json"
+        "data/strategyqa.json",
+        # "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
-            # "data/eval_data/strategyqa_train.json",
-            "data/eval_data/math500.json",
-            "data/eval_data/aime2024.json",
+            "data/eval_data/strategyqa_train.json",
+            # "data/eval_data/math500.json",
+            # "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -109,8 +109,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 12000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -128,9 +128,6 @@ class PPOExpConfig(BasePPOExpConfig):
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
-
-    skip_student_training_to_pretrain_teacher: bool = False
-    skip_student_first_n_rounds: int = 0
 
     student_loss_type: str = "ppo"
 

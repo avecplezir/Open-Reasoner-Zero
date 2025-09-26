@@ -191,6 +191,9 @@ class BasePPOExpConfig(BaseConfig):
 
     adversarial_training: bool = False
 
+    skip_student_training_to_pretrain_teacher: bool = False
+    skip_student_first_n_rounds: int = 0
+
     student_loss_type: str = "topr"
     teacher_loss_type: str = "ppo"
     topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif

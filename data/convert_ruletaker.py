@@ -16,7 +16,7 @@ Usage examples:
         --dataset tasksource/ruletaker \
         --config default \
         --train-split train \
-        --dev-split validation \
+        --dev-split dev \
         --train-out data/ruletaker_train.json \
         --dev-out data/eval_data/ruletaker_dev.json
 
