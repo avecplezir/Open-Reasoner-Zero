@@ -168,7 +168,8 @@ class BasePPOExpConfig(BaseConfig):
     train_student_on_teacher_data_only: bool = False
     # Delay (seconds) before starting weight broadcast, to coordinate starts
     sync_wait_seconds: float = 20.0
-    filter_for_correct_formatting: bool = True
+    filter_for_correct_formatting_student: bool = True
+    filter_for_correct_formatting_teacher: bool = True
     train_teacher_on_student_data_only: bool = False
 
     eval_teacher: bool = False
@@ -181,16 +182,16 @@ class BasePPOExpConfig(BaseConfig):
     #          "opposite" (when teacher correct, always use opposite).
     augment_strategy: str = "correct"
 
-    # Student prompt template for dataset/student prompts:
-    # - "default": regular student template
-    # - "continue": continuation template that can include previous reasoning
-    # - "default_yesno"
-    # - "continue_yesno"
-    student_prompt_template: str = "default"
+    # Prompt flags controlling instruction style
+    # - general_propmt_yes_no: emphasize yes/no answers where applicable
+    # - student_prompt_continuation: allow continuing prior reasoning in student prompts
+    general_propmt_yes_no: bool = False
+    student_prompt_continuation: bool = False
+    teacher_add_role_prefix: bool = False
 
     adversarial_training: bool = False
 
-    student_loss_type: str = "sft"
+    student_loss_type: str = "topr"
     teacher_loss_type: str = "ppo"
     topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif
     topr_temperature: float = 1.0

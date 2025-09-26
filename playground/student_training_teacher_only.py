@@ -117,7 +117,7 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 10  # number student training rounds, -1 means no student training
+    student_training_rounds: int = 2  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
@@ -131,8 +131,9 @@ class PPOExpConfig(BasePPOExpConfig):
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
 
-    student_prompt_template: str = "default_yesno"
-    student_loss_type: str = "topr"
+    # Prompt configuration
+    teacher_add_role_prefix: bool = True
+    general_propmt_yes_no: bool = True
     use_ss_reward_for_student: bool = True
     remove_student_reward_normalization: bool = True
 

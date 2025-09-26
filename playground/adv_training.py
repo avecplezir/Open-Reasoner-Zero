@@ -130,7 +130,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_loss_type: str = "ppo"
     adversarial_training: bool = True
-    student_prompt_template: str = "continue"
+    # Prompt configuration
+    general_propmt_yes_no: bool = False
+    student_prompt_continuation: bool = True
 
     reward_kl_coef: float = 0.
     reward_match_coef: float = 1.

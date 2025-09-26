@@ -765,7 +765,7 @@ class PPOExp(BasePPOExp):
             self.strategy,
             pretrain_mode=False,
             num_processors=1,
-            student_prompt_template=self.cfg.student_prompt_template,
+            cfg=self.cfg,
         )
         logger.info(f"Finished processing {len(prompts_dataset)} dialogues")
         return prompts_dataset
@@ -789,7 +789,7 @@ class PPOExp(BasePPOExp):
             self.strategy,
             pretrain_mode=False,
             num_processors=1,
-            student_prompt_template=self.cfg.student_prompt_template,
+            cfg=self.cfg,
         )
         logger.info(f"Finished processing {len(prompts_dataset)} dialogues")
         return prompts_dataset

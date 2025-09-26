@@ -512,8 +512,8 @@ class RayPPOTrainer:
                     all_extra["dialogue"],
                     student_answer,
                     bos_token,
-                    explain_only=self.cfg.teacher_explain_only,
-                    template=self.cfg.student_prompt_template,
+                    cfg=self.cfg,
+                    is_correct=student_score,
                 )
 
                 all_teacher_prompts.append(teacher_prompt)
@@ -669,8 +669,8 @@ class RayPPOTrainer:
                             extra["dialogue"],
                             student_answer,
                             bos_token,
-                            explain_only=self.cfg.teacher_explain_only,
-                            template=self.cfg.student_prompt_template,
+                            cfg=self.cfg,
+                            is_correct=student_score,
                         )
                         retry_teacher_prompts.append(teacher_prompt)
 
@@ -741,19 +741,21 @@ class RayPPOTrainer:
                 include = True
                 teacher_answer = None
                 teacher_answers = None
+                is_correct = None
 
                 teacher_score, student_score, final_answer = (initial_teacher_scores[i], initial_scores[i], final_answers[i]) if self.cfg.generate_with_student else (None, None, None)
 
                 if self.cfg.augment_strategy == "correct":
                     # logger.info("Using 'correct' augmentation strategy")
                     # Always use the dataset's ground-truth answer
-                    if not student_score:
+                    if not student_score and student_score is not None:
                         # Track a representative incorrect example index; we will
                         # map it to the start index of the duplicated block below.
                         representative_incorrect = True
                     else:
                         representative_incorrect = False
                     teacher_answer = extra["answer"]
+                    is_correct = True
 
                 elif self.cfg.augment_strategy == "correct_incorrect":
                     # Pair each prompt with both the correct and an incorrect answer.
@@ -782,10 +784,11 @@ class RayPPOTrainer:
                     assert neg_ans is not None, "Negative answer must be not None by now"
 
                     teacher_answers = [correct_ans, neg_ans]
+                    is_corrects = [True, False]
 
                 elif self.cfg.augment_strategy == "yes_no":
                     # logger.info("Using 'yes_no' augmentation strategy")
-                    if not student_score:
+                    if not student_score and student_score is not None:
                         # Track a representative incorrect example index; we will
                         # map it to the start index of the duplicated block below.
                         representative_incorrect = True
@@ -793,6 +796,8 @@ class RayPPOTrainer:
                         representative_incorrect = False
 
                     teacher_answers =  [self.yes_token(), self.no_token()]
+                    assert extra["answer"] in ['yes', 'no'], f"Ground-truth answer must be yes or no for yes_no strategy, got {extra['answer']}"
+                    is_corrects = [extra["answer"] == "yes", extra["answer"] == "no"]
 
                 elif self.cfg.augment_strategy == "only_wrong":
                     # logger.info("Using 'only_wrong' augmentation strategy")
@@ -809,6 +814,8 @@ class RayPPOTrainer:
                         include = False
                         representative_incorrect = False
 
+                    is_correct = True
+
                 elif self.cfg.augment_strategy == "opposite":
                     # logger.info("Using 'opposite' augmentation strategy")
                     # When teacher is correct, use the opposite label
@@ -820,6 +827,7 @@ class RayPPOTrainer:
                             teacher_answer = self.yes_token()
                         else:
                             assert False, f"final_answer {final_answer} must be yes or no"
+                        is_correct = not bool(student_score)
                     else:
                         include = False
                         representative_incorrect = False
@@ -831,15 +839,16 @@ class RayPPOTrainer:
                     continue
 
                 teacher_answers = [teacher_answer] if teacher_answers is None else teacher_answers
+                is_corrects = [is_correct] if len(teacher_answers) == 1 else is_corrects
 
-                for teacher_answer in teacher_answers:
+                for teacher_answer, is_correct in zip(teacher_answers, is_corrects):
                     # Build the teacher prompt from the chosen answer
                     teacher_prompt = create_teacher_prompt_from_answer(
                         extra["dialogue"],
                         teacher_answer,
                         bos_token,
-                        explain_only=self.cfg.teacher_explain_only,
-                        template=self.cfg.student_prompt_template,
+                        cfg=self.cfg,
+                        is_correct=is_correct
                     )
 
                     # Use prompt string as a stable key for deduplication
@@ -1034,7 +1043,7 @@ class RayPPOTrainer:
                 adv_teacher_prompts = []
                 adv_extras = []
                 for t_propmpt, extra, prev_r in zip(all_teacher_prompts, all_extras, extracted_reasonings):
-                    new_prompt = create_student_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, template=self.cfg.student_prompt_template)
+                    new_prompt = create_student_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, cfg=self.cfg)
                     for _ in range(self.cfg.n_samples_per_prompt):
                         adv_student_prompts.append(new_prompt)
                         adv_teacher_prompts.append(t_propmpt)
@@ -1196,7 +1205,7 @@ class RayPPOTrainer:
             if self.train_student:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
-        if self.cfg.filter_for_correct_formatting:
+        if (self.cfg.filter_for_correct_formatting_student and self.train_student) or (self.cfg.filter_for_correct_formatting_teacher and self.train_teacher):
             # Filter strictly by formatting correctness, not by teacher correctness.
             keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
             dropped = len(correct_formattings) - len(keep_idx)

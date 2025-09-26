@@ -5,20 +5,6 @@ from jinja2 import Template
 from orz.ppo import PromptDataset
 
 
-"""
-This module provides prompt templates and helpers for student/teacher prompts.
-
-It supports selecting a stricter instruction variant that forces "yes"/"no"
-answers by encoding it into the `template` string used by callers.
-Accepted student templates:
-- "default": general instruction
-- "continue": continuation instruction
-- "default_yesno": general instruction + yes/no constraint
-- "continue_yesno": continuation instruction + yes/no constraint
-Teacher prompts mirror the yes/no selection by passing the student's
-template string when creating teacher prompts.
-"""
-
 # Base prompt instruction templates used in all variants
 # Variant with explicit yes/no guidance (previously commented out)
 PROMPT_INSTRUCTION_TEMPLATE_JNJA_YESNO = """\
@@ -73,16 +59,19 @@ def create_student_prompt(
     bos_token: str = "",
     previous_reasoning: Optional[str] = None,
     *,
-    template: str = "default",
+    cfg=None,
     eval: bool = False,
 ) -> str:
-    """Create a student prompt using a selectable template.
+    """Create a student prompt using configuration-driven settings.
 
     Args:
-        dialogue: Two-message list (user question + ground truth/metadata entry).
+        dialogue: Two-message list (user question + ground truth/metadata entry) or
+            an eval dict with keys "prompt", "final_answer", etc. when eval=True.
         bos_token: Model BOS token to prefix if present.
         previous_reasoning: Optional content of a prior <think>...</think> block.
-        template: "default" or "continue".
+        cfg: Experiment configuration. Uses cfg.general_propmt_yes_no and
+            cfg.student_prompt_continuation.
+        eval: Eval-mode flag for dataset wrappers that pass dict inputs.
 
     Returns:
         Rendered student prompt string.
@@ -92,23 +81,17 @@ def create_student_prompt(
         assert len(dialogue) == 2, "dialogue must contain 2 items"
 
     # Decide which instruction header to use (general vs yes/no)
-    assert template in {"default", "continue", "default_yesno", "continue_yesno"}, f"Unknown template: {template}"
+    prompt_instruction_template_jinja = get_instruction_template_from_flags(cfg.general_propmt_yes_no)
 
-    prompt_instruction_template_jinja = get_instruction_template(template)
-
-    # Map template to the student prompt body variant
-    use_conitinue = template in {"continue", "continue_yesno"}
-    if use_conitinue:
-        prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA
-    else:
-        prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    # Map to the student prompt body variant
+    prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA if cfg.student_prompt_continuation else STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
     prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     prompt_template = Template(prompt_template_jinja)
 
-    if use_conitinue:
+    if cfg.student_prompt_continuation:
         rendered = prompt_template.render(
             bos_token=bos_token,
             prompt=prompt_instruction,
@@ -123,34 +106,28 @@ def create_student_prompt(
 
     return rendered
 
-def get_instruction_template(template: str):
-    # Mirror the student's yes/no choice (if provided)
-    if template in {"default_yesno", "continue_yesno"}:
-        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA_YESNO
-    else:
-        prompt_instruction_template_jinja = PROMPT_INSTRUCTION_TEMPLATE_JNJA
-    return prompt_instruction_template_jinja
+def get_instruction_template_from_flags(yesno: bool) -> str:
+    """Return the instruction header template based on yes/no flag."""
+    return PROMPT_INSTRUCTION_TEMPLATE_JNJA_YESNO if yesno else PROMPT_INSTRUCTION_TEMPLATE_JNJA
+
 
 def create_teacher_prompt_from_answer(
     dialogue: List,
     answer: str = "",
     bos_token: str = "",
     *,
-    explain_only: bool = False,
-    template: str = 'default',
+    cfg=None,
+    is_correct: Optional[bool] = None,
 ):
-    """Create a teacher prompt from a dialogue and provided answer.
+    """Create a teacher prompt from a dialogue and provided answer using cfg.
 
-    When explain_only is True, the template instructs the assistant to output only
-    the reasoning chain inside <think>...</think>, without emitting an <answer> tag
-    (the caller may append the answer programmatically). Otherwise, the template
-    asks for both reasoning and the final <answer>.
+    The configuration controls two aspects:
+    - cfg.general_propmt_yes_no: mirrors yes/no guidance with student.
+    - cfg.teacher_explain_only: when True, asks for only <think> without <answer>.
     """
-    assert template in {"default", "continue", "default_yesno", "continue_yesno"}, f"Unknown template: {template}"
+    prompt_instruction_template_jinja = get_instruction_template_from_flags(cfg.general_propmt_yes_no)
 
-    prompt_instruction_template_jinja = get_instruction_template(template)
-
-    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if cfg.teacher_explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
     assert len(dialogue) == 2, "dialogue must contain 2 items"
 
@@ -158,8 +135,21 @@ def create_teacher_prompt_from_answer(
     prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
     teacher_prompt_template = Template(teacher_prompt_template_jinja)
 
+    # Optionally add a role prefix to the beginning via bos_token
+    bos_with_role = bos_token
+    if cfg.teacher_add_role_prefix:
+        if is_correct is True:
+            role = "You are a teacher explaining a correct final answer. "
+            # role = "You are a teacher. Convince the student that the following correct final answer is correct."
+        elif is_correct is False:
+            role = "You are a teacher explaining an incorrect final answer. "
+        else:
+            assert 0, "is_correct must be provided if teacher_add_role_prefix is True"
+            # role = "You are a teacher explaining the provided final answer. "
+        bos_with_role = f"{bos_token}{role}"
+
     teacher_prompt_answer = teacher_prompt_template.render(
-        bos_token=bos_token,
+        bos_token=bos_with_role,
         prompt=prompt_instruction,
         answer=answer,
     )
@@ -170,7 +160,8 @@ def create_teacher_prompt_from_answer(
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
         # Optional flag to control teacher prompt style
-        self.student_prompt_template = kwargs.pop("student_prompt_template", None)
+        # self.student_prompt_template = kwargs.pop("student_prompt_template", None)
+        self.cfg = kwargs.pop("cfg", None)
         super().__init__(*args, **kwargs)
 
     def process_dialogue(self, dialogue: List):
@@ -181,7 +172,7 @@ class CustomDataset(PromptDataset):
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
 
         # Resolve template: auto -> default for dataset usage
-        prompt = create_student_prompt(dialogue, bos_token=bos_token, template=self.student_prompt_template)
+        prompt = create_student_prompt(dialogue, bos_token=bos_token, cfg=self.cfg)
 
         extra = {
             "answer": dialogue[1]["ground_truth"]["value"],
@@ -193,7 +184,8 @@ class CustomDataset(PromptDataset):
 
 class EvalCustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
-        self.student_prompt_template = kwargs.pop("student_prompt_template", None)
+        self.cfg = kwargs.pop("cfg", None)
+        # self.student_prompt_template = kwargs.pop("student_prompt_template", None)
         super().__init__(*args, **kwargs)
 
     def process_dialogue(self, dialogue: dict):
@@ -208,7 +200,7 @@ class EvalCustomDataset(PromptDataset):
         else:
             bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
 
-        prompt = create_student_prompt(dialogue, bos_token=bos_token, template=self.student_prompt_template, eval=True)
+        prompt = create_student_prompt(dialogue, bos_token=bos_token, cfg=self.cfg, eval=True)
 
         extra = {"answer": dialogue["final_answer"], "file_name": dialogue["file_name"]}
 
