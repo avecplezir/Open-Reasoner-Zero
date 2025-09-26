@@ -79,13 +79,15 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/strategyqa.json",
+        "data/ruletaker_train.json",
+        # "data/strategyqa.json",
         # "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
+            "data/eval_data/ruletaker_dev.json",
+            # "data/eval_data/strategyqa_test.json",
+            # "data/eval_data/strategyqa_train.json",
             # "data/eval_data/math500.json",
             # "data/eval_data/aime2024.json",
         ]
