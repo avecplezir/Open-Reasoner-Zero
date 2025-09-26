@@ -8,6 +8,8 @@ slurm/
 
 data/ruletaker_train.json
 data/eval_data/ruletaker_dev.json
+data/proofwriter_train.json
+data/eval_data/proofwriter_dev.json
 
 # temporary files which can be created if a process still has a handle open of a deleted file
 .fuse_hidden*
