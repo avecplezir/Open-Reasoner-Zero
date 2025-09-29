@@ -136,7 +136,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # Prompt configuration
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
-    use_ss_reward_for_student: bool = True
+    use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
 

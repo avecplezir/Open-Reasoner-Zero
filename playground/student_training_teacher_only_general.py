@@ -89,7 +89,8 @@ class PPOExpConfig(BasePPOExpConfig):
             "data/eval_data/strategyqa_test.json",
             # "data/eval_data/strategyqa_train.json",
             "data/eval_data/math500.json",
-            "data/eval_data/aime2024.json",
+            "data/eval_data/gpqa_diamond.json",
+            # "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -102,10 +103,10 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.00
+    kl_loss_coef: float = 0.001
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 5
@@ -121,8 +122,8 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
@@ -134,7 +135,11 @@ class PPOExpConfig(BasePPOExpConfig):
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
+    filter_for_correct_formatting_student: bool = True
+    filter_for_correct_formatting_teacher: bool = True
 
+    teacher_add_role_prefix: bool = True
+    general_propmt_yes_no: bool = False
     student_loss_type: str = "topr"
     use_ss_reward_for_student: bool = True
 
