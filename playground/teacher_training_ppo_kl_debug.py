@@ -84,7 +84,7 @@ class PPOExpConfig(BasePPOExpConfig):
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
+            # "data/eval_data/strategyqa_test.json",
             # "data/eval_data/strategyqa_train.json",
             "data/eval_data/math500.json",
             "data/eval_data/aime2024.json",
@@ -131,8 +131,6 @@ class PPOExpConfig(BasePPOExpConfig):
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
-
-    student_loss_type: str = "ppo"
 
 
 if __name__ == "__main__":

@@ -513,7 +513,7 @@ class RayPPOTrainer:
                     student_answer,
                     bos_token,
                     cfg=self.cfg,
-                    is_correct=student_score,
+                    is_correct=bool(student_score),
                 )
 
                 all_teacher_prompts.append(teacher_prompt)
@@ -670,7 +670,7 @@ class RayPPOTrainer:
                             student_answer,
                             bos_token,
                             cfg=self.cfg,
-                            is_correct=student_score,
+                            is_correct=bool(student_score),
                         )
                         retry_teacher_prompts.append(teacher_prompt)
 
@@ -1047,7 +1047,7 @@ class RayPPOTrainer:
                     for _ in range(self.cfg.n_samples_per_prompt):
                         adv_student_prompts.append(new_prompt)
                         adv_teacher_prompts.append(t_propmpt)
-                        adv_extras.append(extra)
+                        adv_extras.append((extra))
 
                 # Sync student weights and generate adversarial student responses
                 async with Timer("Sync policy weights to VLLM engines for adversarial student gen"):

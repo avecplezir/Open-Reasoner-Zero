@@ -81,12 +81,11 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/strategyqa.json",
+        "data/proofwriter_train.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
+            "data/eval_data/proofwriter_dev.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -113,7 +112,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 10
+    initial_teacher_training_rounds: int = 50
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 

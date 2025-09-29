@@ -144,7 +144,7 @@ def create_teacher_prompt_from_answer(
         elif is_correct is False:
             role = "You are a teacher explaining an incorrect final answer. "
         else:
-            assert 0, "is_correct must be provided if teacher_add_role_prefix is True"
+            assert 0, f"is_correct {is_correct} must be True or False if teacher_add_role_prefix is True"
             # role = "You are a teacher explaining the provided final answer. "
         bos_with_role = f"{bos_token}{role}"
 

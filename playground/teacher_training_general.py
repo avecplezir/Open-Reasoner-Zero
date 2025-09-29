@@ -37,7 +37,6 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 executor = ThreadPoolExecutor(max_workers=64)
 
 prefix = '/home/a/anokhin/links/scratch'
-project_prefix = '/home/a/anokhin/links/projects/aip-irina/anokhin/adv_reasoner'
 # prefix = '/home/anokhin/scratch'
 
 @dataclass
@@ -69,11 +68,10 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
-    reward_pretrain: Optional[str] = None
-    save_interval: int = 50
+    save_interval: int = 30
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-st-iter50-t-iter50-{randint}'
+    e_name = f'aug-iter50-correct-longrun-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -86,17 +84,16 @@ class PPOExpConfig(BasePPOExpConfig):
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
+            # "data/eval_data/strategyqa_test.json",
             # "data/eval_data/strategyqa_train.json",
             "data/eval_data/math500.json",
-            "data/eval_data/gpqa_diamond.json",
-            # "data/eval_data/aime2024.json",
+            "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128
+    train_batch_size: int = 256 if not DEBUG_MODE else 32
     num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
@@ -109,38 +106,35 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_coef: float = 0.001
 
     enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 5
+    eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 4000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 4192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
-    use_grpo: bool = True #False
-
+    use_grpo: bool = True
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    train_student_on_teacher_data_only: bool = True
+    train_student_on_teacher_data_only: bool = False
     augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-584/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = pretrain
 
-    skip_student_training_to_pretrain_teacher: bool = False
-    skip_student_first_n_rounds: int = initial_teacher_training_rounds
-    filter_for_correct_formatting_student: bool = True
-    filter_for_correct_formatting_teacher: bool = True
+    skip_student_training_to_pretrain_teacher: bool = True
+    skip_student_first_n_rounds: int = 0
 
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = False
-    use_ss_reward_for_student: bool = True
+    use_ss_reward_for_student: bool = False
 
 
 if __name__ == "__main__":
