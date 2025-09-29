@@ -168,8 +168,8 @@ class BasePPOExpConfig(BaseConfig):
     train_student_on_teacher_data_only: bool = False
     # Delay (seconds) before starting weight broadcast, to coordinate starts
     sync_wait_seconds: float = 20.0
-    filter_for_correct_formatting_student: bool = True
-    filter_for_correct_formatting_teacher: bool = True
+    filter_for_correct_formatting_student: bool = False
+    filter_for_correct_formatting_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
 
     eval_teacher: bool = False

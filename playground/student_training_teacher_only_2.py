@@ -114,7 +114,7 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 3  # number student training rounds, -1 means no student training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     enable_eval: bool = True if not DEBUG_MODE else True

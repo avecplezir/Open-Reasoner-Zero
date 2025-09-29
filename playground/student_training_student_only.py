@@ -134,6 +134,7 @@ class PPOExpConfig(BasePPOExpConfig):
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain
 
+    general_propmt_yes_no: bool = True
     student_loss_type: str = "ppo"
 
 

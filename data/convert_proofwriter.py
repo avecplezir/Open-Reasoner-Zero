@@ -17,7 +17,7 @@ Usage examples:
         --dataset tasksource/proofwriter \
         --config default \
         --train-split train \
-        --dev-split dev \
+        --dev-split validation \
         --train-out data/proofwriter_train.json \
         --dev-out data/eval_data/proofwriter_dev.json \
         --unknown-policy drop
@@ -249,9 +249,6 @@ def main() -> None:
     ds_kwargs = {}
     if args.config:
         ds_kwargs["name"] = args.config
-
-    # train_split = normalize_split_name(args.train_split)
-    # dev_split = normalize_split_name(args.dev_split)
 
     ds_train = load_dataset(args.dataset, **ds_kwargs, split=args.train_split)
     ds_dev = load_dataset(args.dataset, **ds_kwargs, split=args.dev_split)
