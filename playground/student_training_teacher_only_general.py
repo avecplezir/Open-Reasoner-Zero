@@ -112,8 +112,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 5
 
     # generate related settings
-    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 4000 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 4192 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -135,8 +135,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
-    filter_for_correct_formatting_student: bool = True
-    filter_for_correct_formatting_teacher: bool = True
+    filter_for_correct_formatting_student: bool = False
+    filter_for_correct_formatting_teacher: bool = False
 
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = False

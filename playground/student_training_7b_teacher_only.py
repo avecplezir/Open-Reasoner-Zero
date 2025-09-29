@@ -46,9 +46,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
-    total_num_nodes: int = 4
+    total_num_nodes: int = 8
 
-    actor_num = 3
+    actor_num = 4
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -63,13 +63,15 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
+    vllm_num_engines: int = 4 #total_num_nodes - actor_num
+    vllm_tensor_parallel_size: int = 1 #4
     gpu_memory_utilization: float = 0.95
+    vllm_sync_backend: str = "nccl"  # "gloo" #"nccl"
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_7b_ppo_kl_debug_7b-iter20-correct-v0-438/iter90/policy" #f"{prefix}/teacher_training_7b_ppo_debug_7b-iter50-v0-403/iter20/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     reward_pretrain: Optional[str] = None
-    save_interval: int = 30
+    save_interval: int = 100
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'7b-iter90-correct-v0-{randint}'
@@ -97,12 +99,10 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.001
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
@@ -124,13 +124,18 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
 
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = 0
+
+    teacher_add_role_prefix: bool = False
+    general_propmt_yes_no: bool = True
+    use_ss_reward_for_student: bool = True
+    remove_student_reward_normalization: bool = True
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ class BasePPOExpConfig(BaseConfig):
     colocate_all: bool = False
     vllm_num_engines: int = 4
     vllm_tensor_parallel_size: int = 1
-    vllm_sync_backend: str = "gloo" #"gloo" #"nccl"
+    vllm_sync_backend: str = "nccl" #"gloo" #"nccl"
     local_rank: int = -1
 
     # path related settings
@@ -300,9 +300,23 @@ class BasePPOExp(BaseExp):
             "NCCL_PXN_DISABLE": "1",
             # "NCCL_ALGO": "^Ring",
             "NCCL_NET_OVERHEAD": "1000000",
+            # "CUDA_LAUNCH_BLOCKING": "1",
             "CUDA_LAUNCH_BLOCKING": "1",
+            "NCCL_P2P_DISABLE": "1",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
         }
+
+        # ray.init(
+        #     runtime_env=RuntimeEnv(
+        #         env_vars={
+        #             "NCCL_DEBUG": "WARN",
+        #             "NCCL_PXN_DISABLE": "1",
+        #             "NCCL_ALGO": "^Ring",
+        #             "NCCL_NET_OVERHEAD": "1000000",
+        #             "CUDA_LAUNCH_BLOCKING": "1",
+        #         }
+        #     )
+        # )
 
         if use_ib0:
             env_vars.update({
