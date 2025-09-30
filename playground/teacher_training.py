@@ -79,15 +79,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        # "data/strategyqa.json",
-        "data/orz_math_57k_collected.json"
+        "data/strategyqa.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            # "data/eval_data/strategyqa_test.json",
-            # "data/eval_data/strategyqa_train.json",
-            "data/eval_data/math500.json",
-            "data/eval_data/aime2024.json",
+            "data/eval_data/strategyqa_test.json",
+            "data/eval_data/strategyqa_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -109,8 +106,8 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 4000 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 4192 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -121,16 +118,24 @@ class PPOExpConfig(BasePPOExpConfig):
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_student: bool = True
+    generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = False
-    augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
+
+    teacher_add_role_prefix: bool = True
+    general_propmt_yes_no: bool = True
+    use_ss_reward_for_student: bool = True
+    remove_student_reward_normalization: bool = True
+
+    topr_reward_coef: float = 1.0
+    reward_kl_coef: float = 0.0
 
 
 if __name__ == "__main__":

@@ -198,6 +198,10 @@ class RayPPOTrainer:
                 # 3. make experiences, calculate advantages and returns
                 await self.make_experience(rand_prompts)
 
+                if self.cfg.separate_teacher_model:
+                    await self.policy_model.async_run_method("empty_cache")
+                    await self.teacher_model.async_run_method("empty_cache")
+
                 # check if has enough data
                 if len(self.student_replay_buffer) <= 0 or len(self.teacher_replay_buffer) <= 0:
                     await self._major_sync_policy_weights_to_vllm()
@@ -305,11 +309,11 @@ class RayPPOTrainer:
                     await self.policy_model.async_run_method("empty_cache")
                     await self.policy_model.backload_to_gpu()
 
-                # if train_student and self.cfg.separate_teacher_model:
-                if not self.cfg.colocate_all and self.cfg.separate_teacher_model:
-                    await self.teacher_model.offload_to_cpu()
-                    await self.teacher_model.async_run_method("empty_cache")
-                    await self.teacher_model.backload_to_gpu()
+                    # if train_student and self.cfg.separate_teacher_model:
+                    if self.cfg.separate_teacher_model:
+                        await self.teacher_model.offload_to_cpu()
+                        await self.teacher_model.async_run_method("empty_cache")
+                        await self.teacher_model.backload_to_gpu()
 
                     if self.cfg.critic_pretrain:
                         await self.critic_model.offload_to_cpu()
@@ -1352,7 +1356,6 @@ class RayPPOTrainer:
                             ss_reward_mean, ss_reward_min = -2.7, -11.8
                         else:
                             ss_reward_mean = final_answer_log_propbs.mean().item()
-                            # min() on empty tensors errors; above guard ensures non-empty here
                             ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = self.cfg.kl_mean_coef * ss_reward_mean + self.cfg.kl_max_coef * ss_reward_min
 
@@ -1363,6 +1366,13 @@ class RayPPOTrainer:
                         start_kl, end_kl, end_full = offset, offset + na, offset + na
 
                     # logger.info(f'start_kl {start_kl} end_kl {end_kl}')
+                    if teacher_generated[teacher_prompt_idx]:
+                        if start_kl < end_full:
+                            student_ratio_clipped_0_1_scalar = torch.exp(self.cfg.topr_temperature * (student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0))
+                        else:
+                            student_ratio_clipped_0_1_scalar = torch.tensor(0)
+                    else:
+                        student_ratio_clipped_0_1_scalar = torch.tensor(1)
 
                     ss_reward_mean_list.append(ss_reward_mean)
                     ss_reward_min_list.append(ss_reward_min)
@@ -1394,7 +1404,7 @@ class RayPPOTrainer:
                     match_reward = teacher_exp.info['custom_rewards'][i][-1]
                     assert match_reward_check == match_reward, "match_reward_check and match_reward must be equal"
                     if teacher_score:
-                        final_teacher_reward = self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward
+                        final_teacher_reward = self.cfg.topr_reward_coef * student_ratio_clipped_0_1_scalar + self.cfg.ss_reward_coef * ss_reward_list[-1] + self.cfg.reward_kl_coef * kl_reward + self.cfg.reward_match_coef * match_reward
                         final_reward_list.append(final_teacher_reward.item())
                     else:
                         final_reward_list.append(-2.0)

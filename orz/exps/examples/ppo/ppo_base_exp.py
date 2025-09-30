@@ -141,6 +141,7 @@ class BasePPOExpConfig(BaseConfig):
     kl_mean_coef: float = 1.
     reward_kl_coef: float = 1.
     kl_reward_clamp: float = 10
+    topr_reward_coef: float = 0.
     reward_kl_reduction: str = "mean"  # "mean" or "sum"
     reward_match_coef: float = 0.
     reward_kl_toward_ref_model: bool = False
