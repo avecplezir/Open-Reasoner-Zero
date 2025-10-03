@@ -48,7 +48,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 8
 
-    actor_num = 4
+    actor_num = 6
     # resource related settings
     ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
@@ -63,8 +63,8 @@ class PPOExpConfig(BasePPOExpConfig):
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = 4 #total_num_nodes - actor_num
-    vllm_tensor_parallel_size: int = 1 #4
+    vllm_num_engines: int = total_num_nodes - actor_num
+    vllm_tensor_parallel_size: int = 1
     gpu_memory_utilization: float = 0.95
     vllm_sync_backend: str = "nccl"  # "gloo" #"nccl"
 

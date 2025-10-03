@@ -68,7 +68,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
-    save_interval: int = 30
+    save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
     e_name = f'aug-iter50-correct-longrun-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'

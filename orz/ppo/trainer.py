@@ -408,6 +408,10 @@ class RayPPOTrainer:
 
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
         teacher_generated, combined_correct_formattings = [], []
+        # Track the index range of the initial student-generated block so we can
+        # write a symmetric match reward for student samples after adversarial gen
+        student_block_start = None
+        student_block_len = 0
 
         # Prepare BOS token for logging
         if self.tokenizer.bos_token_id is None:
@@ -574,6 +578,11 @@ class RayPPOTrainer:
             ):
                 logger.info(f"Skipping student-generated data due to train_teacher_on_teacher_data_only={self.cfg.train_teacher_on_teacher_data_only} and train_teacher_on_teacher_data_only={self.cfg.train_student_on_teacher_data_only} flags")
             else:
+                # Remember where the original student-generated block starts so we can
+                # attach student-side match rewards later (after adversarial gen)
+                student_block_start = len(combined_custom_rewards)
+                student_block_len = len(all_student_prompts)
+
                 teacher_generated.extend([False] * len(all_student_prompts))
                 combined_all_student_prompts.extend(all_student_prompts)
                 combined_all_teacher_prompts.extend(all_teacher_prompts)
@@ -1109,6 +1118,18 @@ class RayPPOTrainer:
                     teacher_idx = teacher_block_start + i
                     if self.train_teacher:
                         combined_teacher_custom_rewards[teacher_idx][-1] = avg_match
+
+                    # Symmetric: compute a student-side match reward as the
+                    # average correctness of the adversarial student responses
+                    # generated from the corresponding teacher explanation, and
+                    # assign it back to the original student sample slot.
+                    if student_block_start is not None:
+                        avg_student_match = float(np.mean(adv_initial_scores[start:end]))
+                        student_idx = student_block_start + i
+                        try:
+                            combined_custom_rewards[student_idx][-1] = avg_student_match
+                        except Exception as e:
+                            logger.warning(f"Failed to write student match reward at idx {student_idx}: {e}")
 
                 # Log a few adversarial examples to wandb
                 if wandb.run is not None and len(adv_student_prompts) > 0:
