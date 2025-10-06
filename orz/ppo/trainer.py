@@ -408,6 +408,7 @@ class RayPPOTrainer:
 
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
         teacher_generated, combined_correct_formattings = [], []
+        combined_extras = []
         # Track the index range of the initial student-generated block so we can
         # write a symmetric match reward for student samples after adversarial gen
         student_block_start = None
@@ -439,7 +440,7 @@ class RayPPOTrainer:
         for student, extra in paired_data:
             # Add both positive and negative examples
             all_student_prompts.extend([student])
-            all_extras.extend([extra])
+            all_extras.extend([dict(extra)])
 
         if self.cfg.generate_with_student:
 
@@ -525,6 +526,7 @@ class RayPPOTrainer:
                 )
 
                 all_teacher_prompts.append(teacher_prompt)
+                all_extras[i]['teacher_answer'] = student_answer
 
                 if not student_score:
                     indices_incorrect.append(i)
@@ -594,6 +596,7 @@ class RayPPOTrainer:
                 combined_initial_teacher_scores.extend(initial_teacher_scores)
                 combined_final_answers.extend(final_answers)
                 combined_correct_formattings.extend(correct_formattings)
+                combined_extras.extend(all_extras)
 
             # Optional retry rounds based on per-prompt success counts (pass@N)
             if self.cfg.student_retry_max_rounds > 0  and self.cfg.student_success_min_per_prompt > 0:
@@ -699,6 +702,7 @@ class RayPPOTrainer:
                     combined_initial_teacher_scores.extend(retry_initial_teacher_scores)
                     combined_final_answers.extend(retry_final_answers)
                     combined_correct_formattings.extend(retry_correct_formattings)
+                    combined_extras.extend(all_extras)
 
                     # Prepare next-round retry list
                     to_retry_keys = [p for p in original_prompts if success_counts[p] < self.cfg.student_success_min_per_prompt]
@@ -1028,38 +1032,42 @@ class RayPPOTrainer:
             # Remember where this teacher block starts in the combined teacher rewards list
             teacher_block_start = len(combined_teacher_custom_rewards)
 
-            if (not self.cfg.adversarial_training) or self.train_teacher:
-                teacher_generated.extend([True] * len(all_student_prompts))
-                combined_all_student_prompts.extend(all_student_prompts)
-                combined_all_teacher_prompts.extend(all_teacher_prompts)
-                combined_outputs.extend(outputs)
-                combined_custom_rewards.extend(custom_rewards)
-                combined_teacher_custom_rewards.extend(teacher_custom_rewards)
-                combined_answer_indices.extend(answer_indices)
-                combined_initial_scores.extend(initial_scores)
-                combined_initial_teacher_scores.extend(initial_teacher_scores)
-                combined_final_answers.extend(final_answers)
-                combined_correct_formattings.extend(correct_formattings)
+            # if (not self.cfg.adversarial_training) or self.train_teacher:
+            teacher_generated.extend([True] * len(all_student_prompts))
+            combined_all_student_prompts.extend(all_student_prompts)
+            combined_all_teacher_prompts.extend(all_teacher_prompts)
+            combined_outputs.extend(outputs)
+            combined_custom_rewards.extend(custom_rewards)
+            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
+            combined_answer_indices.extend(answer_indices)
+            combined_initial_scores.extend(initial_scores)
+            combined_initial_teacher_scores.extend(initial_teacher_scores)
+            combined_final_answers.extend(final_answers)
+            combined_correct_formattings.extend(correct_formattings)
+            combined_extras.extend(all_extras)
 
             # Optional third-round adversarial student generation using teacher explanations
             if self.cfg.adversarial_training:
                 # Extract prior reasoning up to </think> and create continuation student prompts
                 extracted_reasonings: List[str] = []
-                teacher_responses = outputs
-                for resp in teacher_responses:
+                for resp in combined_outputs:
                     m = re.search(r"(.*?)</think>", resp, re.DOTALL)
                     prev = m.group(1).strip() if m else resp.strip()
                     extracted_reasonings.append(prev + '</think> <think>')
 
                 # Construct prompts; keep one new prompt per teacher sample (already repeated for GRPO)
-                adv_student_prompts = []
-                adv_teacher_prompts = []
+                adv_prompts = []
+                adv_init_prompts = []
                 adv_extras = []
-                for t_propmpt, extra, prev_r in zip(all_teacher_prompts, all_extras, extracted_reasonings):
+                for i, (t_propmpt, s_prompt, extra, prev_r, tgenerated) in enumerate(zip(combined_all_teacher_prompts, combined_all_student_prompts, combined_extras, extracted_reasonings, teacher_generated)):
                     new_prompt = create_student_prompt(extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, cfg=self.cfg)
+                    init_prompt = t_propmpt if tgenerated else s_prompt
+                    if not self.cfg.verifier_use_answer_target:
+                        extra = dict(extra)
+                        extra["answer"] = verifier_answer = self.yes_token() if initial_scores[i] else self.no_token()
                     for _ in range(self.cfg.n_samples_per_prompt):
-                        adv_student_prompts.append(new_prompt)
-                        adv_teacher_prompts.append(t_propmpt)
+                        adv_prompts.append(new_prompt)
+                        adv_init_prompts.append(init_prompt)
                         adv_extras.append((extra))
 
                 # Sync student weights and generate adversarial student responses
@@ -1069,10 +1077,10 @@ class RayPPOTrainer:
                 adv_outputs_local: List[str] = []
                 num_vllm_dp_gruops = len(self.vllm_engines)
                 async with Timer("Generate adversarial student sequences via vllm engines"):
-                    dp_prompt_size = (len(adv_student_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
+                    dp_prompt_size = (len(adv_prompts) + num_vllm_dp_gruops - 1) // num_vllm_dp_gruops
                     dp_tasks = []
                     for dp_rank in range(num_vllm_dp_gruops):
-                        dp_inputs = adv_student_prompts[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
+                        dp_inputs = adv_prompts[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
                         dp_extras = adv_extras[dp_rank * dp_prompt_size: (dp_rank + 1) * dp_prompt_size]
                         if len(dp_inputs) == 0:
                             continue
@@ -1083,7 +1091,7 @@ class RayPPOTrainer:
 
                 reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
                 (
-                    adv_student_prompts,
+                    adv_prompts,
                     adv_outputs,
                     adv_custom_rewards,
                     adv_teacher_custom_rewards,
@@ -1095,7 +1103,7 @@ class RayPPOTrainer:
                     adv_teacher_no,
                     adv_correct_formattings,
                     adv_pass_at_n_dict,
-                ) = await reward_fn(adv_student_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
+                ) = await reward_fn(adv_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
 
                 teacher_adv_match_rewards = []
                 # If we have generated adversarial responses for each teacher prompt, compute
@@ -1103,54 +1111,52 @@ class RayPPOTrainer:
                 # the teacher-declared answer embedded in the prompts. This averages over
                 # multiple adversarial responses per teacher prompt instance.
                 # Each teacher prompt instance produced cfg.n_samples_per_prompt adversarial responses
-                assert len(adv_initial_teacher_scores) == len(all_teacher_prompts) * self.cfg.n_samples_per_prompt, (
+                assert len(adv_initial_teacher_scores) == len(combined_all_teacher_prompts) * self.cfg.n_samples_per_prompt, (
                     "Expected adv_initial_teacher_scores to be teacher_instances * n_samples_per_prompt"
                 )
                 # Overwrite the teacher custom rewards block we appended earlier
                 match_reward_dict = {}
                 # logger.info(f"combined_teacher_custom_rewards {len(combined_teacher_custom_rewards)} \n {combined_teacher_custom_rewards}")
-                for i in range(len(all_teacher_prompts)):
+                for i in range(len(combined_all_teacher_prompts)):
                     start = i * self.cfg.n_samples_per_prompt
                     end = (i + 1) * self.cfg.n_samples_per_prompt
                     avg_match = float(np.mean(adv_initial_teacher_scores[start:end]))
-                    match_reward_dict[adv_student_prompts[start]] = avg_match
-                    teacher_adv_match_rewards.append(avg_match)
-                    teacher_idx = teacher_block_start + i
-                    if self.train_teacher:
-                        combined_teacher_custom_rewards[teacher_idx][-1] = avg_match
+                    if teacher_generated[i]:
+                        match_reward_dict[adv_prompts[start]] = avg_match
+                        teacher_adv_match_rewards.append(avg_match)
+                        if self.train_teacher:
+                            combined_teacher_custom_rewards[i][-1] = avg_match
 
                     # Symmetric: compute a student-side match reward as the
                     # average correctness of the adversarial student responses
                     # generated from the corresponding teacher explanation, and
                     # assign it back to the original student sample slot.
-                    if student_block_start is not None:
+                    if student_block_start is not None and not teacher_generated[i]:
                         avg_student_match = float(np.mean(adv_initial_scores[start:end]))
-                        student_idx = student_block_start + i
-                        try:
-                            combined_custom_rewards[student_idx][-1] = avg_student_match
-                        except Exception as e:
-                            logger.warning(f"Failed to write student match reward at idx {student_idx}: {e}")
+                        coef = 1 if combined_initial_scores[i] else -1
+                        if self.train_student:
+                            combined_custom_rewards[i][-1] = coef * avg_student_match
 
                 # Log a few adversarial examples to wandb
-                if wandb.run is not None and len(adv_student_prompts) > 0:
-                    n = min(16, len(adv_student_prompts))
+                if wandb.run is not None and len(adv_prompts) > 0:
+                    n = min(16, len(adv_prompts))
                     table_data = []
                     for i in range(n):
                         table_data.append([
-                            adv_teacher_prompts[-i],
-                            adv_student_prompts[-i],
+                            adv_init_prompts[-i],
+                            adv_prompts[-i],
                             adv_outputs[-i],
                             adv_final_answers[-i],
                             adv_extras[-i].get("teacher_answer", ""),
                             bool(adv_initial_scores[-i]),
                             bool(adv_initial_teacher_scores[-i]),
-                            match_reward_dict.get(adv_student_prompts[-i], None),
+                            match_reward_dict.get(adv_prompts[-i], None),
                         ])
                     wandb.log({
                         "adversarial_examples": wandb.Table(
                             columns=[
-                                "adv_teacher_prompts",
-                                "adv_student_prompt",
+                                "adv_init_prompts",
+                                "adv_prompt",
                                 "adv_response",
                                 "adv_final_answer",
                                 "teacher_answer",
@@ -1706,8 +1712,8 @@ class RayPPOTrainer:
                     _,
                     _,
                 ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                    adv_student_prompts,
-                    adv_teacher_prompts,
+                    adv_prompts,
+                    adv_init_prompts,
                     adv_outputs,
                     adv_custom_rewards,
                     adv_teacher_custom_rewards,
@@ -1735,7 +1741,7 @@ class RayPPOTrainer:
                                 score = adv_initial_scores[prompt_idx]
                                 adv_exp.info['loss_type'] = torch.tensor(compute_loss_type_hash('sft')).unsqueeze(0).float()
                             else:
-                                prompt = adv_student_prompts[prompt_idx]
+                                prompt = adv_prompts[prompt_idx]
                                 score = adv_initial_scores[prompt_idx]
                                 score -= np.mean(adv_pass_at_n_dict[prompt])
                                 if std := np.std(adv_pass_at_n_dict[prompt]) > 0:
@@ -1751,7 +1757,7 @@ class RayPPOTrainer:
 
                 # Append only to student experiences; exclude from teacher training
                 student_experiences.extend(adv_student_experiences)
-                logger.info(f"Adversarial third-round added {len(adv_student_prompts)} student samples")
+                logger.info(f"Adversarial third-round added {len(adv_prompts)} student samples")
 
         # 3. calculate advantages and returns / along with tensorboard logging
         for experiences, buffer, prefix in zip([student_experiences, teacher_experiences],
