@@ -289,7 +289,7 @@ class BaseTrainer:
                 bool(initial_scores[idx]),
                 bool(initial_teacher_scores[idx]),
             ])
-        if getattr(self.cfg, "augment_strategy", None) != "only_wrong":
+        if self.cfg.augment_strategy != "only_wrong":
             n_inc = min(5, len(indices_incorrect))
             for i in range(n_inc):
                 idx = indices_incorrect[i]
@@ -824,10 +824,43 @@ class BaseTrainer:
         List[str], List[str], List[str], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]
     ]]:
         """
-        Apply SFT filtering (student/teacher) and formatting correctness filtering.
-        Returns filtered lists or None if no samples remain.
+        Apply adversarial-origin filtering (if enabled), SFT filtering (student/teacher),
+        and formatting correctness filtering. Returns filtered lists.
         """
-        # SFT filtering
+        # 0. Adversarial-origin filtering: when adversarial training is enabled,
+        #    select samples by origin based on which model is being trained.
+        if self.cfg.adversarial_training:
+            if self.train_teacher:
+                # Keep only teacher-generated samples (code == 1)
+                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg == 1]
+                dropped = len(teacher_generated) - len(keep_idx)
+                logger.info(f"ADV filter (teacher): dropping {dropped}/{len(teacher_generated)} non-teacher samples")
+                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+                outputs = [outputs[i] for i in keep_idx]
+                custom_rewards = [custom_rewards[i] for i in keep_idx]
+                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+                answer_indices = [answer_indices[i] for i in keep_idx]
+                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+                initial_scores = [initial_scores[i] for i in keep_idx]
+                teacher_generated = [teacher_generated[i] for i in keep_idx]
+                correct_formattings = [correct_formattings[i] for i in keep_idx]
+            elif self.train_student:
+                # Keep student or adversarial samples (codes 0 and -1), drop teacher (code 1)
+                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg != 1]
+                dropped = len(teacher_generated) - len(keep_idx)
+                logger.info(f"ADV filter (student): dropping {dropped}/{len(teacher_generated)} teacher samples")
+                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+                outputs = [outputs[i] for i in keep_idx]
+                custom_rewards = [custom_rewards[i] for i in keep_idx]
+                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+                answer_indices = [answer_indices[i] for i in keep_idx]
+                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+                initial_scores = [initial_scores[i] for i in keep_idx]
+                teacher_generated = [teacher_generated[i] for i in keep_idx]
+                correct_formattings = [correct_formattings[i] for i in keep_idx]
+        # 1. SFT filtering
         if self.train_student and self.cfg.student_loss_type == 'sft':
             keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc) and bool(tsc)]
             dropped = len(initial_scores) - len(keep_idx)
@@ -862,7 +895,7 @@ class BaseTrainer:
             if self.train_student:
                 logger.info(f"Using {self.cfg.student_loss_type} to train student")
 
-        # Formatting correctness filtering
+        # 2. Formatting correctness filtering
         if (self.cfg.filter_for_correct_formatting_student and self.train_student) or (self.cfg.filter_for_correct_formatting_teacher and self.train_teacher):
             keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
             dropped = len(correct_formattings) - len(keep_idx)
