@@ -991,7 +991,7 @@ class BaseTrainer:
                         signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
                         score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
                     else:
-                        score = float(initial_scores[prompt_idx])
+                        score = initial_scores[prompt_idx]
                 else:
                     if self.cfg.use_ss_reward_for_student:
                         prompt = all_student_prompts[prompt_idx]
@@ -1038,7 +1038,7 @@ class BaseTrainer:
         kl_mean_list: np.ndarray,
         kl_max_list: np.ndarray,
         kl_sum_list: np.ndarray,
-        match_reward_list: np.ndarray,
+        teacher_match_reward_list: np.ndarray,
         ss_reward_mean_list: np.ndarray,
         ss_reward_min_list: np.ndarray,
         ss_reward_list: np.ndarray,
@@ -1073,7 +1073,7 @@ class BaseTrainer:
             avg_student_teacher_kl = kl_reward_list[mask].mean()
             avg_student_teacher_kl_mean = kl_mean_list[mask].mean()
             avg_student_teacher_kl_max = kl_max_list[mask].mean()
-            avg_match_reward = match_reward_list[mask].mean()
+            avg_teacher_match_reward = teacher_match_reward_list[mask].mean()
             avg_ss_reward_mean = ss_reward_mean_list[mask].mean()
             avg_ss_reward_min = ss_reward_min_list[mask].mean()
             avg_ss_reward = ss_reward_list[mask].mean()
@@ -1081,10 +1081,10 @@ class BaseTrainer:
             ct = np.logical_and(initial_scores == 1, mask)
             it = np.logical_and(initial_scores == 0, mask)
 
-            correct_match_reward_trainer = np.array([]) if np.all(it) else np.array(match_reward_list[ct])
-            incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(match_reward_list[it])
-            avg_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
-            avg_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item()
+            correct_match_reward_trainer = np.array([]) if np.all(it) else np.array(teacher_match_reward_list[ct])
+            incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(teacher_match_reward_list[it])
+            avg_teacher_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
+            avg_teacher_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item()
 
             ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), mask)
             cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), mask)
@@ -1132,9 +1132,9 @@ class BaseTrainer:
                     f"{pfx}avg_student_teacher_kl": avg_student_teacher_kl,
                     f"{pfx}avg_student_teacher_kl_mean": avg_student_teacher_kl_mean,
                     f"{pfx}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
-                    f"{pfx}avg_match_reward": avg_match_reward,
-                    f"{pfx}avg_correct_match_reward": avg_correct_match_reward,
-                    f"{pfx}avg_incorrect_match_reward": avg_incorrect_match_reward,
+                    f"{pfx}avg_teacher_match_reward": avg_teacher_match_reward,
+                    f"{pfx}avg_teacher_correct_match_reward": avg_teacher_correct_match_reward,
+                    f"{pfx}avg_teacher_incorrect_match_reward": avg_teacher_incorrect_match_reward,
                     f"{pfx}avg_ss_reward_mean": avg_ss_reward_mean,
                     f"{pfx}avg_ss_reward_min": avg_ss_reward_min,
                     f"{pfx}avg_ss_reward": avg_ss_reward,
@@ -1156,7 +1156,7 @@ class BaseTrainer:
                 }
             )
 
-            logger.info(f"{pfx} avg_teacher_reward: {avg_teacher_reward} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_match_reward {avg_match_reward}")
+            logger.info(f"{pfx} avg_teacher_reward: {avg_teacher_reward} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_teacher_match_reward {avg_teacher_match_reward}")
             logger.info(f"{pfx} avg_correct_ss_reward_mean: {avg_correct_ss_reward_mean} avg_incorrect_ss_reward_mean: {avg_incorrect_ss_reward_mean}")
             logger.info(f"{pfx} avg_correct_kl_mean: {avg_correct_kl_mean} avg_incorrect_kl_mean: {avg_incorrect_kl_mean} avg_correct_kl_max: {avg_correct_kl_max} avg_incorrect_kl_max: {avg_incorrect_kl_max}")
 
@@ -1188,7 +1188,7 @@ class BaseTrainer:
             kl_mean_list = []
             kl_sum_list = []
             kl_reward_list = []
-            match_reward_list = []
+            teacher_match_reward_list = []
             ss_reward_mean_list = []
             ss_reward_min_list = []
             ss_reward_list = []
@@ -1377,7 +1377,7 @@ class BaseTrainer:
                     kl_max_list.append(kl_max.item())
                     kl_mean_list.append(kl_mean.item())
                     kl_sum_list.append(kl_sum.item())
-                    match_reward_list.append(match_reward.item())
+                    teacher_match_reward_list.append(match_reward.item())
 
                     student_exp.info["loss_type"] = (
                         torch.tensor(compute_loss_type_hash(self.cfg.student_loss_type))
@@ -1560,7 +1560,7 @@ class BaseTrainer:
                 ss_reward_mean_list,
                 ss_reward_min_list,
                 ss_reward_list,
-                match_reward_list,
+                teacher_match_reward_list,
                 teacher_ratio_clipped_0_1_list,
                 student_ratio_clipped_0_1_list,
                 teacher_pass_at_n_dict,

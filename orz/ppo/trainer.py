@@ -593,7 +593,18 @@ class RayPPOTrainer(BaseTrainer):
                     combined_teacher_custom_rewards[i][-1] = avg_teacher_match
 
                 avg_student_match = np.mean(adv_initial_scores[start:end])
-                # avg_student_match = np.mean(adv_initial_scores[start:end]) if combined_initial_scores[i] else (1-np.mean(adv_initial_scores[start:end]))
+                if combined_initial_scores[i]:
+                    avg_student_match = avg_student_match
+                else:
+                    if self.cfg.avd_student_negative_strategy == "same":
+                        avg_student_match = avg_student_match
+                    elif self.cfg.avd_student_negative_strategy == "inverse":
+                        avg_student_match = 1 - avg_student_match
+                    elif self.cfg.avd_student_negative_strategy == "negate":
+                        avg_student_match = -avg_student_match
+                    elif self.cfg.avd_student_negative_strategy == "inv_neg":
+                        avg_student_match = -(1 -avg_student_match)
+
                 student_adv_match_reward_dict[adv_prompts[start]] = avg_student_match
 
                 if self.train_student:
@@ -728,7 +739,7 @@ class RayPPOTrainer(BaseTrainer):
             ss_reward_mean_list,
             ss_reward_min_list,
             ss_reward_list,
-            match_reward_list,
+            teacher_match_reward_list,
             teacher_ratio_clipped_0_1_list,
             student_ratio_clipped_0_1_list,
             teacher_pass_at_n_dict,
@@ -754,7 +765,7 @@ class RayPPOTrainer(BaseTrainer):
         ss_reward_mean_list = np.array(ss_reward_mean_list)
         ss_reward_min_list = np.array(ss_reward_min_list)
         ss_reward_list = np.array(ss_reward_list)
-        match_reward_list = np.array(match_reward_list)
+            teacher_match_reward_list = np.array(teacher_match_reward_list)
         teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
         student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
 
@@ -766,7 +777,7 @@ class RayPPOTrainer(BaseTrainer):
             kl_mean_list,
             kl_max_list,
             kl_sum_list,
-            match_reward_list,
+                teacher_match_reward_list,
             ss_reward_mean_list,
             ss_reward_min_list,
             ss_reward_list,

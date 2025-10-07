@@ -131,6 +131,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_loss_type: str = "ppo"
     adversarial_training: bool = True
+    avd_student_negative_strategy: str = "negate"  # options: negate | same | inverse | inv_neg
 
     # Prompt configuration
     student_prompt_continuation: bool = True
