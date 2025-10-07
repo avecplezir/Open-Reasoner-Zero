@@ -513,7 +513,6 @@ class RayPPOTrainer(BaseTrainer):
                 step=self.global_step,
             )
 
-            # if (not self.cfg.adversarial_training) or self.train_teacher:
             teacher_generated.extend([1] * len(all_student_prompts))
             combined_all_student_prompts.extend(all_student_prompts)
             combined_all_teacher_prompts.extend(all_teacher_prompts)
@@ -527,8 +526,10 @@ class RayPPOTrainer(BaseTrainer):
             combined_correct_formattings.extend(correct_formattings)
             combined_extras.extend(all_extras)
 
-            # Optional third-round adversarial student generation using teacher explanations
-            if self.cfg.adversarial_training:
+        # Optional verification round generation on adversarial teacher or helping student samples
+        if self.cfg.adversarial_training:
+
+            async with Timer("Generating verification responses"):
                 adv_prompts, adv_init_prompts, adv_extras = self._build_adversarial_student_prompts(
                     combined_outputs,
                     combined_all_teacher_prompts,
@@ -539,86 +540,91 @@ class RayPPOTrainer(BaseTrainer):
                     bos_token,
                 )
 
+            if self.cfg.separate_teacher_model:
                 # Sync student weights and generate adversarial student responses
                 async with Timer("Sync policy weights to VLLM engines for adversarial student gen"):
                     await self._major_sync_policy_weights_to_vllm()
 
-                adv_outputs_local: List[str] = await self._distributed_generate(
-                    adv_prompts,
-                    adv_extras,
-                    teacher=False,
-                    desc="Generate adversarial student sequences via vllm engines",
-                    **generate_kwargs,
-                )
+            adv_outputs_local: List[str] = await self._distributed_generate(
+                adv_prompts,
+                adv_extras,
+                teacher=False,
+                desc="Generate adversarial student sequences via vllm engines",
+                **generate_kwargs,
+            )
 
-                reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
-                (
-                    adv_prompts,
-                    adv_outputs,
-                    adv_custom_rewards,
-                    adv_teacher_custom_rewards,
-                    adv_answer_indices,
-                    adv_initial_scores,
-                    adv_initial_teacher_scores,
-                    adv_final_answers,
-                    adv_teacher_yes,
-                    adv_teacher_no,
-                    adv_correct_formattings,
-                    adv_pass_at_n_dict,
-                ) = await reward_fn(adv_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
+            reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
+            (
+                adv_prompts,
+                adv_outputs,
+                adv_custom_rewards,
+                adv_teacher_custom_rewards,
+                adv_answer_indices,
+                adv_initial_scores,
+                adv_initial_teacher_scores,
+                adv_final_answers,
+                adv_teacher_yes,
+                adv_teacher_no,
+                adv_correct_formattings,
+                adv_pass_at_n_dict,
+            ) = await reward_fn(adv_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
 
-                teacher_adv_match_rewards = []
-                # If we have generated adversarial responses for each teacher prompt, compute
-                # teacher rewards as the average agreement of adversarial final answers with
-                # the teacher-declared answer embedded in the prompts. This averages over
-                # multiple adversarial responses per teacher prompt instance.
-                # Each teacher prompt instance produced cfg.n_samples_per_prompt adversarial responses
-                assert len(adv_initial_teacher_scores) == len(combined_all_teacher_prompts) * self.cfg.n_samples_per_prompt, (
-                    "Expected adv_initial_teacher_scores to be teacher_instances * n_samples_per_prompt"
-                )
-                # Overwrite the teacher custom rewards block we appended earlier
-                match_reward_dict = {}
-                # logger.info(f"combined_teacher_custom_rewards {len(combined_teacher_custom_rewards)} \n {combined_teacher_custom_rewards}")
-                for i in range(len(combined_all_teacher_prompts)):
-                    start = i * self.cfg.n_samples_per_prompt
-                    end = (i + 1) * self.cfg.n_samples_per_prompt
-                    avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
+            teacher_adv_match_rewards = []
+            # If we have generated adversarial responses for each teacher prompt, compute
+            # teacher rewards as the average agreement of adversarial final answers with
+            # the teacher-declared answer embedded in the prompts. This averages over
+            # multiple adversarial responses per teacher prompt instance.
+            # Each teacher prompt instance produced cfg.n_samples_per_prompt adversarial responses
+            logger.info(f"Generated {len(adv_prompts)} verifier responses for {len(combined_all_teacher_prompts)} init prompts")
+            assert len(adv_initial_teacher_scores) == len(combined_all_teacher_prompts) * self.cfg.adv_n_samples_per_prompt, (
+                "Expected adv_initial_teacher_scores to be teacher_instances * n_samples_per_prompt"
+            )
+            # Overwrite the teacher custom rewards block we appended earlier
+            teacher_match_reward_dict = {}
+            student_adv_match_reward_dict = {}
+            # logger.info(f"combined_teacher_custom_rewards {len(combined_teacher_custom_rewards)} \n {combined_teacher_custom_rewards}")
+            for i in range(len(combined_all_teacher_prompts)):
+                start = i * self.cfg.adv_n_samples_per_prompt
+                end = (i + 1) * self.cfg.adv_n_samples_per_prompt
+                avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
+                teacher_match_reward_dict[adv_prompts[start]] = avg_teacher_match
+                teacher_adv_match_rewards.append(avg_teacher_match)
+                if self.train_teacher:
+                    combined_teacher_custom_rewards[i][-1] = avg_teacher_match
 
-                    match_reward_dict[adv_prompts[start]] = avg_teacher_match
-                    teacher_adv_match_rewards.append(avg_teacher_match)
-                    if self.train_teacher:
-                        combined_teacher_custom_rewards[i][-1] = avg_teacher_match
+                avg_student_match = np.mean(adv_initial_scores[start:end])
+                # avg_student_match = np.mean(adv_initial_scores[start:end]) if combined_initial_scores[i] else (1-np.mean(adv_initial_scores[start:end]))
+                student_adv_match_reward_dict[adv_prompts[start]] = avg_student_match
 
-                    avg_student_match = float(np.mean(adv_initial_scores[start:end]))
-                    coef = 1 if combined_initial_scores[i] else -1
-                    if self.train_student:
-                        combined_custom_rewards[i][-1] = coef * avg_student_match
+                if self.train_student:
+                    combined_custom_rewards[i][-1] = avg_student_match
 
-                self.log_adversarial_examples(
-                    adv_init_prompts=adv_init_prompts,
-                    adv_prompts=adv_prompts,
-                    adv_outputs=adv_outputs,
-                    adv_final_answers=adv_final_answers,
-                    adv_extras=adv_extras,
-                    adv_initial_scores=adv_initial_scores,
-                    adv_initial_teacher_scores=adv_initial_teacher_scores,
-                    match_reward_dict=match_reward_dict,
-                    step=self.global_step,
-                )
+            self.log_adversarial_examples(
+                adv_init_prompts=adv_init_prompts,
+                adv_prompts=adv_prompts,
+                adv_outputs=adv_outputs,
+                adv_final_answers=adv_final_answers,
+                adv_extras=adv_extras,
+                adv_initial_scores=adv_initial_scores,
+                adv_initial_teacher_scores=adv_initial_teacher_scores,
+                teacher_match_reward_dict=teacher_match_reward_dict,
+                student_match_reward_dict=student_adv_match_reward_dict,
+                step=self.global_step,
+            )
 
-                # Use adv_prompts as both student and teacher prompts for these appended samples
-                teacher_generated.extend([-1] * len(adv_prompts))
-                combined_all_student_prompts.extend(adv_prompts)
-                combined_all_teacher_prompts.extend(adv_prompts)
-                combined_outputs.extend(adv_outputs)
-                combined_custom_rewards.extend(adv_custom_rewards)
-                combined_teacher_custom_rewards.extend(adv_teacher_custom_rewards)
-                combined_answer_indices.extend(adv_answer_indices)
-                combined_initial_scores.extend(adv_initial_scores)
-                combined_initial_teacher_scores.extend(adv_initial_teacher_scores)
-                combined_final_answers.extend(adv_final_answers)
-                combined_correct_formattings.extend(adv_correct_formattings)
-                combined_extras.extend(adv_extras)
+            # Use adv_prompts as both student and teacher prompts for these appended samples
+            teacher_generated.extend([-1] * len(adv_prompts))
+            combined_all_student_prompts.extend(adv_prompts)
+            combined_all_teacher_prompts.extend(adv_prompts)
+            combined_outputs.extend(adv_outputs)
+            combined_custom_rewards.extend(adv_custom_rewards)
+            combined_teacher_custom_rewards.extend(adv_teacher_custom_rewards)
+            combined_answer_indices.extend(adv_answer_indices)
+            combined_initial_scores.extend(adv_initial_scores)
+            combined_initial_teacher_scores.extend(adv_initial_teacher_scores)
+            combined_final_answers.extend(adv_final_answers)
+            combined_correct_formattings.extend(adv_correct_formattings)
+            combined_extras.extend(adv_extras)
 
         # offload vllm engines when colocate all models
         if self.cfg.colocate_all:

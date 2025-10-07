@@ -202,6 +202,16 @@ class BasePPOExpConfig(BaseConfig):
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = False
 
+    # Verifier settings
+    # When True: the verifier is expected to output the full target answer.
+    #   - For student samples: target is the dataset-correct answer.
+    #   - For teacher samples: target is the dataset-correct answer if the
+    #     teacher answer is correct, otherwise the provided incorrect teacher answer.
+    # When False: the verifier is expected to output only yes/no indicating
+    # correctness of the underlying sample (student → student correctness,
+    # teacher → teacher correctness).
+    verifier_use_answer_target: bool = False
+
 
 
 class BasePPOExp(BaseExp):

@@ -174,17 +174,6 @@ class PPOExpConfig(BasePPOExpConfig):
     gpu_memory_utilization: float = 0.75 if use_grpo else 0.7 if not DEBUG_MODE else 0.5
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    # Verifier settings
-    # When True: the verifier is expected to output the full target answer.
-    #   - For student samples: target is the dataset-correct answer.
-    #   - For teacher samples: target is the dataset-correct answer if the
-    #     teacher answer is correct, otherwise the provided incorrect teacher answer.
-    # When False: the verifier is expected to output only yes/no indicating
-    # correctness of the underlying sample (student → student correctness,
-    # teacher → teacher correctness).
-    verifier_use_answer_target: bool = False
-
-
 
 class CustomRewardTrainer(RayPPOTrainer):
     @override

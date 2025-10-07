@@ -98,7 +98,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 3 if not DEBUG_MODE else 3
+    adv_n_samples_per_prompt: int = 4 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -116,11 +116,11 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 2  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
+    augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "only_wrong"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = False
