@@ -530,7 +530,7 @@ class RayPPOTrainer(BaseTrainer):
         if self.cfg.adversarial_training:
 
             async with Timer("Generating verification responses"):
-                adv_prompts, adv_init_prompts, adv_extras = self._build_adversarial_student_prompts(
+                adv_prompts, adv_init_prompts, adv_extras, adv_init_sources, adv_init_final_answers = self._build_adversarial_student_prompts(
                     combined_outputs,
                     combined_all_teacher_prompts,
                     combined_all_student_prompts,
@@ -538,6 +538,7 @@ class RayPPOTrainer(BaseTrainer):
                     combined_initial_scores,
                     teacher_generated,
                     bos_token,
+                    combined_final_answers,
                 )
 
             if self.cfg.separate_teacher_model:
@@ -612,6 +613,8 @@ class RayPPOTrainer(BaseTrainer):
 
             self.log_adversarial_examples(
                 adv_init_prompts=adv_init_prompts,
+                adv_init_sources=adv_init_sources,
+                adv_init_final_answers=adv_init_final_answers,
                 adv_prompts=adv_prompts,
                 adv_outputs=adv_outputs,
                 adv_final_answers=adv_final_answers,
@@ -765,7 +768,7 @@ class RayPPOTrainer(BaseTrainer):
         ss_reward_mean_list = np.array(ss_reward_mean_list)
         ss_reward_min_list = np.array(ss_reward_min_list)
         ss_reward_list = np.array(ss_reward_list)
-            teacher_match_reward_list = np.array(teacher_match_reward_list)
+        teacher_match_reward_list = np.array(teacher_match_reward_list)
         teacher_ratio_clipped_0_1_list = np.array(teacher_ratio_clipped_0_1_list)
         student_ratio_clipped_0_1_list = np.array(student_ratio_clipped_0_1_list)
 

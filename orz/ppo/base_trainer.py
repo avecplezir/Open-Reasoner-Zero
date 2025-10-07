@@ -324,6 +324,8 @@ class BaseTrainer:
         self,
         *,
         adv_init_prompts: List[str],
+        adv_init_sources: List[Any],
+        adv_init_final_answers: List[Any],
         adv_prompts: List[str],
         adv_outputs: List[Any],
         adv_final_answers: List[Any],
@@ -334,11 +336,14 @@ class BaseTrainer:
         student_match_reward_dict: Dict[str, Any],
         step: Optional[int] = None,
     ) -> None:
-        n = min(16, len(adv_prompts))
+        n = min(8, len(adv_prompts))
+        indices = [i for i in range(n)] + [-i for i in range(n)]
         table_data: List[List[Any]] = []
-        for i in range(n):
+        for i in indices:
             idx = -i
             table_data.append([
+                adv_init_sources[idx],
+                adv_init_final_answers[idx],
                 adv_init_prompts[idx],
                 adv_prompts[idx],
                 adv_outputs[idx],
@@ -352,6 +357,8 @@ class BaseTrainer:
         self._log_wandb_table(
             name="adversarial_examples",
             columns=[
+                "adv_init_source",
+                "adv_init_final_answer",
                 "adv_init_prompts",
                 "adv_prompt",
                 "adv_response",
@@ -615,6 +622,7 @@ class BaseTrainer:
         combined_initial_scores: List[bool],
         teacher_generated: List[bool],
         bos_token: str,
+        combined_final_answers: List[str],
     ) -> Tuple[List[str], List[str], List[dict]]:
         """
         Build adversarial continuation student prompts from teacher explanations.
@@ -631,6 +639,8 @@ class BaseTrainer:
         adv_prompts: List[str] = []
         adv_init_prompts: List[str] = []
         adv_extras: List[dict] = []
+        adv_init_sources = []
+        adv_init_final_answers = []
 
         for i, (t_prompt, s_prompt, extra, prev_r, tgenerated) in enumerate(
             zip(
@@ -655,8 +665,10 @@ class BaseTrainer:
                 adv_prompts.append(new_prompt)
                 adv_init_prompts.append(init_prompt)
                 adv_extras.append(new_extra)
+                adv_init_sources.append(tgenerated)
+                adv_init_final_answers.append(combined_final_answers[i])
 
-        return adv_prompts, adv_init_prompts, adv_extras
+        return adv_prompts, adv_init_prompts, adv_extras, adv_init_sources, adv_init_final_answers
 
     async def _distributed_generate(
         self,
