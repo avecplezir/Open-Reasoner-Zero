@@ -629,7 +629,7 @@ class BaseTrainer:
             else:
                 new_extra = extra
 
-            for _ in range(self.cfg.n_samples_per_prompt):
+            for _ in range(self.cfg.adv_n_samples_per_prompt):
                 adv_prompts.append(new_prompt)
                 adv_init_prompts.append(init_prompt)
                 adv_extras.append(new_extra)
