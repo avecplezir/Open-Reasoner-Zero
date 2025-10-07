@@ -121,7 +121,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
-    augment_strategy: str = "only_wrong"  # options: correct | yes_no | only_wrong | opposite
+    augment_strategy: str = "only_correct"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"

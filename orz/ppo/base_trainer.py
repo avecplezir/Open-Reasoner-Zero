@@ -462,11 +462,11 @@ class BaseTrainer:
         # each unique prompt exactly n_samples_per_prompt times.
         added_teacher_prompt_keys = set()
 
-        allowed_strategies = {"correct", "yes_no", "only_wrong", "opposite", "correct_incorrect"}
+        allowed_strategies = {"correct", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
         assert self.cfg.augment_strategy in allowed_strategies, (
             f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
         )
-        if self.cfg.augment_strategy in {"only_wrong", "opposite", "correct_incorrect"}:
+        if self.cfg.augment_strategy in {"only_wrong", "only_correct", "opposite", "correct_incorrect"}:
             assert (
                 self.cfg.generate_with_student
             ), f"{self.cfg.augment_strategy} strategy require student generation to be enabled"
@@ -531,6 +531,20 @@ class BaseTrainer:
                     include = False
                     representative_incorrect = False
                 is_correct = True
+
+            elif self.cfg.augment_strategy == "only_correct":
+                if teacher_score and student_score:
+                    representative_incorrect = False
+                    if teacher_yes[i]:
+                        teacher_answer = self.no_token()
+                    elif teacher_no[i]:
+                        teacher_answer = self.yes_token()
+                    else:
+                        assert False, f"final_answer {final_answer} must be yes or no"
+                else:
+                    include = False
+                    representative_incorrect = True
+                is_correct = False
 
             elif self.cfg.augment_strategy == "opposite":
                 if teacher_score:
