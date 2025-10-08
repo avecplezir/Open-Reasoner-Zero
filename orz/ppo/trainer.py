@@ -583,13 +583,13 @@ class RayPPOTrainer(BaseTrainer):
             # Overwrite the teacher custom rewards block we appended earlier
             teacher_match_reward_dict = {}
             student_adv_match_reward_dict = {}
-            # logger.info(f"combined_teacher_custom_rewards {len(combined_teacher_custom_rewards)} \n {combined_teacher_custom_rewards}")
             for i in range(len(combined_all_teacher_prompts)):
                 start = i * self.cfg.adv_n_samples_per_prompt
                 end = (i + 1) * self.cfg.adv_n_samples_per_prompt
                 avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
                 teacher_match_reward_dict[adv_prompts[start]] = avg_teacher_match
                 teacher_adv_match_rewards.append(avg_teacher_match)
+
                 if self.train_teacher:
                     combined_teacher_custom_rewards[i][-1] = avg_teacher_match
 
@@ -604,9 +604,12 @@ class RayPPOTrainer(BaseTrainer):
                     elif self.cfg.avd_student_negative_strategy == "negate":
                         avg_student_match = -avg_student_match
                     elif self.cfg.avd_student_negative_strategy == "inv_neg":
-                        avg_student_match = -(1 -avg_student_match)
+                        avg_student_match = -(1 - avg_student_match)
 
                 student_adv_match_reward_dict[adv_prompts[start]] = avg_student_match
+
+                if self.cfg.adv_student_add_initial:
+                    avg_student_match = (avg_student_match + combined_custom_rewards[i][-1])
 
                 if self.train_student:
                     combined_custom_rewards[i][-1] = avg_student_match

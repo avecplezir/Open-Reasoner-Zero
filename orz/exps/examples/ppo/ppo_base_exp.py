@@ -93,6 +93,8 @@ class BasePPOExpConfig(BaseConfig):
     max_len: Optional[int] = None
     max_norm: float = 1.0
     num_warmup_steps: int = 5
+    # LR scheduler type: "constant_with_warmup", "linear", "cosine", etc.
+    lr_scheduler_type: str = "constant_with_warmup"
 
     l2: float = 0.0
     eps_clip: float = 0.2

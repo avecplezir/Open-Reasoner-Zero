@@ -116,13 +116,13 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 3  # number student training rounds, -1 means no student training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "only_correct"  # options: correct | yes_no | only_wrong | opposite
-    avd_student_negative_strategy: str = "same" # options: negate | same | inverse | inv_neg
+    avd_student_negative_strategy: str = "negate" # options: negate | same | inverse | inv_neg
 
     separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"
@@ -140,9 +140,9 @@ class PPOExpConfig(BasePPOExpConfig):
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = False
 
-    reward_kl_coef: float = 0.
+    reward_kl_coef: float = 1.
     reward_match_coef: float = 1.
-    ss_reward_coef: float = 0.
+    ss_reward_coef: float = 0.1
 
 
 if __name__ == "__main__":

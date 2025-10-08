@@ -470,9 +470,17 @@ class PolicyRayActorBase(RayActor):
             actor, lr=self.args.actor_learning_rate, betas=strategy.args.adam_betas, weight_decay=self.args.l2
         )
 
-        actor_scheduler = get_scheduler(
-            "constant_with_warmup", actor_optim, num_warmup_steps=self.args.num_warmup_steps
-        )
+        if self.args.lr_scheduler_type == "constant_with_warmup":
+            actor_scheduler = get_scheduler(
+                "constant_with_warmup", actor_optim, num_warmup_steps=self.args.num_warmup_steps
+            )
+        elif self.args.lr_scheduler_type == "linear":
+            logger.info(f"Using linear lr scheduler with {self.args.total_num_training_steps} total steps")
+            actor_scheduler = get_scheduler(
+                "linear", actor_optim, num_warmup_steps=self.args.num_warmup_steps, num_training_steps=self.args.total_num_training_steps,
+            )
+        else:
+            raise NotImplementedError(f"Unsupported lr_scheduler_type: {self.args.lr_scheduler_type}")
 
         if self.args.gradient_checkpointing:
             actor.gradient_checkpointing_enable(
@@ -562,61 +570,6 @@ class PolicyRayActorBase(RayActor):
                 torch.cuda.synchronize()
         except Exception as e:
             logger.warning(f"Post-load ZeRO refresh failed (continuing): {e}")
-
-    def _reset_optimizer_state(self, reset_scheduler: bool = True):
-        """Reset optimizer moments/state (and optionally scheduler) for the policy.
-
-        This clears momentum/EMA buffers so the teacher's optimizer does not
-        carry stale state after copying student weights. It also resets the LR
-        scheduler if requested.
-        """
-        # Access the DeepSpeed engine
-        engine = self.model.model if isinstance(self.model, Actor) else self.model
-
-        # Clear optimizer state safely
-        optim = getattr(engine, "optimizer", None)
-
-        try:
-            if hasattr(optim, "refresh_fp32_params"):
-                optim.refresh_fp32_params()
-                logger.info("Refreshed fp32 params.")
-        except Exception:
-            pass
-
-        if optim is not None:
-            try:
-                optim.state.clear()
-                logger.info("Cleared optimizer state.")
-            except Exception:
-                # Fallback: reassign empty dict
-                try:
-                    optim.state = {}
-                    logger.info("Reset optimizer state to {}.")
-                except Exception:
-                    pass
-            try:
-                optim.zero_grad(set_to_none=True)
-                logger.info("zero_grad optimizer.")
-            except Exception:
-                pass
-
-        # Reset scheduler if requested
-        if reset_scheduler:
-            try:
-                new_scheduler = get_scheduler(
-                    "constant_with_warmup",
-                    optim,
-                    num_warmup_steps=self.args.num_warmup_steps,
-                )
-                # Attach to both engine and local reference if present
-                if hasattr(engine, "lr_scheduler"):
-                    engine.lr_scheduler = new_scheduler
-                if hasattr(engine, "_lr_scheduler"):
-                    engine._lr_scheduler = new_scheduler
-                self.scheduler = new_scheduler
-                logger.info("reset optimizer scheduler.")
-            except Exception:
-                pass
 
     def forward(
         self, sequences, num_actions, attention_mask, return_output=False, ring_attn_group=None, packed_seq_lens=None
