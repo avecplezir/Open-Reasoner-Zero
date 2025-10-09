@@ -92,6 +92,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/proofwriter_dev.json",
 
             "data/eval_data/booliq_dev.json",
+            "data/eval_data/booliq_train.json",
             # "data/eval_data/strategyqa_train.json",
             "data/eval_data/strategyqa_test.json",
             # "data/eval_data/math500.json",
@@ -107,14 +108,14 @@ class PPOExpConfig(BasePPOExpConfig):
 
     advantage_normalize: bool = False
 
-    num_episodes: int = 20
+    num_episodes: int = 40
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.0
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 5
+    eval_interval: int = 10
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later

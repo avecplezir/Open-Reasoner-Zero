@@ -91,16 +91,18 @@ def main() -> None:
     args.dev_out.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert train
-    train_records = load_jsonl(args.train_in)
-    train_out = [to_orz_train(r) for r in train_records]
-    with args.train_out.open("w", encoding="utf-8") as f:
-        json.dump(train_out, f, ensure_ascii=False)
+    if args.train_in.exists():
+        train_records = load_jsonl(args.train_in)
+        train_out = [to_orz_train(r) for r in train_records]
+        with args.train_out.open("w", encoding="utf-8") as f:
+            json.dump(train_out, f, ensure_ascii=False)
 
     # Convert dev -> eval format
-    dev_records = load_jsonl(args.dev_in)
-    dev_out = [to_orz_eval(r) for r in dev_records]
-    with args.dev_out.open("w", encoding="utf-8") as f:
-        json.dump(dev_out, f, ensure_ascii=False)
+    if args.dev_in.exists():
+        dev_records = load_jsonl(args.dev_in)
+        dev_out = [to_orz_eval(r) for r in dev_records]
+        with args.dev_out.open("w", encoding="utf-8") as f:
+            json.dump(dev_out, f, ensure_ascii=False)
 
 
 if __name__ == "__main__":
