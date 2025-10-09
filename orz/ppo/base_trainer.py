@@ -1887,7 +1887,10 @@ class BaseTrainer:
         max_steps = math.ceil(self.cfg.num_episodes * self.num_update_steps_per_episodes)
         self._max_steps = max_steps
         # Expose total training steps to strategy args so schedulers (e.g., linear) can decay to zero
-        setattr(self.strategy.args, "total_num_training_steps", max_steps)
+        logger.info(f"len(dataset) // self.cfg.train_batch_size: {len(dataset) // self.cfg.rollout_batch_size}")
+        self.total_num_training_steps = len(dataset) // self.cfg.rollout_batch_size * self.cfg.num_episodes
+        logger.info(f"Total number of training steps: {self.total_num_training_steps}")
+        setattr(self.strategy.args, "total_num_training_steps", self.total_num_training_steps)
 
         return prompts_dataloader
 
@@ -2121,6 +2124,9 @@ class BaseTrainer:
             self.writer.add_scalar(f"{metric_prefix}ppo_clip_count", status[0]["clip_ratio"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
             self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
+            # Log learning rate for policy (student unprefixed, teacher with 'teacher_')
+            if "actor_lr" in status[0]:
+                self.writer.add_scalar(f"{metric_prefix}actor_lr", status[0]["actor_lr"], global_steps)
             await model.async_run_method("empty_cache")
 
         if global_steps > self.cfg.freezing_actor_steps:
@@ -2134,6 +2140,9 @@ class BaseTrainer:
             metric_prefix = f"{prefix}_" if prefix else ""
             self.writer.add_scalar(f"{metric_prefix}critic_loss", critic_loss, global_steps)
             self.writer.add_scalar(f"{metric_prefix}critic_update_steps", status[0]["critic_update_steps"], global_steps)
+            # Log learning rate for critic (student unprefixed, teacher with 'teacher_')
+            if "critic_lr" in status[0]:
+                self.writer.add_scalar(f"{metric_prefix}critic_lr", status[0]["critic_lr"], global_steps)
         return status[0]
 
     async def custom_reward_fn(

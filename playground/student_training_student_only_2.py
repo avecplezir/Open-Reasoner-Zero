@@ -92,7 +92,7 @@ class PPOExpConfig(BasePPOExpConfig):
             # "data/eval_data/proofwriter_dev.json",
 
             "data/eval_data/booliq_dev.json",
-            "data/eval_data/strategyqa_train.json",
+            # "data/eval_data/strategyqa_train.json",
             "data/eval_data/strategyqa_test.json",
             # "data/eval_data/math500.json",
             # "data/eval_data/aime2024.json",
