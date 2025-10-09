@@ -67,7 +67,7 @@ class PPOExpConfig(BasePPOExpConfig):
     gpu_memory_utilization: float = 0.95
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
@@ -79,20 +79,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        # "data/ruletaker_train.json",
-        "data/proofwriter_train.json",
-
-        # "data/strategyqa.json",
-        # "data/orz_math_57k_collected.json"
+        "data/strategyqa.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            # "data/eval_data/ruletaker_dev.json",
-            "data/eval_data/proofwriter_dev.json",
-            # "data/eval_data/strategyqa_test.json",
-            # "data/eval_data/strategyqa_train.json",
-            # "data/eval_data/math500.json",
-            # "data/eval_data/aime2024.json",
+            "data/eval_data/strategyqa_test.json",
+            "data/eval_data/strategyqa_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -136,6 +128,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     general_propmt_yes_no: bool = True
     student_loss_type: str = "ppo"
+
+    lr_scheduler_type: str = "linear"
 
 
 if __name__ == "__main__":

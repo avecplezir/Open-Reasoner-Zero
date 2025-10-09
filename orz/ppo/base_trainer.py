@@ -1580,266 +1580,6 @@ class BaseTrainer:
             )
 
     @torch.no_grad()
-    async def inference_and_calculates(
-        self,
-        sequences_all: List[torch.Tensor],
-        attention_mask_all: List[torch.Tensor],
-        action_mask_all: Optional[List[torch.Tensor]],
-        num_actions_all: Optional[List[int]],
-        packed_seq_lens_all: Optional[List[int]],
-        custom_rewards_all: Optional[List[torch.Tensor]],
-        use_teacher_model: bool = False,
-    ):
-        num_policy_dp_groups = self.cfg.actor_num_nodes * self.cfg.actor_num_gpus_per_node
-        num_critic_dp_groups = self.cfg.critic_num_nodes * self.cfg.critic_num_gpus_per_node
-        num_ref_dp_groups = self.cfg.ref_num_nodes * self.cfg.ref_num_gpus_per_node
-        num_reward_dp_groups = self.cfg.reward_num_nodes * self.cfg.reward_num_gpus_per_node
-
-        async def micro_infer_model(num_dps, model_type, sequences, num_actions, attention_mask, packed_seq_lens):
-            dp_iterator = self._split_dp_batch(
-                (sequences, num_actions, attention_mask, packed_seq_lens),
-                num_dps,
-            )
-            dp_tasks = []
-            for dp_rank, (
-                micro_sequences,
-                micro_num_actions,
-                micro_attention_mask,
-                micro_packed_seq_lens,
-            ) in enumerate(dp_iterator):
-                model = self._get_dp_group_models(dp_rank, model_type)
-
-                async def forward_fn(
-                    local_model, fwd_sequences, fwd_num_actions, fwd_attention_mask, fwd_packed_seq_lens
-                ):
-                    return await local_model.forward.remote(
-                        sequences=fwd_sequences,
-                        num_actions=fwd_num_actions,
-                        attention_mask=fwd_attention_mask,
-                        packed_seq_lens=fwd_packed_seq_lens,
-                    )
-
-                dp_tasks.append(
-                    self._split_and_run_micro_batch(
-                        partial(forward_fn, model),
-                        (micro_sequences, micro_num_actions, micro_attention_mask, micro_packed_seq_lens),
-                        self.cfg.micro_forward_batch_size,
-                    )
-                )
-            results = await asyncio.gather(*dp_tasks)
-            results = sum(results, [])
-            return results
-
-        if action_mask_all is not None:
-            num_actions_all = action_mask_all.size(1)
-
-        # calculate critic values
-        if self.cfg.colocate_all and self.critic_model is not None:
-            await self.critic_model.backload_to_gpu()
-
-        if self.critic_model is not None:
-            value_ref = micro_infer_model(
-                num_critic_dp_groups,
-                "critic_model",
-                sequences_all,
-                num_actions_all,
-                attention_mask_all,
-                packed_seq_lens_all,
-            )
-            values = None
-            if self.cfg.colocate_all:
-                values = await value_ref
-                await self.critic_model.offload_to_cpu()
-
-        # calculate ref log probs
-        if self.cfg.use_ref_model:
-            base_action_log_probs_ref = micro_infer_model(
-                num_ref_dp_groups, "ref_model", sequences_all, num_actions_all, attention_mask_all, packed_seq_lens_all
-            )
-            base_log_probs = None
-
-        # handle colocate critic and reward model
-        if self.cfg.colocate_critic_reward and not self.cfg.colocate_all and self.critic_model is not None:
-            values = await value_ref
-            await self.critic_model.async_run_method("empty_cache")
-
-        # handle colocate actor and ref model
-        if (self.cfg.colocate_actor_ref or self.cfg.colocate_all) and self.cfg.use_ref_model:
-            base_log_probs = await base_action_log_probs_ref
-            await self.ref_model.async_run_method("empty_cache")
-
-        # calculate rewards
-        reward_refs = []
-        if self.cfg.use_orm_score and self.reward_model:
-            reward_refs.append(
-                micro_infer_model(
-                    num_reward_dp_groups,
-                    "reward_model",
-                    sequences_all,
-                    num_actions_all,
-                    attention_mask_all,
-                    packed_seq_lens_all,
-                )
-            )
-        if (self.cfg.colocate_critic_reward or self.cfg.colocate_all) and self.critic_model is not None and self.reward_model is not None:
-            reward_outputs = await reward_refs[-1]
-            if reward_outputs is not None:
-                reward_outputs = reward_outputs[: len(sequences_all)]  # drop padding
-            await self.reward_model.async_run_method("empty_cache")
-
-        # calculate student log probs
-        policy_log_probs_ref = micro_infer_model(
-            num_policy_dp_groups,
-            "teacher_model" if use_teacher_model else "policy_model",
-            sequences_all,
-            num_actions_all,
-            attention_mask_all,
-            packed_seq_lens_all,
-        )
-        action_log_probs = None
-        if self.cfg.colocate_all:
-            action_log_probs = await policy_log_probs_ref
-            await (self.teacher_model if use_teacher_model else self.policy_model).offload_to_cpu()
-
-        # handle colocate actor and ref model
-        if not (self.cfg.colocate_actor_ref or self.cfg.colocate_all) and self.cfg.use_ref_model:
-            base_log_probs = await base_action_log_probs_ref
-            await self.ref_model.async_run_method("empty_cache")
-
-        # when none colocated
-        if not self.cfg.colocate_all:
-            action_log_probs = await policy_log_probs_ref
-            await (self.teacher_model if use_teacher_model else self.policy_model).async_run_method("empty_cache")
-            if self.critic_model:
-                values = await value_ref
-                await self.critic_model.async_run_method("empty_cache")
-
-            # when none colocated and use orm score
-            if self.cfg.use_orm_score and self.reward_model:
-                reward_outputs = await reward_refs[-1]
-                reward_outputs = reward_outputs[: len(sequences_all)] if reward_outputs is not None else None
-                await self.reward_model.async_run_method("empty_cache")
-
-        values = values if self.critic_model is not None else None
-        base_log_probs = (
-            base_log_probs
-            if self.cfg.use_ref_model
-            else [torch.zeros_like(action_log_probs[i]) for i in range(len(action_log_probs))]
-        )
-        custom_rewards_all = (
-            custom_rewards_all
-            if custom_rewards_all is not None
-            else [torch.zeros_like(action_log_probs[i]) for i in range(len(action_log_probs))]
-        )
-
-        kl_rewards = []
-        rewards = []
-        if self.cfg.use_kl_loss:
-            for i in range(len(action_log_probs)):
-                kl = compute_approx_kl(
-                    action_log_probs[i],
-                    base_log_probs[i],
-                    action_mask=None,  # action_mask_all[i],
-                    use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
-                    use_abs_kl=self.cfg.use_abs_kl,
-                )
-                kl_rewards.append(-self.cfg.init_kl_coef * kl)
-
-        # support multiple reward models outputs
-        reward_outputs = reward_outputs if self.cfg.use_orm_score else None
-        if reward_outputs is not None:
-            reward_outputs = [r for r in reward_outputs]
-            if len(reward_outputs) > 1:
-                assert all(
-                    r.size(0) == len(sequences_all) for r in reward_outputs
-                ), "orm score outputs number must be equal to sequences_all"
-                r = torch.stack(reward_outputs)
-            else:
-                r = reward_outputs[0]
-        else:
-            r = None
-        r = torch.stack(rewards).sum(dim=0) if len(rewards) > 0 else r
-        r = r + torch.stack(custom_rewards_all).sum(dim=0) if len(custom_rewards_all) > 0 else r
-        r = r + torch.stack(kl_rewards).sum(dim=0) if len(kl_rewards) > 0 else r
-
-        # ensure tensors moved to cpu
-        sequences_all = [s.cpu() for s in sequences_all]
-        attention_mask_all = [m.cpu() for m in attention_mask_all]
-        action_log_probs = [p.cpu() for p in action_log_probs]
-        base_log_probs = [p.cpu() for p in base_log_probs]
-        if self.critic_model is not None:
-            values = [v.cpu() for v in values]
-        if r is not None:
-            r = r.cpu()
-        if custom_rewards_all is not None:
-            custom_rewards_all = [v.cpu() for v in custom_rewards_all]
-
-        if not self.cfg.colocate_all:
-            empty_cache_tasks = [
-                self.policy_model.async_run_method("empty_cache") if not use_teacher_model else self.teacher_model.async_run_method("empty_cache"),
-            ]
-            if self.cfg.use_ref_model:
-                empty_cache_tasks.append(self.ref_model.async_run_method("empty_cache"))
-            if self.critic_model:
-                empty_cache_tasks.append(self.critic_model.async_run_method("empty_cache"))
-            if self.reward_model:
-                empty_cache_tasks.extend([rm.async_run_method("empty_cache") for rm in self.reward_model])
-            await asyncio.gather(*empty_cache_tasks)
-
-        # 6. calculate kl divergence
-        experiences = []
-        if self.critic_model is not None:
-            values = values[: len(sequences_all)]
-        base_log_probs = base_log_probs[: len(sequences_all)]
-        action_log_probs = action_log_probs[: len(sequences_all)]
-        if r is not None:
-            r = r[: len(sequences_all)]
-        for i in range(len(action_log_probs)):
-            response_length = torch.Tensor(num_actions_all[i]).unsqueeze(0)
-            total_length = torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0)
-            kl = compute_approx_kl(
-                action_log_probs[i],
-                base_log_probs[i],
-                action_mask=None,
-                use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
-                use_abs_kl=self.cfg.use_abs_kl,
-            )
-            kl_max = torch.max(kl.abs(), dim=-1)[0]
-            kl_mean = masked_mean(kl, None, dim=-1)
-            if r is not None:
-                local_reward = r[i]
-            else:
-                local_reward = None
-            info = {
-                "kl": kl_mean,
-                "kl_max": kl_max,
-                "reward": local_reward,
-                "custom_rewards": custom_rewards_all[i] if custom_rewards_all is not None else None,
-                "response_length": response_length,
-                "total_length": total_length,
-                "num_actions": num_actions_all[i],
-            }
-
-            experiences.append(
-                Experience(
-                    sequences_all[i],
-                    action_log_probs[i],
-                    base_log_probs[i],
-                    values[i] if self.critic_model is not None else None,
-                    None,
-                    None,
-                    attention_mask_all[i],
-                    torch.ones_like(action_log_probs[i]) if self.cfg.teacher_explain_only else None,
-                    response_length,
-                    torch.Tensor(packed_seq_lens_all[i]).unsqueeze(0),
-                    info,
-                    kl,
-                    torch.ones_like(action_log_probs[i]) if self.cfg.student_loss_type == 'topr' or self.cfg.teacher_loss_type == 'topr' else None,
-                )
-            )
-        return experiences
-
-    @torch.no_grad()
     async def generate_vllm(
         self,
         gen_func: Callable[[List[str]], Awaitable[List[str | Any]]],
@@ -1860,231 +1600,6 @@ class BaseTrainer:
 
         responses, _ = await gen_func(prompts=prompts, sampling_params=sampling_params, use_tqdm=False)
         return responses
-
-    def build_dataloader(self, dataset):
-        prompts_dataloader = DataLoader(
-            dataset, batch_size=self.cfg.rollout_batch_size, shuffle=True, collate_fn=dataset.collate_fn, num_workers=8
-        )
-        self.num_update_steps_per_episodes = (
-            len(dataset) * self.cfg.n_samples_per_prompt // self.cfg.train_batch_size * self.cfg.max_epochs
-        )
-        max_steps = math.ceil(self.cfg.num_episodes * self.num_update_steps_per_episodes)
-        self._max_steps = max_steps
-        # Expose total training steps to strategy args so schedulers (e.g., linear) can decay to zero
-        setattr(self.strategy.args, "num_training_steps", max_steps)
-
-        return prompts_dataloader
-
-    async def build_models(self, PolicyRayActor, CriticRayActor, RefRayActor, RewardRayActor=None):
-        cfg = self.cfg
-        pg = None
-
-        if cfg.colocate_all:
-            assert (
-                cfg.actor_num_nodes == cfg.critic_num_nodes
-                and cfg.actor_num_gpus_per_node == cfg.critic_num_gpus_per_node
-                and cfg.actor_num_nodes == cfg.ref_num_nodes
-                and cfg.actor_num_gpus_per_node == cfg.ref_num_gpus_per_node
-                and cfg.actor_num_gpus_per_node == 1
-                and cfg.actor_num_nodes == cfg.vllm_num_engines
-            ), "num_nodes and num_gpus_per_node must be the same when colocate all models and each actor has only one gpu."
-            pg = self.colocate_pg
-
-            policy_model = PPORayActorGroup(
-                cfg.actor_num_nodes,
-                cfg.actor_num_gpus_per_node,
-                PolicyRayActor,
-                pg=pg,
-                num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
-            )
-            if cfg.separate_teacher_model:
-                teacher_model = PPORayActorGroup(
-                    cfg.actor_num_nodes,
-                    cfg.actor_num_gpus_per_node,
-                    PolicyRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=0.1,
-                )
-            if self.cfg.use_ref_model:
-                ref_model = PPORayActorGroup(
-                    cfg.ref_num_nodes,
-                    cfg.ref_num_gpus_per_node,
-                    RefRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
-                )
-            else:
-                ref_model = None
-
-            if cfg.critic_pretrain:
-                critic_model = PPORayActorGroup(
-                    cfg.critic_num_nodes,
-                    cfg.critic_num_gpus_per_node,
-                    CriticRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=0.2,
-                )
-            else:
-                critic_model = None
-
-            if RewardRayActor is not None and cfg.reward_pretrain:
-                reward_pretrains = cfg.reward_pretrain.split(",")
-                reward_models = []
-                for _ in reward_pretrains:
-                    reward_models.append(
-                        PPORayActorGroup(
-                            cfg.reward_num_nodes,
-                            cfg.reward_num_gpus_per_node,
-                            RewardRayActor,
-                            pg=pg,
-                            num_gpus_per_actor=0.2,
-                        )
-                    )
-            else:
-                reward_models = None
-
-        else:
-            if cfg.colocate_actor_ref:
-                assert (
-                    cfg.actor_num_nodes == cfg.ref_num_nodes
-                    and cfg.actor_num_gpus_per_node == cfg.ref_num_gpus_per_node
-                ), "num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
-
-                bundles = [
-                    {"GPU": cfg.actor_num_gpus_per_node, "CPU": cfg.actor_num_gpus_per_node}
-                    for _ in range(cfg.actor_num_nodes)
-                ]
-                pg = placement_group(bundles, strategy="PACK")
-                ray.get(pg.ready())
-                if cfg.separate_teacher_model:
-                    if cfg.critic_pretrain:
-                        num_gpus_per_actors = [0.25]
-                    else:
-                        num_gpus_per_actors = [0.4, 0.2]
-                else:
-                    if cfg.critic_pretrain:
-                        num_gpus_per_actors = [0.3]
-                    else:
-                        num_gpus_per_actors = [0.7, 0.25]
-
-            policy_model = PPORayActorGroup(
-                cfg.actor_num_nodes,
-                cfg.actor_num_gpus_per_node,
-                PolicyRayActor,
-                pg=pg,
-                num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
-            )
-            if self.cfg.separate_teacher_model:
-                teacher_model = PPORayActorGroup(
-                    cfg.actor_num_nodes,
-                    cfg.actor_num_gpus_per_node,
-                    PolicyRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
-                )
-            if cfg.use_ref_model:
-                ref_model = PPORayActorGroup(
-                    cfg.ref_num_nodes,
-                    cfg.ref_num_gpus_per_node,
-                    RefRayActor,
-                    pg=pg,
-                    num_gpus_per_actor=num_gpus_per_actors[-1] if pg else 1,
-                )
-            else:
-                ref_model = None
-
-            if cfg.critic_pretrain:
-                if self.cfg.colocate_critic_policy:
-                    critic_model = PPORayActorGroup(
-                        cfg.critic_num_nodes,
-                        cfg.critic_num_gpus_per_node,
-                        CriticRayActor,
-                        pg=pg,
-                        num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
-                    )
-                    reward_models = None
-                else:
-                    pg = None
-                    if cfg.colocate_critic_reward:
-                        assert (
-                            cfg.critic_num_nodes == cfg.reward_num_nodes
-                            and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
-                        ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
-
-                        bundles = [
-                            {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
-                            for _ in range(cfg.critic_num_nodes)
-                        ]
-                        pg = placement_group(bundles, strategy="PACK")
-                        ray.get(pg.ready())
-
-                    if cfg.critic_pretrain:
-                        critic_model = PPORayActorGroup(
-                            cfg.critic_num_nodes,
-                            cfg.critic_num_gpus_per_node,
-                            CriticRayActor,
-                            pg=pg,
-                            num_gpus_per_actor=0.75 if pg else 1,
-                        )
-                    else:
-                        critic_model = None
-
-                    if RewardRayActor is not None and cfg.reward_pretrain:
-                        reward_pretrains = cfg.reward_pretrain.split(",")
-                        reward_models = []
-                        for _ in reward_pretrains:
-                            reward_models.append(
-                                PPORayActorGroup(
-                                    cfg.reward_num_nodes,
-                                    cfg.reward_num_gpus_per_node,
-                                    RewardRayActor,
-                                    pg=pg,
-                                    num_gpus_per_actor=0.25 if pg else 1,
-                                )
-                            )
-                    else:
-                        reward_models = None
-                        critic_model = None
-
-        self.policy_model = policy_model
-        if cfg.separate_teacher_model:
-            self.teacher_model = teacher_model
-        self.critic_model = critic_model
-        self.ref_model = ref_model
-        self.reward_model = reward_models
-
-        logger.info("init policy/teacher/ref/critic/reward models done")
-
-    async def ppo_local_train_policy(self, model, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = "", backlog: bool = False):
-        if global_steps > self.cfg.freezing_actor_steps:
-            async with Timer(f"{prefix.capitalize()} policy model training"):
-                status = await model.async_ppo_train(global_steps, replay_buffers)
-            metric_prefix = f"{prefix}_" if prefix else ""
-            self.writer.add_scalar(f"{metric_prefix}ppo_clip_count", status[0]["clip_ratio"], global_steps)
-            self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
-            self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
-            await model.async_run_method("empty_cache")
-
-        if global_steps > self.cfg.freezing_actor_steps:
-            return status[0]
-
-    async def ppo_local_train_critic(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = ""):
-        async with Timer(f"{prefix.capitalize()} Critic model training"):
-            status = await self.critic_model.async_ppo_train(global_steps, replay_buffers)
-        if critic_loss := status[0].get("critic_loss", None):
-            metric_prefix = f"{prefix}_" if prefix else ""
-            self.writer.add_scalar(f"{metric_prefix}critic_loss", critic_loss, global_steps)
-            self.writer.add_scalar(f"{metric_prefix}critic_update_steps", status[0]["critic_update_steps"], global_steps)
-        return status[0]
-
-    async def custom_reward_fn(
-        self,
-        prompts: List[str],
-        outputs: List[Any],
-        extras: List[dict],
-        reward_model_fn: Callable[[List[str], List[str]], Awaitable[torch.Tensor]],
-    ) -> Tuple[List[str], List[str], List[torch.Tensor]]:
-        raise NotImplementedError("custom reward function is not supported yet")
 
     @torch.no_grad()
     async def _calc_advantages_and_returns(self, experience: Experience):
@@ -2121,32 +1636,6 @@ class BaseTrainer:
         self.writer.flush()
         return experience
 
-    def _convert_prompts_outputs_to_batch_tensors_packing(
-        self,
-        prompts,
-        outputs,
-        rewards,
-        max_length,
-        teacher_prompts=None,
-        return_real_length=False,
-        **kwargs,
-    ):
-        sequences_all = []
-        attention_mask_all = []
-        packed_seq_lens_all = []
-        num_actions_all = []
-        custom_rewards_all = []
-        teacher_sequences_all, teacher_attention_mask_all, teacher_packed_seq_lens_all, teacher_num_actions_all, teacher_custom_rewards_all = [], [], [], [], []
-
-        def _new_instance():
-            max_packed_seq_len = self.cfg.packing_max_len
-            out_sequence = torch.zeros((max_packed_seq_len, self.cfg.packing_max_len), dtype=torch.long)
-            out_attention_mask = torch.zeros((max_packed_seq_len, self.cfg.packing_max_len), dtype=torch.long)
-            out_num_actions = []
-            out_packed_seq_lens = []
-            rewards = []
-            teacher_rewards = []
-            out_teacher_sequence @torch.no_grad()
     async def inference_and_calculates(
             self,
             sequences_all: List[torch.Tensor],
@@ -2387,6 +1876,679 @@ class BaseTrainer:
 
         responses, _ = await gen_func(prompts=prompts, sampling_params=sampling_params, use_tqdm=False)
         return responses
+
+    def build_dataloader(self, dataset):
+        prompts_dataloader = DataLoader(
+            dataset, batch_size=self.cfg.rollout_batch_size, shuffle=True, collate_fn=dataset.collate_fn, num_workers=8
+        )
+        self.num_update_steps_per_episodes = (
+            len(dataset) * self.cfg.n_samples_per_prompt // self.cfg.train_batch_size * self.cfg.max_epochs
+        )
+        max_steps = math.ceil(self.cfg.num_episodes * self.num_update_steps_per_episodes)
+        self._max_steps = max_steps
+        # Expose total training steps to strategy args so schedulers (e.g., linear) can decay to zero
+        setattr(self.strategy.args, "total_num_training_steps", max_steps)
+
+        return prompts_dataloader
+
+    async def build_models(self, PolicyRayActor, CriticRayActor, RefRayActor, RewardRayActor=None):
+        cfg = self.cfg
+        pg = None
+
+        if cfg.colocate_all:
+            assert (
+                cfg.actor_num_nodes == cfg.critic_num_nodes
+                and cfg.actor_num_gpus_per_node == cfg.critic_num_gpus_per_node
+                and cfg.actor_num_nodes == cfg.ref_num_nodes
+                and cfg.actor_num_gpus_per_node == cfg.ref_num_gpus_per_node
+                and cfg.actor_num_gpus_per_node == 1
+                and cfg.actor_num_nodes == cfg.vllm_num_engines
+            ), "num_nodes and num_gpus_per_node must be the same when colocate all models and each actor has only one gpu."
+            pg = self.colocate_pg
+
+            policy_model = PPORayActorGroup(
+                cfg.actor_num_nodes,
+                cfg.actor_num_gpus_per_node,
+                PolicyRayActor,
+                pg=pg,
+                num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
+            )
+            # Create separate teacher model if flag is enabled
+            if cfg.separate_teacher_model:
+                teacher_model = PPORayActorGroup(
+                    cfg.actor_num_nodes,
+                    cfg.actor_num_gpus_per_node,
+                    PolicyRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.1,
+                )
+            if self.cfg.use_ref_model:
+                ref_model = PPORayActorGroup(
+                    cfg.ref_num_nodes,
+                    cfg.ref_num_gpus_per_node,
+                    RefRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.2 if not self.cfg.separate_teacher_model else 0.1,
+                )
+            else:
+                ref_model = None
+
+            if cfg.critic_pretrain:
+                critic_model = PPORayActorGroup(
+                    cfg.critic_num_nodes,
+                    cfg.critic_num_gpus_per_node,
+                    CriticRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=0.2,
+                )
+            else:
+                critic_model = None
+
+            # multiple reward models
+            if RewardRayActor is not None and cfg.reward_pretrain:
+                reward_pretrains = cfg.reward_pretrain.split(",")
+                reward_models = []
+                for _ in reward_pretrains:
+                    reward_models.append(
+                        PPORayActorGroup(
+                            cfg.reward_num_nodes,
+                            cfg.reward_num_gpus_per_node,
+                            RewardRayActor,
+                            pg=pg,
+                            num_gpus_per_actor=0.2,
+                        )
+                    )
+            else:
+                reward_models = None
+
+        else:
+            if cfg.colocate_actor_ref:
+                assert (
+                    cfg.actor_num_nodes == cfg.ref_num_nodes
+                    and cfg.actor_num_gpus_per_node == cfg.ref_num_gpus_per_node
+                ), "num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
+
+                bundles = [
+                    {"GPU": cfg.actor_num_gpus_per_node, "CPU": cfg.actor_num_gpus_per_node}
+                    for _ in range(cfg.actor_num_nodes)
+                ]
+                pg = placement_group(bundles, strategy="PACK")
+                ray.get(pg.ready())
+                if cfg.separate_teacher_model:
+                    if cfg.critic_pretrain:
+                        num_gpus_per_actors = [0.25]
+                    else:
+                        num_gpus_per_actors = [0.4, 0.2]
+                else:
+                    if cfg.critic_pretrain:
+                        num_gpus_per_actors = [0.3]
+                    else:
+                        num_gpus_per_actors = [0.7, 0.25]
+
+            policy_model = PPORayActorGroup(
+                cfg.actor_num_nodes,
+                cfg.actor_num_gpus_per_node,
+                PolicyRayActor,
+                pg=pg,
+                num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
+            )
+            if self.cfg.separate_teacher_model:
+                teacher_model = PPORayActorGroup(
+                    cfg.actor_num_nodes,
+                    cfg.actor_num_gpus_per_node,
+                    PolicyRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
+                )
+            if cfg.use_ref_model:
+                ref_model = PPORayActorGroup(
+                    cfg.ref_num_nodes,
+                    cfg.ref_num_gpus_per_node,
+                    RefRayActor,
+                    pg=pg,
+                    num_gpus_per_actor=num_gpus_per_actors[-1] if pg else 1,
+                )
+            else:
+                ref_model = None
+
+            # if colocated, create placement group for critic and reward model explicitly.
+            if cfg.critic_pretrain:
+                if self.cfg.colocate_critic_policy:
+                    critic_model = PPORayActorGroup(
+                        cfg.critic_num_nodes,
+                        cfg.critic_num_gpus_per_node,
+                        CriticRayActor,
+                        pg=pg,
+                        num_gpus_per_actor=num_gpus_per_actors[0] if pg else 1,
+                    )
+                    reward_models = None
+                else:
+                    pg = None
+                    if cfg.colocate_critic_reward:
+                        assert (
+                            cfg.critic_num_nodes == cfg.reward_num_nodes
+                            and cfg.critic_num_gpus_per_node == cfg.reward_num_gpus_per_node
+                        ), "num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
+
+                        bundles = [
+                            {"GPU": cfg.critic_num_gpus_per_node, "CPU": cfg.critic_num_gpus_per_node}
+                            for _ in range(cfg.critic_num_nodes)
+                        ]
+                        pg = placement_group(bundles, strategy="PACK")
+                        ray.get(pg.ready())
+
+                    if cfg.critic_pretrain:
+                        critic_model = PPORayActorGroup(
+                            cfg.critic_num_nodes,
+                            cfg.critic_num_gpus_per_node,
+                            CriticRayActor,
+                            pg=pg,
+                            num_gpus_per_actor=0.75 if pg else 1,
+                        )
+                    else:
+                        critic_model = None
+
+                    # multiple reward models
+                    if RewardRayActor is not None and cfg.reward_pretrain:
+                        reward_pretrains = cfg.reward_pretrain.split(",")
+                        reward_models = []
+                        for _ in reward_pretrains:
+                            reward_models.append(
+                                PPORayActorGroup(
+                                    cfg.reward_num_nodes,
+                                    cfg.reward_num_gpus_per_node,
+                                    RewardRayActor,
+                                    pg=pg,
+                                    num_gpus_per_actor=0.25 if pg else 1,
+                                )
+                            )
+                    else:
+                        reward_models = None
+            else:
+                reward_models = None
+                critic_model = None
+
+        if not cfg.colocate_all:
+            refs = []
+            if ref_model is not None:
+                refs.extend(ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            logger.info(f"init policy from {cfg.pretrain}")
+            refs.extend(policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            if cfg.separate_teacher_model:
+                logger.info(f"init teacher from {cfg.teacher_pretrain}")
+                refs.extend(teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))
+            if cfg.critic_pretrain:
+                refs.extend(critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))
+            if cfg.reward_pretrain:
+                for reward_model, reward_pretrain in zip(reward_models, reward_pretrains):
+                    refs.extend(reward_model.async_init_model_from_pretrained(self.strategy, reward_pretrain))
+            await asyncio.gather(*refs)
+            await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+            if cfg.separate_teacher_model:
+                await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+        else:
+            if ref_model is not None:
+                await asyncio.gather(*ref_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            await asyncio.gather(*policy_model.async_init_model_from_pretrained(self.strategy, cfg.pretrain))
+            await policy_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+            await policy_model.offload_to_cpu()
+            if cfg.separate_teacher_model:
+                await asyncio.gather(*teacher_model.async_init_model_from_pretrained(self.strategy, cfg.teacher_pretrain))
+                await teacher_model.async_run_method("_set_pad_token_id", self.tokenizer.pad_token_id)
+                await teacher_model.offload_to_cpu()
+            if cfg.critic_pretrain:
+                await asyncio.gather(*critic_model.async_init_model_from_pretrained(self.strategy, cfg.critic_pretrain))
+                await critic_model.offload_to_cpu()
+            if cfg.reward_pretrain:
+                for reward_model, reward_pretrain in zip(reward_models, reward_pretrains):
+                    await asyncio.gather(*reward_model.async_init_model_from_pretrained(self.strategy, reward_pretrain))
+
+        self.policy_model = policy_model
+        if cfg.separate_teacher_model:
+            self.teacher_model = teacher_model
+        self.critic_model = critic_model
+        self.ref_model = ref_model
+        self.reward_model = reward_models
+
+        logger.info("init policy/teacher/ref/critic/reward models done")
+
+    async def ppo_local_train_policy(self, model, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = "", backlog: bool = False):
+        if global_steps > self.cfg.freezing_actor_steps:
+            async with Timer(f"{prefix.capitalize()} policy model training"):
+                status = await model.async_ppo_train(global_steps, replay_buffers)
+            # Log with prefix for separate tracking
+            metric_prefix = f"{prefix}_" if prefix else ""
+            self.writer.add_scalar(f"{metric_prefix}ppo_clip_count", status[0]["clip_ratio"], global_steps)
+            self.writer.add_scalar(f"{metric_prefix}policy_update_steps", status[0]["policy_update_steps"], global_steps)
+            self.writer.add_scalar(f"{metric_prefix}policy_entropy", status[0]["entropy"], global_steps)
+            await model.async_run_method("empty_cache")
+
+        if global_steps > self.cfg.freezing_actor_steps:
+            return status[0]
+
+    async def ppo_local_train_critic(self, replay_buffers: List[NaiveReplayBuffer], global_steps: int, prefix: str = ""):
+        async with Timer(f"{prefix.capitalize()} Critic model training"):
+            status = await self.critic_model.async_ppo_train(global_steps, replay_buffers)
+        if critic_loss := status[0].get("critic_loss", None):
+            # Log with prefix for separate tracking
+            metric_prefix = f"{prefix}_" if prefix else ""
+            self.writer.add_scalar(f"{metric_prefix}critic_loss", critic_loss, global_steps)
+            self.writer.add_scalar(f"{metric_prefix}critic_update_steps", status[0]["critic_update_steps"], global_steps)
+        return status[0]
+
+    async def custom_reward_fn(
+        self,
+        prompts: List[str],
+        outputs: List[Any],
+        extras: List[dict],
+        reward_model_fn: Callable[[List[str], List[str]], Awaitable[torch.Tensor]],
+    ) -> Tuple[List[str], List[str], List[torch.Tensor]]:
+        raise NotImplementedError("custom reward function is not supported yet")
+
+    @torch.no_grad()
+    async def _calc_advantages_and_returns(self, experience: Experience):
+        num_actions = experience.info["num_actions"]
+        # ToDo: hardcoded action mask = None, need to fix it later
+        reward = await compute_reward.remote(
+            experience.info["reward"],
+            self.cfg.init_kl_coef,
+            experience.kl,
+            custom_rewards=experience.info["custom_rewards"],
+            action_mask=None, #experience.action_mask,
+            num_actions=num_actions,
+            reward_clip_range=self.cfg.reward_clip_range,
+            use_kl_loss=self.cfg.use_kl_loss,
+        )
+        experience.advantages, experience.returns = await get_advantages_and_returns.remote(
+            experience.values,
+            reward,
+            None, #experience.action_mask,
+            num_actions,
+            self.cfg.gamma,
+            self.cfg.lambd,
+            packing=True,
+        )
+
+        return_sums = reward.sum(dim=-1)
+        return_sums /= len(num_actions)
+        experience.info["return"] = return_sums
+        experience.kl = None
+
+        avg_rewards = return_sums.mean().item()
+        avg_kl = experience.info["kl"].mean().item()
+        avg_kl_max = experience.info["kl_max"].mean().item()
+
+        avg_response_length = experience.info["response_length"].mean().item()
+        if experience.info["reward"] is not None:
+            avg_orm_score = experience.info["reward"].mean().item()
+        else:
+            avg_orm_score = 0
+
+        if experience.info["custom_rewards"] is not None:
+
+            def func(x):
+                return [r.sum() for r in x]
+
+            avg_custom_rewards = torch.stack(func(experience.info["custom_rewards"])).mean().item()
+            # experience.info["avg_custom_rewards"] = torch.stack(func(experience.info["custom_rewards"]))
+        else:
+            avg_custom_rewards = 0
+
+        del experience.info["num_actions"]
+        del experience.info["custom_rewards"]
+        del experience.info["reward"]
+        del experience.info["kl_max"]
+        experience.to_device("cpu")
+
+        # for replay buffer split batch
+        num_packed_samples = len(num_actions)
+        return_sums /= num_packed_samples
+        experience.info["response_length"] = torch.Tensor(experience.info["response_length"]).mean().unsqueeze(0)
+        experience.info["total_length"] = torch.Tensor(experience.info["total_length"]).mean().unsqueeze(0)
+
+        metrics = {
+            "avg_rewards": avg_rewards,
+            "avg_kl": avg_kl,
+            "avg_kl_max": avg_kl_max,
+            "avg_response_length": avg_response_length,
+            "avg_orm_score": avg_orm_score,
+            "avg_custom_rewards": avg_custom_rewards,
+            "avg_advantages": experience.advantages.mean().item(),
+            "avg_advantages_abs": experience.advantages.abs().mean().item(),
+        }
+
+        return experience, metrics
+
+
+    def _convert_prompts_outputs_to_batch_tensors_packing(
+        self, prompts: List[str],
+        teacher_prompts: List[str],
+        outputs: List[str],
+        custom_rewards: Optional[List[torch.Tensor]],
+        teacher_custom_rewards: Optional[List[torch.Tensor]],
+        packing_max_len: int,
+
+    ):
+        ret_sequences = []
+        ret_attention_masks = []
+        ret_num_actions = []
+        ret_packed_seq_lens = []
+        if custom_rewards is not None:
+            ret_custom_rewards = []
+        else:
+            ret_custom_rewards = None
+
+        if teacher_custom_rewards is not None:
+            ret_teacher_custom_rewards = []
+        else:
+            ret_teacher_custom_rewards = None
+
+        # Teacher sequences (always provided)
+        ret_teacher_sequences = []
+        ret_teacher_attention_masks = []
+        ret_teacher_num_actions = []
+        ret_teacher_packed_seq_lens = []
+
+        assert (
+            len(prompts) == len(outputs) and len(prompts) > 0 and len(teacher_prompts) == len(prompts)
+        ), "prompts, outputs, and teacher_prompts must have the same length and length must be greater than 0"
+
+        def _new_instance():
+            out_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
+            out_attention_mask = torch.zeros((packing_max_len,), dtype=torch.int)
+            out_num_actions = []
+            out_packed_seq_lens = []
+            rewards = [] if custom_rewards else None
+            teacher_rewards = [] if teacher_custom_rewards else None
+            seq_offset = 0
+            seq_index = 0
+
+            # Teacher sequence variables
+            out_teacher_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
+            out_teacher_attention_mask = torch.zeros((packing_max_len,), dtype=torch.int)
+            out_teacher_num_actions = []
+            out_teacher_packed_seq_lens = []
+            teacher_seq_offset = 0
+
+            return (
+                out_sequence,
+                out_attention_mask,
+                out_num_actions,
+                out_packed_seq_lens,
+                rewards,
+                teacher_rewards,
+                seq_offset,
+                seq_index,
+                out_teacher_sequence,
+                out_teacher_attention_mask,
+                out_teacher_num_actions,
+                out_teacher_packed_seq_lens,
+                teacher_seq_offset,
+            )
+
+        def _accumulate(
+            out_sequence,
+            out_attention_mask,
+            out_num_actions,
+            out_packed_seq_lens,
+            rewards,
+            seq_offset,
+            seq_index,
+            sequence,
+            attention_mask,
+            num_action,
+            total_len,
+            custom_rewards,
+            i,
+            # Teacher sequence parameters
+            out_teacher_sequence,
+            out_teacher_attention_mask,
+            out_teacher_num_actions,
+            out_teacher_packed_seq_lens,
+            teacher_rewards,
+            teacher_seq_offset,
+            teacher_sequence,
+            teacher_attention_mask,
+            teacher_num_action,
+            teacher_total_len,
+            teacher_custom_rewards,
+        ):
+            # Student sequence
+            out_sequence[seq_offset : seq_offset + total_len] = torch.tensor(sequence)
+            out_attention_mask[seq_offset : seq_offset + total_len] = seq_index + 1
+            out_num_actions.append(num_action)
+            out_packed_seq_lens.append(total_len)
+            if custom_rewards:
+                rewards.append(custom_rewards[i])
+
+            # Teacher sequence
+            out_teacher_sequence[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = torch.tensor(teacher_sequence)
+            out_teacher_attention_mask[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = seq_index + 1
+            out_teacher_num_actions.append(teacher_num_action)
+            out_teacher_packed_seq_lens.append(teacher_total_len)
+            if teacher_custom_rewards:
+                teacher_rewards.append(teacher_custom_rewards[i])
+
+            return seq_offset + total_len, seq_index + 1, teacher_seq_offset + teacher_total_len
+
+        sequences = []
+        attention_masks = []
+        num_actions = []
+        total_lens = []
+
+        # Teacher sequences
+        teacher_sequences = []
+        teacher_attention_masks = []
+        teacher_num_actions = []
+        teacher_total_lens = []
+
+        input_token_ids = self._tokenize(prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
+        response_token_ids = self._tokenize(outputs, self.cfg.generate_max_len, padding=False)["input_ids"]
+        teacher_input_token_ids = self._tokenize(teacher_prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
+
+        for input_ids, response_ids, teacher_input_ids in zip(input_token_ids, response_token_ids, teacher_input_token_ids):
+            # Student sequences
+            sequences.append(input_ids + response_ids)
+            attention_masks.append(torch.ones((len(input_ids) + len(response_ids),), dtype=torch.float32))
+            num_actions.append(len(response_ids))
+            total_lens.append(len(input_ids) + len(response_ids))
+
+            # Teacher sequences (teacher prompt + same response)
+            teacher_sequences.append(teacher_input_ids + response_ids)
+            teacher_attention_masks.append(torch.ones((len(teacher_input_ids) + len(response_ids),), dtype=torch.float32))
+            teacher_num_actions.append(len(response_ids))
+            teacher_total_lens.append(len(teacher_input_ids) + len(response_ids))
+
+        # make packed sequences
+        (
+            out_sequence,
+            out_attention_mask,
+            out_num_actions,
+            out_packed_seq_lens,
+            rewards,
+            teacher_rewards,
+            seq_offset,
+            seq_index,
+            out_teacher_sequence,
+            out_teacher_attention_mask,
+            out_teacher_num_actions,
+            out_teacher_packed_seq_lens,
+            teacher_seq_offset,
+        ) = _new_instance()
+        for i, (sequence, attention_mask, num_action, total_len, teacher_sequence, teacher_attention_mask, teacher_num_action, teacher_total_len) in enumerate(
+            zip(sequences, attention_masks, num_actions, total_lens, teacher_sequences, teacher_attention_masks, teacher_num_actions, teacher_total_lens)
+        ):
+            if seq_offset + total_len < packing_max_len and teacher_seq_offset + teacher_total_len < packing_max_len:
+                seq_offset, seq_index, teacher_seq_offset = _accumulate(
+                    out_sequence,
+                    out_attention_mask,
+                    out_num_actions,
+                    out_packed_seq_lens,
+                    rewards,
+                    seq_offset,
+                    seq_index,
+                    sequence,
+                    attention_mask,
+                    num_action,
+                    total_len,
+                    custom_rewards,
+                    i,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_rewards,
+                    teacher_seq_offset,
+                    teacher_sequence,
+                    teacher_attention_mask,
+                    teacher_num_action,
+                    teacher_total_len,
+                    teacher_custom_rewards,
+                )
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) == packing_max_len:
+                seq_offset, seq_index, teacher_seq_offset = _accumulate(
+                    out_sequence,
+                    out_attention_mask,
+                    out_num_actions,
+                    out_packed_seq_lens,
+                    rewards,
+                    seq_offset,
+                    seq_index,
+                    sequence,
+                    attention_mask,
+                    num_action,
+                    total_len,
+                    custom_rewards,
+                    i,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_rewards,
+                    teacher_seq_offset,
+                    teacher_sequence,
+                    teacher_attention_mask,
+                    teacher_num_action,
+                    teacher_total_len,
+                    teacher_custom_rewards,
+                )
+                # Pack student sequences
+                valid_size = out_attention_mask.nonzero().size(0)
+                ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
+                ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
+                ret_num_actions.append(out_num_actions)
+                ret_packed_seq_lens.append(out_packed_seq_lens)
+                if custom_rewards:
+                    ret_custom_rewards.append(rewards)
+
+                # Pack teacher sequences
+                valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+                ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+                ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+                ret_teacher_num_actions.append(out_teacher_num_actions)
+                ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                if teacher_custom_rewards:
+                    ret_teacher_custom_rewards.append(teacher_rewards)
+
+                (
+                    out_sequence,
+                    out_attention_mask,
+                    out_num_actions,
+                    out_packed_seq_lens,
+                    rewards,
+                    teacher_rewards,
+                    seq_offset,
+                    seq_index,
+                    out_teacher_sequence,
+                    out_teacher_attention_mask,
+                    out_teacher_num_actions,
+                    out_teacher_packed_seq_lens,
+                    teacher_seq_offset,
+                ) = _new_instance()
+            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) > packing_max_len:
+                if seq_offset > 0:
+                    # Pack student sequences
+                    valid_size = out_attention_mask.nonzero().size(0)
+                    ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
+                    ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
+                    ret_num_actions.append(out_num_actions)
+                    ret_packed_seq_lens.append(out_packed_seq_lens)
+                    if custom_rewards:
+                        ret_custom_rewards.append(rewards)
+
+                    # Pack teacher sequences
+                    valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+                    ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+                    ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+                    ret_teacher_num_actions.append(out_teacher_num_actions)
+                    ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+                    if teacher_custom_rewards:
+                        ret_teacher_custom_rewards.append(teacher_rewards)
+                    (
+                        out_sequence,
+                        out_attention_mask,
+                        out_num_actions,
+                        out_packed_seq_lens,
+                        rewards,
+                        teacher_rewards,
+                        seq_offset,
+                        seq_index,
+                        out_teacher_sequence,
+                        out_teacher_attention_mask,
+                        out_teacher_num_actions,
+                        out_teacher_packed_seq_lens,
+                        teacher_seq_offset,
+                    ) = _new_instance()
+                    seq_offset, seq_index, teacher_seq_offset = _accumulate(
+                        out_sequence,
+                        out_attention_mask,
+                        out_num_actions,
+                        out_packed_seq_lens,
+                        rewards,
+                        seq_offset,
+                        seq_index,
+                        sequence,
+                        attention_mask,
+                        num_action,
+                        total_len,
+                        custom_rewards,
+                        i,
+                        out_teacher_sequence,
+                        out_teacher_attention_mask,
+                        out_teacher_num_actions,
+                        out_teacher_packed_seq_lens,
+                        teacher_rewards,
+                        teacher_seq_offset,
+                        teacher_sequence,
+                        teacher_attention_mask,
+                        teacher_num_action,
+                        teacher_total_len,
+                        teacher_custom_rewards
+                    )
+
+        if seq_offset > 0:
+            # Pack final student sequences
+            valid_size = out_attention_mask.nonzero().size(0)
+            ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
+            ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
+            ret_num_actions.append(out_num_actions)
+            ret_packed_seq_lens.append(out_packed_seq_lens)
+            if custom_rewards:
+                ret_custom_rewards.append(rewards)
+
+            # Pack final teacher sequences
+            valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
+            ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
+            ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
+            ret_teacher_num_actions.append(out_teacher_num_actions)
+            ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
+            if teacher_custom_rewards:
+                ret_teacher_custom_rewards.append(teacher_rewards)
+
+            assert (len(ret_custom_rewards) == len(ret_teacher_custom_rewards)), "Number of packed student and teacher rewards must be the same"
+
+        return (ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards,
+                ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens, ret_teacher_custom_rewards)
 
     def _get_dp_group_models(self, dp_rank: int, model_type: str = ""):
         model = getattr(self, model_type)
