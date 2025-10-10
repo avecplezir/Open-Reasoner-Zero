@@ -998,12 +998,14 @@ class BaseTrainer:
                 teacher_exp.info['custom_rewards'][i][-1] = teacher_score
 
                 # Student score
-                if self.cfg.student_loss_type == 'sft' or self.cfg.remove_student_reward_normalization:
+                if self.cfg.student_loss_type == 'sft':
+                    score = initial_scores[prompt_idx]
+                elif self.cfg.remove_student_reward_normalization:
                     if self.cfg.use_ss_reward_for_student:
                         signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
                         score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
                     else:
-                        score = initial_scores[prompt_idx]
+                        score = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
                 else:
                     if self.cfg.use_ss_reward_for_student:
                         prompt = all_student_prompts[prompt_idx]
@@ -1386,9 +1388,7 @@ class BaseTrainer:
                         student_norm_score = float(np.exp(ss_reward_list[-1]) * signed)
                     else:
                         student_norm_score = float(initial_scores[teacher_prompt_idx])
-                    pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(
-                        student_norm_score
-                    )
+                    pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(student_norm_score)
 
                     kl_reward_list.append(kl_reward.item())
                     kl_max_list.append(kl_max.item())

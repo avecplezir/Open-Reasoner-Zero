@@ -120,7 +120,8 @@ class PPOExpConfig(BasePPOExpConfig):
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.04
+    update_ref_every_epoch: bool = False
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
@@ -150,7 +151,6 @@ class PPOExpConfig(BasePPOExpConfig):
     student_loss_type: str = "ppo"
 
     use_ref_model: bool = True
-    kl_loss_coef: float = 0.01
 
 
 if __name__ == "__main__":
