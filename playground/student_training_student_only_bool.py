@@ -50,21 +50,29 @@ class PPOExpConfig(BasePPOExpConfig):
 
     actor_num = 2
     # resource related settings
-    ref_num_nodes: int = actor_num
-    ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = actor_num
-    actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = actor_num
-    critic_num_gpus_per_node: int = 1
-    reward_num_nodes: int = actor_num
-    reward_num_gpus_per_node: int = 1
     colocate_all: bool = False
+    ref_num_gpus_per_node: int = 1
+    actor_num_gpus_per_node: int = 1
+    critic_num_gpus_per_node: int = 1
+    reward_num_gpus_per_node: int = 1
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
-    gpu_memory_utilization: float = 0.95
+    if not colocate_all:
+        ref_num_nodes: int = actor_num
+        actor_num_nodes: int = actor_num
+        critic_num_nodes: int = actor_num
+        reward_num_nodes: int = actor_num
+        vllm_num_engines: int = total_num_nodes - actor_num
+        gpu_memory_utilization: float = 0.95
+    else:
+        ref_num_nodes: int = total_num_nodes
+        actor_num_nodes: int = total_num_nodes
+        critic_num_nodes: int = total_num_nodes
+        reward_num_nodes: int = total_num_nodes
+        vllm_num_engines: int = total_num_nodes
+        gpu_memory_utilization: float = 0.3
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
@@ -103,7 +111,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # ppo related settings
     train_batch_size: int = 256 if not DEBUG_MODE else 32
-    num_warmup_steps: int = 5
+    num_warmup_steps: int = 20
     prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
@@ -140,6 +148,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     general_propmt_yes_no: bool = True
     student_loss_type: str = "ppo"
+
+    use_ref_model: bool = True
+    kl_loss_coef: float = 0.01
 
 
 if __name__ == "__main__":

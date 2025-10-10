@@ -73,7 +73,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-st-iter50-t-iter50-topr-temp-10-{randint}'
+    e_name = f'iter50-t-iter50-topr-1-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -114,7 +114,7 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    student_training_rounds: int = 4  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     enable_eval: bool = True if not DEBUG_MODE else True
@@ -130,14 +130,16 @@ class PPOExpConfig(BasePPOExpConfig):
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
-    filter_for_correct_formatting_student: bool = True
-    filter_for_correct_formatting_teacher: bool = True
+    filter_for_correct_formatting_student: bool = False
+    filter_for_correct_formatting_teacher: bool = False
 
     # Prompt configuration
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
+
+    topr_type: int = 2
 
 
 if __name__ == "__main__":

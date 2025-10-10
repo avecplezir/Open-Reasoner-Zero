@@ -323,6 +323,11 @@ class RayPPOTrainer(BaseTrainer):
 
         combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers = [], [], [], [], [], [], [], [], []
         teacher_generated, combined_correct_formattings, combined_extras = [], [], []
+        # Keep a per-prompt FIFO list of student responses and final answers to use letter for correct_incorrect augmentation if used
+        student_responses_by_prompt = defaultdict(list)
+        student_final_answers_by_prompt = defaultdict(list)
+        student_response_ptr = defaultdict(int)
+
         # Prepare BOS token for logging
         if self.tokenizer.bos_token_id is None:
             bos_token = ""
@@ -380,10 +385,6 @@ class RayPPOTrainer(BaseTrainer):
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None, None
 
-            # Keep a per-prompt FIFO list of student responses and final answers to use letter for correct_incorrect augmentation if used
-            student_responses_by_prompt = defaultdict(list)
-            student_final_answers_by_prompt = defaultdict(list)
-            student_response_ptr = defaultdict(int)
             for sp, sresp, sfinal in zip(all_student_prompts, outputs, final_answers):
                 student_responses_by_prompt[sp].append(sresp)
                 student_final_answers_by_prompt[sp].append(sfinal)
@@ -444,6 +445,9 @@ class RayPPOTrainer(BaseTrainer):
                 combined_extras=combined_extras,
                 teacher_generated=teacher_generated,
             )
+        else:
+            final_answers = initial_scores = initial_teacher_scores = teacher_yes = teacher_no = []
+
 
         generate_with_teacher = not (self.train_teacher and self.cfg.train_teacher_on_student_data_only)
         if generate_with_teacher:

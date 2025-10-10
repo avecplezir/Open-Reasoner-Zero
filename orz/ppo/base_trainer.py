@@ -1126,12 +1126,12 @@ class BaseTrainer:
             )
             student_correct_ratio_clipped_0_1 = (
                 np.array([])
-                if np.all(ic) or not self.cfg.teacher_loss_type == 'topr'
+                if np.all(ic) or not self.cfg.student_loss_type == 'topr'
                 else np.array(student_ratio_clipped_0_1_list[cc])
             )
             student_incorrect_ratio_clipped_0_1 = (
                 np.array([])
-                if np.all(cc) or not self.cfg.teacher_loss_type == 'topr'
+                if np.all(cc) or not self.cfg.student_loss_type == 'topr'
                 else np.array(student_ratio_clipped_0_1_list[ic])
             )
 
@@ -1165,6 +1165,11 @@ class BaseTrainer:
                     f"{pfx}avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1).item(),
                     f"{pfx}avg_student_correct_alpha": 0 if len(student_correct_ratio_clipped_0_1) == 0 else np.mean(student_correct_ratio_clipped_0_1).item(),
                     f"{pfx}avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1) == 0 else np.mean(student_incorrect_ratio_clipped_0_1).item(),
+                    # New student incorrect alpha diagnostics
+                    f"{pfx}max_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1) == 0 else np.max(student_incorrect_ratio_clipped_0_1).item(),
+                    f"{pfx}ratio_student_incorrect_alpha_gt_0.1": 0
+                    if len(student_incorrect_ratio_clipped_0_1) == 0
+                    else float(np.mean(student_incorrect_ratio_clipped_0_1 > 0.1)),
                 }
             )
 
@@ -1435,9 +1440,22 @@ class BaseTrainer:
                                 student_exp.ratio_clipped_0_1[
                                     :, start_kl:end_full
                                 ] = student_ratio_clipped_0_1_scalar
+                                # logger.info(f'student_ratio_clipped_0_1_scalar {student_ratio_clipped_0_1_scalar}')
                                 student_ratio_clipped_0_1_scalar = (
                                     student_ratio_clipped_0_1_scalar.mean()
                                 )
+                            elif self.cfg.topr_type == 2:
+                                diff = (
+                                    student_exp.action_log_probs[:, start_kl:end_full]
+                                    - teacher_exp.action_log_probs[:, start_kl:end_full]
+                                )
+                                suffix = torch.flip(torch.flip(diff, dims=[-1]).cumsum(dim=-1), dims=[-1])
+                                student_ratio_vec = torch.exp(
+                                    self.cfg.topr_temperature * suffix.clamp(max=0.0)
+                                )
+                                student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_vec
+                                student_ratio_clipped_0_1_scalar = student_ratio_vec.mean()
+                                # logger.info(f'2 student_ratio_clipped_0_1_scalar {student_ratio_clipped_0_1_scalar}')
                         else:
                             student_ratio_clipped_0_1_scalar = torch.tensor(1)
                         student_ratio_clipped_0_1_list.append(
@@ -1482,6 +1500,18 @@ class BaseTrainer:
                                     teacher_ratio_clipped_0_1_scalar = (
                                         teacher_ratio_clipped_0_1_scalar.mean()
                                     )
+                                elif self.cfg.topr_type == 2:
+                                    diff = (
+                                        teacher_exp.action_log_probs[:, start_kl:end_full]
+                                        - student_exp.action_log_probs[:, start_kl:end_full]
+                                    )
+                                    suffix = torch.flip(torch.flip(diff, dims=[-1]).cumsum(dim=-1), dims=[-1])
+                                    teacher_ratio_vec = torch.exp(
+                                        self.cfg.topr_temperature * suffix.clamp(max=0.0)
+                                    )
+                                    teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_vec
+                                    teacher_ratio_clipped_0_1_scalar = teacher_ratio_vec.mean()
+
                         teacher_ratio_clipped_0_1_list.append(
                             teacher_ratio_clipped_0_1_scalar.item()
                         )

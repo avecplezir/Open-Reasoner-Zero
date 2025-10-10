@@ -757,7 +757,7 @@ class PolicyRayActorBase(RayActor):
         else:
             kl_loss = 0
 
-        loss = actor_loss + kl_loss * self.args.kl_loss_coef
+        loss = actor_loss + kl_loss * self.args.kl_loss_coef - self.args.entropy_coef * entropy
         loss = loss / accumulation_steps
         self.strategy.backward(loss, self.model, self.optimizer)
 

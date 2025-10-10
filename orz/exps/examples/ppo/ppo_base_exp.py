@@ -124,6 +124,7 @@ class BasePPOExpConfig(BaseConfig):
     use_abs_kl: bool = False
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.0
+    entropy_coef: float = 0.0
     adam_betas: tuple = (0.9, 0.95)
     reward_clip_range: tuple = (-10, 10)
 
@@ -135,7 +136,7 @@ class BasePPOExpConfig(BaseConfig):
 
     enable_eval: bool = False
     eval_interval: int = -1
-    update_ref_every_epoch: bool = False
+    update_ref_every_epoch: bool = True
 
     boxed_pattern: bool = False
 
@@ -197,7 +198,7 @@ class BasePPOExpConfig(BaseConfig):
 
     student_loss_type: str = "topr"
     teacher_loss_type: str = "ppo"
-    topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif
+    topr_type: int = 0 # 0: logprob dif on a full sequence, 1: elementwise logprob dif, 3: suffix-sum dif per token (future tokens only)
     topr_temperature: float = 1.0
 
     # weight_by_ss_reward: bool = False
