@@ -744,6 +744,7 @@ class RayPPOTrainer(BaseTrainer):
             final_reward_list,
             kl_mean_list,
             kl_reward_list,
+            window_kl_reward_list,
             kl_sum_list,
             kl_max_list,
             ss_reward_mean_list,
@@ -770,6 +771,7 @@ class RayPPOTrainer(BaseTrainer):
         final_reward_list = np.array(final_reward_list)
         kl_mean_list = np.array(kl_mean_list)
         kl_reward_list = np.array(kl_reward_list)
+        window_kl_reward_list = np.array(window_kl_reward_list)
         kl_sum_list = np.array(kl_sum_list)
         kl_max_list = np.array(kl_max_list)
         ss_reward_mean_list = np.array(ss_reward_mean_list)
@@ -784,10 +786,11 @@ class RayPPOTrainer(BaseTrainer):
             initial_scores,
             final_reward_list,
             kl_reward_list,
+            window_kl_reward_list,
             kl_mean_list,
             kl_max_list,
             kl_sum_list,
-                teacher_match_reward_list,
+            teacher_match_reward_list,
             ss_reward_mean_list,
             ss_reward_min_list,
             ss_reward_list,

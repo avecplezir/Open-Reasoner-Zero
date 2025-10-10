@@ -9,6 +9,7 @@ from typing import List, Tuple, Dict, Any, Optional, Callable, Awaitable
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import ray
 from loguru import logger
 import wandb
@@ -1050,6 +1051,7 @@ class BaseTrainer:
         initial_scores: np.ndarray,
         final_reward_list: np.ndarray,
         kl_reward_list: np.ndarray,
+        window_kl_reward_list: np.ndarray,
         kl_mean_list: np.ndarray,
         kl_max_list: np.ndarray,
         kl_sum_list: np.ndarray,
@@ -1086,6 +1088,7 @@ class BaseTrainer:
             avg_student_reward = initial_scores[mask].mean()
             avg_teacher_reward = final_reward_list[mask].mean()
             avg_student_teacher_kl = kl_reward_list[mask].mean()
+            avg_window_kl = window_kl_reward_list[mask].mean() if len(window_kl_reward_list) > 0 else 0
             avg_student_teacher_kl_mean = kl_mean_list[mask].mean()
             avg_student_teacher_kl_max = kl_max_list[mask].mean()
             avg_teacher_match_reward = teacher_match_reward_list[mask].mean()
@@ -1145,6 +1148,7 @@ class BaseTrainer:
                     f"{pfx}avg_student_reward": avg_student_reward,
                     f"{pfx}avg_teacher_reward": avg_teacher_reward,
                     f"{pfx}avg_student_teacher_kl": avg_student_teacher_kl,
+                    f"{pfx}avg_window_kl": avg_window_kl,
                     f"{pfx}avg_student_teacher_kl_mean": avg_student_teacher_kl_mean,
                     f"{pfx}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
                     f"{pfx}avg_teacher_match_reward": avg_teacher_match_reward,
@@ -1195,7 +1199,7 @@ class BaseTrainer:
         all_teacher_prompts,
         all_student_prompts,
         initial_scores,
-    ):
+        ):
         """
         Calculate teacher reward, replace student/teacher log probs with the correct ones,
         and compute TOPR ratios. Returns per-sample lists and pass@N dicts for logging/normalization.
@@ -1208,6 +1212,7 @@ class BaseTrainer:
             kl_mean_list = []
             kl_sum_list = []
             kl_reward_list = []
+            window_kl_reward_list = []
             teacher_match_reward_list = []
             ss_reward_mean_list = []
             ss_reward_min_list = []
@@ -1332,7 +1337,7 @@ class BaseTrainer:
                     ss_reward_list.append(ss_reward)
 
                     if teacher_generated[teacher_prompt_idx] != 1:
-                        kl_reward = kl_mean = kl_sum = kl_max = torch.tensor(
+                        kl_reward = kl_mean = kl_sum = kl_max = window_kl_reward = torch.tensor(
                             0.0, device=kl_div_all.device
                         )
                     else:
@@ -1344,6 +1349,7 @@ class BaseTrainer:
                             kl_mean = torch.tensor(0.0, device=kl_div_all.device)
                             kl_sum = torch.tensor(0.0, device=kl_div_all.device)
                             kl_reward = torch.tensor(0.0, device=kl_div_all.device)
+                            window_kl_reward = torch.tensor(0.0, device=kl_div_all.device)
                         else:
                             kl_episode = kl_div_all[:, start_kl:end_kl].clone()
                             kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
@@ -1363,6 +1369,23 @@ class BaseTrainer:
                                 kl_reward, min=-self.cfg.kl_reward_clamp
                             )
 
+                            # Optional: rolling-window KL loss (max over mean of windows of size N)
+                            window_kl_reward = torch.tensor(0.0, device=kl_div_all.device)
+                            if self.cfg.kl_loss_window_size > 0 and  self.cfg.kl_window_loss_coef != 0:
+                                # Compute window means along the sequence axis
+                                # kl_episode shape: [B(=1), L]
+                                if kl_episode.size(-1) >= self.cfg.kl_window_loss_coef:
+                                    pooled = F.avg_pool1d(
+                                        kl_episode.unsqueeze(1), kernel_size=self.cfg.kl_window_loss_coef, stride=1
+                                    ).squeeze(1)  # [1, L-win_sz+1]
+                                    max_mean = torch.max(pooled, dim=-1)[0]  # [1]
+                                    window_kl_reward = -max_mean
+                                    window_kl_reward = torch.clamp(
+                                        window_kl_reward, min=-self.cfg.kl_reward_clamp
+                                    )
+
+                    window_kl_reward_list.append(window_kl_reward.item())
+
                     match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
                     match_reward = teacher_exp.info["custom_rewards"][i][-1]
                     assert (
@@ -1373,6 +1396,7 @@ class BaseTrainer:
                             self.cfg.topr_reward_coef * student_ratio_clipped_0_1_scalar
                             + self.cfg.ss_reward_coef * ss_reward_list[-1]
                             + self.cfg.reward_kl_coef * kl_reward
+                            + self.cfg.kl_window_loss_coef * window_kl_reward
                             + self.cfg.reward_match_coef * match_reward
                         )
                         final_reward_list.append(final_teacher_reward.item())
@@ -1598,6 +1622,7 @@ class BaseTrainer:
                 final_reward_list,
                 kl_mean_list,
                 kl_reward_list,
+                window_kl_reward_list,
                 kl_sum_list,
                 kl_max_list,
                 ss_reward_mean_list,

@@ -126,6 +126,10 @@ class BasePPOExpConfig(BaseConfig):
     use_abs_kl: bool = False
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.0
+    # KL loss: when > 0, compute max-over-mean of all rolling windows of this size
+    kl_loss_window_size: int = 0
+    # Coefficient for the rolling-window KL loss term (added to regular KL)
+    kl_window_loss_coef: float = 0.0
     entropy_coef: float = 0.0
     adam_betas: tuple = (0.9, 0.95)
     reward_clip_range: tuple = (-10, 10)
