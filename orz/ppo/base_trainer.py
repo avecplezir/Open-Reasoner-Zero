@@ -15,6 +15,7 @@ import wandb
 from omegaconf.dictconfig import DictConfig
 from orz.ppo.utils import ORZDeepspeedStrategy as DeepspeedStrategy
 from torch.utils.data import DataLoader
+from orz.ppo.dataset import BalancedYesNoBatchSampler
 from torch.utils.tensorboard import SummaryWriter
 from ray.util.placement_group import PlacementGroup, placement_group
 
@@ -1908,9 +1909,21 @@ class BaseTrainer:
         return responses
 
     def build_dataloader(self, dataset):
-        prompts_dataloader = DataLoader(
-            dataset, batch_size=self.cfg.rollout_batch_size, shuffle=True, collate_fn=dataset.collate_fn, num_workers=8
-        )
+        # Build dataloader, optionally using a balanced yes/no batch sampler
+        if self.cfg.balance_yes_no_batches:
+            batch_sampler = BalancedYesNoBatchSampler(
+                dataset,
+                batch_size=self.cfg.rollout_batch_size,
+                drop_last=False,
+                seed=getattr(self.cfg, "seed", 42),
+            )
+            prompts_dataloader = DataLoader(
+                dataset, batch_sampler=batch_sampler, collate_fn=dataset.collate_fn, num_workers=8
+            )
+        else:
+            prompts_dataloader = DataLoader(
+                dataset, batch_size=self.cfg.rollout_batch_size, shuffle=True, collate_fn=dataset.collate_fn, num_workers=8
+            )
         self.num_update_steps_per_episodes = (
             len(dataset) * self.cfg.n_samples_per_prompt // self.cfg.train_batch_size * self.cfg.max_epochs
         )
