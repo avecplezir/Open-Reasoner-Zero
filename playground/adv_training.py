@@ -116,12 +116,14 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 100  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
-    augment_strategy: str = "only_wrong"  # options: correct | yes_no | only_wrong | opposite
+    generate_with_student: bool = False
+    augment_student_generation_with_teacher: bool = True
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
+    adversarial_training: bool = True
+    verifier_use_mixed_chains: bool = True
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"
@@ -130,7 +132,6 @@ class PPOExpConfig(BasePPOExpConfig):
     skip_student_first_n_rounds: int = 0
 
     student_loss_type: str = "ppo"
-    adversarial_training: bool = True
     avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
     adv_student_add_initial: bool = True
 

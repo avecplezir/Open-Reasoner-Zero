@@ -198,6 +198,7 @@ class BasePPOExpConfig(BaseConfig):
     teacher_add_role_prefix: bool = False
 
     adversarial_training: bool = False
+    verifier_use_mixed_chains: bool = False
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = 0

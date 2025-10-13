@@ -88,11 +88,12 @@ class PPOExpConfig(BasePPOExpConfig):
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/boolq.json",
+        "data/strategyqa.json",
+
         # "data/ruletaker_train.json",
         # "data/proofwriter_train.json",
+        # "data/orz_math_57k_collected.json",
 
-        # "data/strategyqa.json",
-        # "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
@@ -101,8 +102,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
             "data/eval_data/booliq_dev.json",
             "data/eval_data/booliq_train.json",
-            # "data/eval_data/strategyqa_train.json",
+            "data/eval_data/strategyqa_train.json",
             "data/eval_data/strategyqa_test.json",
+
             # "data/eval_data/math500.json",
             # "data/eval_data/aime2024.json",
         ]
@@ -120,7 +122,7 @@ class PPOExpConfig(BasePPOExpConfig):
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.04
+    kl_loss_coef: float = 0.0
     update_ref_every_epoch: bool = False
 
     enable_eval: bool = True if not DEBUG_MODE else True
@@ -150,7 +152,7 @@ class PPOExpConfig(BasePPOExpConfig):
     general_propmt_yes_no: bool = True
     student_loss_type: str = "ppo"
 
-    use_ref_model: bool = True
+    balance_yes_no_batches: bool = True
 
 
 if __name__ == "__main__":

@@ -534,12 +534,11 @@ class RayPPOTrainer(BaseTrainer):
         if self.cfg.adversarial_training:
 
             async with Timer("Generating verification responses"):
-                adv_prompts, adv_init_prompts, adv_extras, adv_init_sources, adv_init_final_answers = self._build_adversarial_student_prompts(
+                adv_prompts, adv_init_prompts, adv_extras, adv_teacher_index_groups = self._build_adversarial_student_prompts(
                     combined_outputs,
                     combined_all_teacher_prompts,
                     combined_all_student_prompts,
                     combined_extras,
-                    combined_initial_scores,
                     teacher_generated,
                     bos_token,
                     combined_final_answers,
@@ -580,48 +579,62 @@ class RayPPOTrainer(BaseTrainer):
             # the teacher-declared answer embedded in the prompts. This averages over
             # multiple adversarial responses per teacher prompt instance.
             # Each teacher prompt instance produced cfg.n_samples_per_prompt adversarial responses
-            logger.info(f"Generated {len(adv_prompts)} verifier responses for {len(combined_all_teacher_prompts)} init prompts")
-            assert len(adv_initial_teacher_scores) == len(combined_all_teacher_prompts) * self.cfg.adv_n_samples_per_prompt, (
-                "Expected adv_initial_teacher_scores to be teacher_instances * n_samples_per_prompt"
+            logger.info(f"Generated {len(adv_prompts)} verifier responses for {len(adv_teacher_index_groups)} adversarial groups")
+            assert len(adv_initial_teacher_scores) == len(adv_teacher_index_groups) * self.cfg.adv_n_samples_per_prompt, (
+                "Expected adv_initial_teacher_scores to be groups * n_samples_per_prompt"
             )
             # Overwrite the teacher custom rewards block we appended earlier
             teacher_match_reward_dict = {}
             student_adv_match_reward_dict = {}
-            for i in range(len(combined_all_teacher_prompts)):
-                start = i * self.cfg.adv_n_samples_per_prompt
-                end = (i + 1) * self.cfg.adv_n_samples_per_prompt
+            for g in range(len(adv_teacher_index_groups)):
+                start = g * self.cfg.adv_n_samples_per_prompt
+                end = (g + 1) * self.cfg.adv_n_samples_per_prompt
                 avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
                 teacher_match_reward_dict[adv_prompts[start]] = avg_teacher_match
                 teacher_adv_match_rewards.append(avg_teacher_match)
 
-                if self.train_teacher:
-                    combined_teacher_custom_rewards[i][-1] = avg_teacher_match
+                # Assign teacher reward to all indices participating in this mixed group
+                for pos, idx in enumerate(adv_teacher_index_groups[g]):
+                    if not self.train_teacher:
+                        continue
+                    if len(adv_teacher_index_groups[g]) == 1:
+                        # Single-teacher groups get the direct average match reward
+                        combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
+                    else:
+                        if pos == 0:
+                            # Mixed group, first index is "yes"
+                            combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
+                        elif pos == 1:
+                            # Mixed group, second index is "no"
+                            combined_teacher_custom_rewards[idx][-1] = 1.0 - avg_teacher_match
+                        else:
+                            assert False, "Only support mixed groups of size 2 for now"
 
-                avg_student_match = np.mean(adv_initial_scores[start:end])
-                if combined_initial_scores[i]:
-                    avg_student_match = avg_student_match
-                else:
-                    if self.cfg.avd_student_negative_strategy == "same":
-                        avg_student_match = avg_student_match
-                    elif self.cfg.avd_student_negative_strategy == "inverse":
-                        avg_student_match = 1 - avg_student_match
-                    elif self.cfg.avd_student_negative_strategy == "negate":
-                        avg_student_match = -avg_student_match
-                    elif self.cfg.avd_student_negative_strategy == "inv_neg":
-                        avg_student_match = -(1 - avg_student_match)
+                # Compute student-side adversarial match average for this group
+                avg_student_match = float(np.mean(adv_initial_scores[start:end]))
+                # Apply negative strategy separately per teacher index using its original correctness
+                for idx in adv_teacher_index_groups[g]:
+                    adj_student_match = avg_student_match
+                    if not combined_initial_scores[idx]:
+                        if self.cfg.avd_student_negative_strategy == "inverse":
+                            adj_student_match = 1 - adj_student_match
+                        elif self.cfg.avd_student_negative_strategy == "negate":
+                            adj_student_match = -adj_student_match
+                        elif self.cfg.avd_student_negative_strategy == "inv_neg":
+                            adj_student_match = -(1 - adj_student_match)
+                        # "same" leaves it unchanged
 
-                student_adv_match_reward_dict[adv_prompts[start]] = avg_student_match
+                    # Log one value per group for visualization, keyed by adv prompt
+                    student_adv_match_reward_dict[adv_prompts[start]] = adj_student_match
 
-                if self.cfg.adv_student_add_initial:
-                    avg_student_match = (avg_student_match + combined_custom_rewards[i][-1])
+                    if self.cfg.adv_student_add_initial:
+                        adj_student_match = adj_student_match + combined_custom_rewards[idx][-1]
 
-                if self.train_student:
-                    combined_custom_rewards[i][-1] = avg_student_match
+                    if self.train_student:
+                        combined_custom_rewards[idx][-1] = adj_student_match
 
             self.log_adversarial_examples(
                 adv_init_prompts=adv_init_prompts,
-                adv_init_sources=adv_init_sources,
-                adv_init_final_answers=adv_init_final_answers,
                 adv_prompts=adv_prompts,
                 adv_outputs=adv_outputs,
                 adv_final_answers=adv_final_answers,

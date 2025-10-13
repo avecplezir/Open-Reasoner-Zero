@@ -326,8 +326,6 @@ class BaseTrainer:
         self,
         *,
         adv_init_prompts: List[str],
-        adv_init_sources: List[Any],
-        adv_init_final_answers: List[Any],
         adv_prompts: List[str],
         adv_outputs: List[Any],
         adv_final_answers: List[Any],
@@ -344,8 +342,6 @@ class BaseTrainer:
         for i in indices:
             idx = -i
             table_data.append([
-                adv_init_sources[idx],
-                adv_init_final_answers[idx],
                 adv_init_prompts[idx],
                 adv_prompts[idx],
                 adv_outputs[idx],
@@ -359,8 +355,6 @@ class BaseTrainer:
         self._log_wandb_table(
             name="adversarial_examples",
             columns=[
-                "adv_init_source",
-                "adv_init_final_answer",
                 "adv_init_prompts",
                 "adv_prompt",
                 "adv_response",
@@ -621,11 +615,10 @@ class BaseTrainer:
         combined_all_teacher_prompts: List[str],
         combined_all_student_prompts: List[str],
         combined_extras: List[dict],
-        combined_initial_scores: List[bool],
         teacher_generated: List[bool],
         bos_token: str,
         combined_final_answers: List[str],
-    ) -> Tuple[List[str], List[str], List[dict]]:
+    ) -> Tuple[List[str], List[str], List[dict], List[bool], List[str], List[List[int]]]:
         """
         Build adversarial continuation student prompts from teacher explanations.
         Keeps one new prompt per teacher sample (already repeated for GRPO).
@@ -641,9 +634,95 @@ class BaseTrainer:
         adv_prompts: List[str] = []
         adv_init_prompts: List[str] = []
         adv_extras: List[dict] = []
-        adv_init_sources = []
-        adv_init_final_answers = []
+        adv_init_sources: List[bool] = []
+        adv_init_final_answers: List[str] = []
+        # For each adversarial group (one mixed pair or one single),
+        # record which original teacher indices should receive the verifier reward.
+        adv_teacher_index_groups: List[List[int]] = []
 
+        # Special handling for yes_no augmentation: mix YES/NO teacher chains
+        if self.cfg.augment_strategy == "yes_no" and self.cfg.verifier_use_mixed_chains:
+            assert not self.cfg.generate_with_student, "Cannot mix chains when student generation is enabled"
+            # Group teacher generations by the underlying student prompt so we can
+            # collect one YES chain and one NO chain per base dialogue.
+            group: Dict[str, Dict[str, Any]] = {}
+
+            for i, (t_prompt, s_prompt, extra, prev_r, tgenerated) in enumerate(
+                zip(
+                    combined_all_teacher_prompts,
+                    combined_all_student_prompts,
+                    combined_extras,
+                    extracted_reasonings,
+                    teacher_generated,
+                )
+            ):
+                # Only consider teacher-generated samples that have explicit teacher answers
+                if not tgenerated:
+                    continue
+                label = extra["teacher_answer"]
+                if label not in ("yes", "no"):
+                    assert False, f"teacher_answer must be yes or no to mix chains, got {label}"
+
+                key = s_prompt  # group by base student prompt
+                if key not in group:
+                    new_extra = dict(extra)
+                    # stick with the yes, gonna use later to compute reward for the teacher
+                    new_extra['teacher_answer'] = "yes"  # indicate mixed answer
+
+                    group[key] = {
+                        "s_prompt": s_prompt,
+                        "t_prompts": {"yes": [], "no": []},
+                        "extra": new_extra,
+                        "chains": {"yes": [], "no": []},
+                        "t_indices": {"yes": [], "no": []},
+                    }
+
+                group[key]["chains"][label].append(combined_outputs[i])
+                group[key]["t_indices"][label].append(i)
+                group[key]["t_prompts"][label].append(t_prompt)
+
+            # Build mixed previous reasoning when both sides exist; otherwise fallback to single
+            for key, bundle in group.items():
+                s_prompt = bundle["s_prompt"]
+                extra = bundle["extra"]
+                yes_list = bundle["chains"]["yes"]
+                no_list = bundle["chains"]["no"]
+                yes_indices = bundle["t_indices"]["yes"]
+                no_indices = bundle["t_indices"]["no"]
+                yes_t_prompts = bundle["t_prompts"]["yes"]
+                no_t_prompts = bundle["t_prompts"]["no"]
+
+                assert len(yes_list) == len(no_list) and len(yes_list) > 0, "yes and no lists must match and be non-empty"
+                for i in range(len(yes_list)):
+                    # Take one chain from each and shuffle the order
+                    candidates = [("yes", yes_list[i]), ("no", no_list[i])]
+                    # random.shuffle(candidates)
+                    prev_chunks = []
+                    for lbl, text in candidates:
+                        prev_chunks.append(f"[Answer: {lbl}]: " + text)
+                    mixed_prev = " ".join(prev_chunks)
+
+                    new_prompt = create_student_prompt(
+                        extra["dialogue"], bos_token=bos_token, previous_reasoning=mixed_prev, cfg=self.cfg
+                    )
+
+                    for _ in range(self.cfg.adv_n_samples_per_prompt):
+                        adv_prompts.append(new_prompt)
+                        adv_extras.append(extra)
+                        adv_init_prompts.append(yes_t_prompts[i])
+
+                    # Map this mixed adversarial group to both YES and NO teacher indices
+                    adv_teacher_index_groups.append([yes_indices[i], no_indices[i]])
+                    # adv_init_prompts.append([yes_t_prompts[i], no_t_prompts[i]])
+
+            return (
+                adv_prompts,
+                adv_init_prompts,
+                adv_extras,
+                adv_teacher_index_groups,
+            )
+
+        # Default behavior: build from single teacher chain (no mixing)
         for i, (t_prompt, s_prompt, extra, prev_r, tgenerated) in enumerate(
             zip(
                 combined_all_teacher_prompts,
@@ -657,11 +736,7 @@ class BaseTrainer:
                 extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, cfg=self.cfg
             )
             init_prompt = t_prompt if tgenerated else s_prompt
-            if not self.cfg.verifier_use_answer_target:
-                new_extra = dict(extra)
-                new_extra["answer"] = self.yes_token() if combined_initial_scores[i] else self.no_token()
-            else:
-                new_extra = extra
+            new_extra = extra
 
             for _ in range(self.cfg.adv_n_samples_per_prompt):
                 adv_prompts.append(new_prompt)
@@ -670,7 +745,15 @@ class BaseTrainer:
                 adv_init_sources.append(tgenerated)
                 adv_init_final_answers.append(combined_final_answers[i])
 
-        return adv_prompts, adv_init_prompts, adv_extras, adv_init_sources, adv_init_final_answers
+            # Non-mixed: reward applies back to this single teacher index
+            adv_teacher_index_groups.append([i])
+
+        return (
+            adv_prompts,
+            adv_init_prompts,
+            adv_extras,
+            adv_teacher_index_groups,
+        )
 
     async def _distributed_generate(
         self,

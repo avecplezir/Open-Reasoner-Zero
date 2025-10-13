@@ -82,11 +82,14 @@ class PPOExpConfig(BasePPOExpConfig):
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
+        "data/boolq.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
+            "data/eval_data/booliq_dev.json",
+            "data/eval_data/booliq_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -118,7 +121,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = (student_training_rounds + teacher_training_rounds) * 5
+    eval_interval: int = 10
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
@@ -139,7 +142,9 @@ class PPOExpConfig(BasePPOExpConfig):
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
-    topr_type: int = 2
+    topr_type: int = 0
+
+    balance_yes_no_batches: bool = True
 
 
 if __name__ == "__main__":
