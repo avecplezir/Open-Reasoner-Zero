@@ -88,6 +88,11 @@ class RayPPOTrainer(BaseTrainer):
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
 
+                    # Optional: evaluate verifier in adversarial mode, when available
+                    if self.cfg.adversarial_training and self.eval_verifier:
+                        async with Timer("Eval of the verifier (adversarial)"):
+                            await self.eval_verifier(prefix="verifier")
+
                 # 2. determine what model to train
                 self.train_teacher = False
                 self.train_student = False
@@ -595,8 +600,6 @@ class RayPPOTrainer(BaseTrainer):
 
                 # Assign teacher reward to all indices participating in this mixed group
                 for pos, idx in enumerate(adv_teacher_index_groups[g]):
-                    if not self.train_teacher:
-                        continue
                     if len(adv_teacher_index_groups[g]) == 1:
                         # Single-teacher groups get the direct average match reward
                         combined_teacher_custom_rewards[idx][-1] = avg_teacher_match

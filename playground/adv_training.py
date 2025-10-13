@@ -97,7 +97,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 1
+    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
     adv_n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
@@ -146,6 +146,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     adversarial_training: bool = True
     verifier_use_mixed_chains: bool = True
+    eval_verifier: bool = True
 
 
 if __name__ == "__main__":

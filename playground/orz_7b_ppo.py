@@ -37,7 +37,12 @@ from orz.exps.examples.ppo.ppo_base_exp import BasePPOExp, BasePPOExpConfig
 from orz.ppo import RayPPOTrainer
 from orz.ppo.tools.math_utils import is_equal, solution2answer
 from orz.ppo.utils import check_reflection_pattern
-from playground.zero_setting_base import CustomDataset, EvalCustomDataset
+from playground.zero_setting_base import (
+    CustomDataset,
+    EvalCustomDataset,
+    create_student_prompt,
+    create_teacher_prompt_from_answer,
+)
 
 DEBUG_MODE = False if os.environ.get("DEBUG_MODE", "False") == "False" else True  # Global debug flag
 
@@ -603,7 +608,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         return results
 
     @override
-    async def eval(self, prefix=""):
+    async def eval(self, prefix="", dataset = None):
         logger.info("Start evaluating on val set")
         from vllm import SamplingParams
 
@@ -618,7 +623,9 @@ class CustomRewardTrainer(RayPPOTrainer):
 
         from torch.utils.data import DataLoader
 
-        dataset = self.eval_dataset
+        if dataset is None:
+            dataset = self.eval_dataset
+
         dataloader = DataLoader(dataset, batch_size=len(dataset), shuffle=False, drop_last=False)
         prompt_pre_llm = (len(dataset) + self.cfg.vllm_num_engines - 1) // self.cfg.vllm_num_engines
 
@@ -733,6 +740,135 @@ class CustomRewardTrainer(RayPPOTrainer):
                     data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"]] for ex in eval_examples]
                 )
             }, step=self.global_step)
+
+    async def eval_verifier(self, prefix: str = "verifier"):
+        """
+        Evaluate the adversarial verifier when adversarial_training is True.
+
+        Procedure:
+        - For each eval item, build two teacher prompts (YES and NO) using
+          extra['dialogue'] so that the teacher generates explanation chains.
+        - Mix the YES and NO chains into a single previous_reasoning block.
+        - Build student prompts with the mixed reasoning and generate verifier outputs.
+        - Extract final answers and compute accuracy versus ground-truth yes/no.
+        - Log scalar metrics and dump a JSONL with details.
+        """
+        if not getattr(self.cfg, "adversarial_training", False):
+            logger.info("adversarial_training is False; skipping eval_verifier")
+            return
+
+        from vllm import SamplingParams
+        from torch.utils.data import DataLoader
+
+        dataset = self.eval_dataset
+        dataloader = DataLoader(dataset, batch_size=len(dataset), shuffle=False, drop_last=False)
+        prompt_pre_llm = (len(dataset) + self.cfg.vllm_num_engines - 1) // self.cfg.vllm_num_engines
+
+        # Helper to trim to the last </think>
+        def extract_reasoning(txt: str) -> str:
+            idx = txt.rfind("</think>")
+            prev = txt[:idx].strip() if idx != -1 else txt.strip()
+            return prev
+
+        # BOS token
+        if self.tokenizer.bos_token_id is None:
+            bos_token = ""
+        else:
+            bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+
+        # Teacher sampling: explain-only, stop at </think>
+        teacher_sampling = SamplingParams(
+            temperature=self.cfg.teacher_temperature,
+            top_p=self.cfg.top_p,
+            top_k=self.cfg.top_k,
+            max_tokens=self.cfg.generate_max_len,
+            skip_special_tokens=False,
+            include_stop_str_in_output=True,
+            stop=ListConfig(["User:", "Human:", "Assistant:", "</answer>", "</think>"]),
+        )
+
+        # Collect across full eval set to avoid repeated sync
+        all_dialogues: List[dict] = []
+        all_answers: List[str] = []
+        all_file_names: List[str] = []
+        all_student_prompts: List[str] = []
+
+        # If a separate teacher exists, ensure engines hold teacher weights once
+        if self.cfg.separate_teacher_model:
+            await self._major_sync_teacher_weights_to_vllm()
+
+        for batch in dataloader:
+            extras = batch[1]
+            dialogues = list(extras.get("dialogue", []))
+            answers = list(extras.get("answer", []))
+            file_names = list(extras.get("file_name", []))
+
+            # Sanity check for yes/no datasets
+            N = len(answers)
+            assert len(dialogues) == N, "eval extras must include 'dialogue' for each item"
+
+            # Build teacher prompts: YES and NO per item, then generate explanations
+            teacher_prompts_yes = [
+                create_teacher_prompt_from_answer(d, self.yes_token(), bos_token, cfg=self.cfg, is_correct=None, eval=True)
+                for d in dialogues
+            ]
+            teacher_prompts_no = [
+                create_teacher_prompt_from_answer(d, self.no_token(), bos_token, cfg=self.cfg, is_correct=None, eval=True)
+                for d in dialogues
+            ]
+
+            out_yes_chunks = await asyncio.gather(*[
+                llm.generate.remote(
+                    prompts=teacher_prompts_yes[i * prompt_pre_llm : (i + 1) * prompt_pre_llm],
+                    sampling_params=teacher_sampling,
+                )
+                for i, llm in enumerate(self.vllm_engines)
+            ])
+            out_no_chunks = await asyncio.gather(*[
+                llm.generate.remote(
+                    prompts=teacher_prompts_no[i * prompt_pre_llm : (i + 1) * prompt_pre_llm],
+                    sampling_params=teacher_sampling,
+                )
+                for i, llm in enumerate(self.vllm_engines)
+            ])
+            out_yes = sum(out_yes_chunks, [])
+            out_no = sum(out_no_chunks, [])
+
+            # Mixed reasoning for this batch
+            mixed_prev_list = []
+            for oy, on in zip(out_yes, out_no):
+                ry = extract_reasoning(oy.outputs[0].text)
+                rn = extract_reasoning(on.outputs[0].text)
+                mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn} </think> <think>")
+
+            # Student prompts with mixed chains
+            student_prompts = [
+                create_student_prompt(d, bos_token=bos_token, previous_reasoning=mp, cfg=self.cfg)
+                for d, mp in zip(dialogues, mixed_prev_list)
+            ]
+
+            # Accumulate for one-shot verifier generation later
+            all_student_prompts.extend(student_prompts)
+            all_dialogues.extend(dialogues)
+            all_answers.extend(answers)
+            all_file_names.extend(file_names)
+
+        # form the dataset for evaluation here
+        from torch.utils.data import Dataset
+        class _InlineEvalDataset(Dataset):
+            def __init__(self, prompts: List[str], answers: List[str], file_names: List[str]):
+                self._prompts = prompts
+                self._answers = answers
+                self._file_names = file_names
+            def __len__(self):
+                return len(self._prompts)
+            def __getitem__(self, idx):
+                return self._prompts[idx], {"answer": self._answers[idx], "file_name": self._file_names[idx]}
+
+        inline_ds = _InlineEvalDataset(all_student_prompts, all_answers, all_file_names)
+        # One-time policy (student) sync; then reuse eval for logging/dumps
+        await self._major_sync_policy_weights_to_vllm()
+        await self.eval(dataset=inline_ds, prefix=prefix)
 
 
 class PPOExp(BasePPOExp):

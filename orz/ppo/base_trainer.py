@@ -1474,12 +1474,10 @@ class BaseTrainer:
                             if self.cfg.kl_loss_window_size > 0 and  self.cfg.kl_window_loss_coef != 0:
                                 # Compute window means along the sequence axis
                                 # kl_episode shape: [B(=1), L]
-                                if kl_episode.size(-1) >= self.cfg.kl_window_loss_coef:
-                                    logger.info(f"kl_episode.unsqueeze(1) {kl_episode.unsqueeze(1).shape}")
+                                if kl_episode.size(-1) >= self.cfg.kl_loss_window_size:
                                     pooled = F.avg_pool1d(
                                         kl_episode.unsqueeze(1), kernel_size=self.cfg.kl_loss_window_size, stride=1
                                     ).squeeze(1)  # [1, L-win_sz+1]
-                                    logger.info(f"pooled {pooled.shape}")
                                     max_mean = torch.max(pooled, dim=-1)[0]  # [1]
                                     window_kl_reward = -max_mean
                                     window_kl_reward = torch.clamp(

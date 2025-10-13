@@ -118,6 +118,7 @@ def create_teacher_prompt_from_answer(
     *,
     cfg=None,
     is_correct: Optional[bool] = None,
+    eval: bool = False,
 ):
     """Create a teacher prompt from a dialogue and provided answer using cfg.
 
@@ -129,10 +130,12 @@ def create_teacher_prompt_from_answer(
 
     teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if cfg.teacher_explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
-    assert len(dialogue) == 2, "dialogue must contain 2 items"
+    if not eval:
+        assert len(dialogue) == 2, "dialogue must contain 2 items"
 
+    prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
-    prompt_instruction = prompt_instruction_template.render(prompt=dialogue[0]["value"])
+    prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     teacher_prompt_template = Template(teacher_prompt_template_jinja)
 
     # Optionally add a role prefix to the beginning via bos_token
@@ -202,6 +205,6 @@ class EvalCustomDataset(PromptDataset):
 
         prompt = create_student_prompt(dialogue, bos_token=bos_token, cfg=self.cfg, eval=True)
 
-        extra = {"answer": dialogue["final_answer"], "file_name": dialogue["file_name"]}
+        extra = {"answer": dialogue["final_answer"], "file_name": dialogue["file_name"], "dialogue": dialogue}
 
         return prompt, extra
