@@ -573,7 +573,7 @@ class RayPPOTrainer(BaseTrainer):
                 adv_pass_at_n_dict,
             ) = await reward_fn(adv_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
 
-            teacher_adv_match_rewards = []
+            # teacher_adv_match_rewards = []
             # If we have generated adversarial responses for each teacher prompt, compute
             # teacher rewards as the average agreement of adversarial final answers with
             # the teacher-declared answer embedded in the prompts. This averages over
@@ -584,14 +584,14 @@ class RayPPOTrainer(BaseTrainer):
                 "Expected adv_initial_teacher_scores to be groups * n_samples_per_prompt"
             )
             # Overwrite the teacher custom rewards block we appended earlier
-            teacher_match_reward_dict = {}
-            student_adv_match_reward_dict = {}
+            index_group_dict = {}
             for g in range(len(adv_teacher_index_groups)):
                 start = g * self.cfg.adv_n_samples_per_prompt
                 end = (g + 1) * self.cfg.adv_n_samples_per_prompt
                 avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
-                teacher_match_reward_dict[adv_prompts[start]] = avg_teacher_match
-                teacher_adv_match_rewards.append(avg_teacher_match)
+                index_group_dict[adv_prompts[start]] = adv_teacher_index_groups[g]
+
+                # teacher_adv_match_rewards.append(avg_teacher_match)
 
                 # Assign teacher reward to all indices participating in this mixed group
                 for pos, idx in enumerate(adv_teacher_index_groups[g]):
@@ -624,9 +624,6 @@ class RayPPOTrainer(BaseTrainer):
                             adj_student_match = -(1 - adj_student_match)
                         # "same" leaves it unchanged
 
-                    # Log one value per group for visualization, keyed by adv prompt
-                    student_adv_match_reward_dict[adv_prompts[start]] = adj_student_match
-
                     if self.cfg.adv_student_add_initial:
                         adj_student_match = adj_student_match + combined_custom_rewards[idx][-1]
 
@@ -634,15 +631,17 @@ class RayPPOTrainer(BaseTrainer):
                         combined_custom_rewards[idx][-1] = adj_student_match
 
             self.log_adversarial_examples(
-                adv_init_prompts=adv_init_prompts,
+                student_prompts=combined_all_student_prompts,
+                teacher_prompts=combined_all_teacher_prompts,
+                combined_custom_rewards=combined_custom_rewards,
+                combined_teacher_custom_rewards=combined_teacher_custom_rewards,
+                index_group_dict=index_group_dict,
                 adv_prompts=adv_prompts,
                 adv_outputs=adv_outputs,
                 adv_final_answers=adv_final_answers,
                 adv_extras=adv_extras,
                 adv_initial_scores=adv_initial_scores,
                 adv_initial_teacher_scores=adv_initial_teacher_scores,
-                teacher_match_reward_dict=teacher_match_reward_dict,
-                student_match_reward_dict=student_adv_match_reward_dict,
                 step=self.global_step,
             )
 

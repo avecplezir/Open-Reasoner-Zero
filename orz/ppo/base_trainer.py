@@ -325,45 +325,62 @@ class BaseTrainer:
     def log_adversarial_examples(
         self,
         *,
-        adv_init_prompts: List[str],
+        student_prompts: List[str],
+        teacher_prompts: List[str],
+        combined_custom_rewards,
+        combined_teacher_custom_rewards,
+        index_group_dict,
         adv_prompts: List[str],
         adv_outputs: List[Any],
         adv_final_answers: List[Any],
         adv_extras: List[dict],
         adv_initial_scores: List[Any],
         adv_initial_teacher_scores: List[Any],
-        teacher_match_reward_dict: Dict[str, Any],
-        student_match_reward_dict: Dict[str, Any],
         step: Optional[int] = None,
     ) -> None:
         n = min(8, len(adv_prompts))
-        indices = [i for i in range(n)] + [-i for i in range(n)]
+        indices = [-i-1 for i in range(n)] + [i for i in range(n)]
         table_data: List[List[Any]] = []
-        for i in indices:
-            idx = -i
+        for idx in indices:
+            index_group = index_group_dict[adv_prompts[idx]]
+            if len(index_group) == 1:
+                prompt_index = index_group
+                prompt_index_2 = None
+            else:
+                prompt_index, prompt_index_2 = index_group
+
             table_data.append([
-                adv_init_prompts[idx],
+                student_prompts[prompt_index],
+                teacher_prompts[prompt_index],
+                teacher_prompts[prompt_index_2] if prompt_index_2 is not None else "",
                 adv_prompts[idx],
                 adv_outputs[idx],
                 adv_final_answers[idx],
                 adv_extras[idx].get("teacher_answer", ""),
                 bool(adv_initial_scores[idx]),
                 bool(adv_initial_teacher_scores[idx]),
-                student_match_reward_dict.get(adv_prompts[idx], None),
-                teacher_match_reward_dict.get(adv_prompts[idx], None),
+                combined_teacher_custom_rewards[prompt_index][-1].item(),
+                combined_teacher_custom_rewards[prompt_index_2][-1].item() if prompt_index_2 is not None else None,
+                combined_custom_rewards[prompt_index][-1].item(),
+                combined_custom_rewards[prompt_index_2][-1].item() if prompt_index_2 is not None else None,
+
             ])
         self._log_wandb_table(
             name="adversarial_examples",
             columns=[
-                "adv_init_prompts",
+                "student_prompts",
+                "teacher_prompts_1",
+                "teacher_prompts_2",
                 "adv_prompt",
                 "adv_response",
                 "adv_final_answer",
                 "teacher_answer",
                 "student_correct",
                 "teacher_correct",
-                "student_adv_match_reward",
                 "teacher_adv_match_reward",
+                "teacher_adv_match_reward_2",
+                "student_adv_match_reward",
+                "student_adv_match_reward_2",
             ],
             data=table_data,
             step=step,
@@ -700,7 +717,7 @@ class BaseTrainer:
                     prev_chunks = []
                     for lbl, text in candidates:
                         prev_chunks.append(f"[Answer: {lbl}]: " + text)
-                    mixed_prev = " ".join(prev_chunks)
+                    mixed_prev = " ".join(prev_chunks) + " </think> <think>"
 
                     new_prompt = create_student_prompt(
                         extra["dialogue"], bos_token=bos_token, previous_reasoning=mixed_prev, cfg=self.cfg
@@ -1459,7 +1476,7 @@ class BaseTrainer:
                                 # kl_episode shape: [B(=1), L]
                                 if kl_episode.size(-1) >= self.cfg.kl_window_loss_coef:
                                     pooled = F.avg_pool1d(
-                                        kl_episode.unsqueeze(1), kernel_size=self.cfg.kl_window_loss_coef, stride=1
+                                        kl_episode.unsqueeze(1), kernel_size=self.cfg.kl_loss_window_size, stride=1
                                     ).squeeze(1)  # [1, L-win_sz+1]
                                     max_mean = torch.max(pooled, dim=-1)[0]  # [1]
                                     window_kl_reward = -max_mean

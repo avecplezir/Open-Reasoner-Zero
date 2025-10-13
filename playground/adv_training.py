@@ -90,15 +90,15 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128 if not DEBUG_MODE else 16
+    train_batch_size: int = 256 if not DEBUG_MODE else 128
     num_warmup_steps: int = 5
     prompt_max_len: int = 4000
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 3 if not DEBUG_MODE else 3
+    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 1
+    adv_n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -122,8 +122,6 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
-    adversarial_training: bool = True
-    verifier_use_mixed_chains: bool = True
 
     separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"
@@ -133,11 +131,11 @@ class PPOExpConfig(BasePPOExpConfig):
 
     student_loss_type: str = "ppo"
     avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
-    adv_student_add_initial: bool = True
+    adv_student_add_initial: bool = False
 
     # Prompt configuration
     student_prompt_continuation: bool = True
-    teacher_add_role_prefix: bool = True
+    teacher_add_role_prefix: bool = False
     general_propmt_yes_no: bool = True
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = False
@@ -145,6 +143,9 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.
     reward_match_coef: float = 1.
     ss_reward_coef: float = 0.
+
+    adversarial_training: bool = True
+    verifier_use_mixed_chains: bool = True
 
 
 if __name__ == "__main__":
