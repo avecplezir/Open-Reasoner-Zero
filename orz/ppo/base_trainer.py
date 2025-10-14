@@ -694,7 +694,7 @@ class BaseTrainer:
                         "t_indices": {"yes": [], "no": []},
                     }
 
-                group[key]["chains"][label].append(combined_outputs[i])
+                group[key]["chains"][label].append(prev_r)
                 group[key]["t_indices"][label].append(i)
                 group[key]["t_prompts"][label].append(t_prompt)
 
@@ -713,7 +713,7 @@ class BaseTrainer:
                 for i in range(len(yes_list)):
                     # Take one chain from each and shuffle the order
                     candidates = [("yes", yes_list[i]), ("no", no_list[i])]
-                    # random.shuffle(candidates)
+                    random.shuffle(candidates)
                     prev_chunks = []
                     for lbl, text in candidates:
                         prev_chunks.append(f"[Answer: {lbl}]: " + text)

@@ -25,10 +25,21 @@ The reasoning process is enclosed within <think> </think> and answer is enclosed
 Assistant: <think>\
 """
 
+# STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
+# {{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
+# If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
+# Assistant: <think>{{previous_reasoning}}\
+# """
+
 STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
-{{bos_token}}A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant may either: (1) reason from scratch; or (2) examine any previously provided reasoning and continue it. \
-If prior reasoning is provided, continue it to arrive at the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. User: {{prompt}}
-Assistant: <think>{{previous_reasoning}}\
+{{bos_token}} You are given a {problem_kind} and several candidate solutions. "
+            "Some candidates may be incorrect or contain errors. "
+            "Aggregate the useful ideas and produce a single, high-quality solution. "
+            "Reason carefully; if candidates disagree, choose the correct path. If all are incorrect, then attempt a different strategy. \n"
+            "{{prompt}} \n" 
+            "Candidates: {{previous_reasoning}}\n"
+            "Now write a single improved solution. Provide clear reasoning and end with the final answer in <answer>...</answer> tags"
+            \
 """
 
 # Teacher variant: explanation + answer (both <think> and <answer> in the output)
