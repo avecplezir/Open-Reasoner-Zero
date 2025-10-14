@@ -31,15 +31,23 @@ Assistant: <think>\
 # Assistant: <think>{{previous_reasoning}}\
 # """
 
+# STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
+# {{bos_token}} You are given a problem and several candidate solutions. \
+# Some candidates may be incorrect or contain errors. Aggregate the useful ideas and produce a single, high-quality solution. \
+# Reason carefully; if candidates disagree, choose the correct path. If all are incorrect, then attempt a different strategy. \n \
+# {{prompt}} \n \
+# Candidate solutions (may contain mistakes): {{previous_reasoning}}\n \
+# Now write a single improved solution. Provide clear reasoning and end with the final answer in <answer>...</answer> tags \
+# """
+
 STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA = """\
-{{bos_token}} You are given a {problem_kind} and several candidate solutions. "
-            "Some candidates may be incorrect or contain errors. "
-            "Aggregate the useful ideas and produce a single, high-quality solution. "
-            "Reason carefully; if candidates disagree, choose the correct path. If all are incorrect, then attempt a different strategy. \n"
-            "{{prompt}} \n" 
-            "Candidates: {{previous_reasoning}}\n"
-            "Now write a single improved solution. Provide clear reasoning and end with the final answer in <answer>...</answer> tags"
-            \
+{{bos_token}} A conversation between User and Assistant. You are given a problem and several candidate solutions. \
+Some candidates may be incorrect or contain errors. Aggregate the useful ideas and produce a single, high-quality solution. \
+Reason carefully; if candidates disagree, choose the correct path. If all are incorrect, then attempt a different strategy. \n \
+{{prompt}} \n \
+Candidate solutions (may contain mistakes): {{previous_reasoning}}\n \
+Now write a single improved solution. Provide clear reasoning  enclosed within <think> </think> and end with the final answer in <answer>...</answer> tags. \
+Assistant: <think>
 """
 
 # Teacher variant: explanation + answer (both <think> and <answer> in the output)
@@ -95,7 +103,7 @@ def create_student_prompt(
     prompt_instruction_template_jinja = get_instruction_template_from_flags(cfg.general_propmt_yes_no)
 
     # Map to the student prompt body variant
-    prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA if cfg.student_prompt_continuation else STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA if cfg.student_prompt_continuation and previous_reasoning else STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
     if isinstance(dialogue, str):
         prompt = dialogue
@@ -112,7 +120,6 @@ def create_student_prompt(
             prompt=prompt_instruction,
             previous_reasoning=previous_reasoning or "",
         )
-
     else:
         rendered = prompt_template.render(
             bos_token=bos_token,

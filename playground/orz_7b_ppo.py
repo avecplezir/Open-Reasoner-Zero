@@ -270,12 +270,13 @@ class CustomRewardTrainer(RayPPOTrainer):
 
             # Formatting checks (student only): require both <think>...</think> and <answer>...</answer>
             resp_txt = output.get("response", "")
-            has_think = bool(re.search(r".*?</think>", resp_txt, re.DOTALL))
             has_answer = bool(re.search(r"<answer>.*?</answer>", resp_txt, re.DOTALL))
             # Ensure ordering: <think> before <answer>
+            has_think = bool(re.search(r".*?</think>", resp_txt, re.DOTALL))
             think_pos = resp_txt.find("<think>")
             answer_pos = resp_txt.find("<answer>")
             formatting_ok = has_think and has_answer and (think_pos == -1 or answer_pos == -1 or think_pos < answer_pos)
+            formatting_ok = has_answer if self.cfg.adversarial_training else formatting_ok  # In adv training, only require answer
             output["has_think"] = has_think
             output["has_answer"] = has_answer
             output["formatting_ok"] = formatting_ok

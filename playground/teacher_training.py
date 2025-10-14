@@ -80,13 +80,13 @@ class PPOExpConfig(BasePPOExpConfig):
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
-        # "data/boolq.json",
+        "data/boolq.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
-            # "data/eval_data/booliq_dev.json",
+            "data/eval_data/booliq_dev.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -138,9 +138,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     topr_reward_coef: float = 0.0
     reward_kl_coef: float = 1.0
-    kl_loss_window_size: int = 5
-    kl_window_loss_coef: float = 0.
-
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 1.
 
 
 if __name__ == "__main__":

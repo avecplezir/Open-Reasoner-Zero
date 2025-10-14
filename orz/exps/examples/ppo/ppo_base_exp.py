@@ -325,7 +325,7 @@ class BasePPOExp(BaseExp):
             # "CUDA_LAUNCH_BLOCKING": "1",
             "CUDA_LAUNCH_BLOCKING": "1",
             "NCCL_P2P_DISABLE": "1",
-            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         }
 
         # ray.init(

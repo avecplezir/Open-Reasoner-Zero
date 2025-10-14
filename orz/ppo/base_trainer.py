@@ -646,7 +646,7 @@ class BaseTrainer:
         for resp in combined_outputs:
             idx = resp.rfind("</think>")
             prev = resp[:idx].strip() if idx != -1 else resp.strip()
-            extracted_reasonings.append(prev + "</think> <think>")
+            extracted_reasonings.append(prev)
 
         adv_prompts: List[str] = []
         adv_init_prompts: List[str] = []

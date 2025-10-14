@@ -455,8 +455,10 @@ class RayPPOTrainer(BaseTrainer):
 
 
         generate_with_teacher = not (self.train_teacher and self.cfg.train_teacher_on_student_data_only)
-        if generate_with_teacher:
+        if not generate_with_teacher:
             logger.info("Skipping teacher generation since only training teacher on student data")
+        else:
+            logger.info(f"Do generation with the teacher")
 
         if generate_with_teacher and self.cfg.augment_student_generation_with_teacher:
 
