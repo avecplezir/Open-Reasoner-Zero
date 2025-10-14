@@ -585,8 +585,8 @@ class CustomRewardTrainer(RayPPOTrainer):
                 equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer_item['final_answer']), executor))
             equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
             # put smt here, won't be used
-            equal_teacher_results_yes = [False] * len(equal_teacher_results)
-            equal_teacher_results_no = [False] * len(equal_teacher_results)
+            equal_teacher_results_yes = [None] * len(equal_teacher_results)
+            equal_teacher_results_no = [None] * len(equal_teacher_results)
 
         results = []
         for extra, response, final_answer_item, stop_reason, iscorrect, teacher_iscorrect, teacher_yes, teacher_no in zip(
@@ -626,6 +626,7 @@ class CustomRewardTrainer(RayPPOTrainer):
         if dataset is None:
             dataset = self.eval_dataset
 
+        logger.info(f"len(dataset) {len(dataset)}")
         dataloader = DataLoader(dataset, batch_size=len(dataset), shuffle=False, drop_last=False)
         prompt_pre_llm = (len(dataset) + self.cfg.vllm_num_engines - 1) // self.cfg.vllm_num_engines
 
@@ -635,6 +636,9 @@ class CustomRewardTrainer(RayPPOTrainer):
             prompts = list(batch[0])
             answers = list(batch[1]["answer"])
             file_names = list(batch[1]["file_name"])
+
+            logger.info(f"Eval total samples: {len(prompts)}, {len(answers)} {len(file_names)}")
+
             outputs = []
             for i, llm in enumerate(self.vllm_engines):
                 outputs.append(
@@ -656,6 +660,10 @@ class CustomRewardTrainer(RayPPOTrainer):
                     final_answers.append(matches[-1])
                 else:
                     final_answers.append("")
+
+            # logger.info(f"Eval sample file_names: {file_names}")
+            # logger.info(f"Eval sample prompts: {prompts}")
+            # logger.info(f"Eval sample final_answer: {final_answers}")
 
             for prompt, output, final_answer, answer, file_name in zip(
                 prompts, outputs, final_answers, answers, file_names
@@ -799,23 +807,26 @@ class CustomRewardTrainer(RayPPOTrainer):
 
         for batch in dataloader:
             extras = batch[1]
-            dialogues = list(extras.get("dialogue", []))
-            answers = list(extras.get("answer", []))
-            file_names = list(extras.get("file_name", []))
+            dialogues = extras["dialogue"]['prompt'][0]['value']  # List[dict]
+            answers = list(extras["answer"])
+            file_names = extras["file_name"]
 
-            # Sanity check for yes/no datasets
-            N = len(answers)
-            assert len(dialogues) == N, "eval extras must include 'dialogue' for each item"
+            logger.info(f"Verifier eval total samples: {len(dialogues)}, {len(answers)} {len(file_names)}")
 
             # Build teacher prompts: YES and NO per item, then generate explanations
+            eval = True
             teacher_prompts_yes = [
-                create_teacher_prompt_from_answer(d, self.yes_token(), bos_token, cfg=self.cfg, is_correct=None, eval=True)
+                create_teacher_prompt_from_answer(d, self.yes_token(), bos_token, cfg=self.cfg, is_correct=None, eval=eval)
                 for d in dialogues
             ]
+            logger.info(f"teacher_prompts_yes: {len(teacher_prompts_yes)}")
+
             teacher_prompts_no = [
-                create_teacher_prompt_from_answer(d, self.no_token(), bos_token, cfg=self.cfg, is_correct=None, eval=True)
+                create_teacher_prompt_from_answer(d, self.no_token(), bos_token, cfg=self.cfg, is_correct=None, eval=eval)
                 for d in dialogues
             ]
+
+            logger.info(f"teacher_prompts_yes: {len(teacher_prompts_no)}")
 
             out_yes_chunks = await asyncio.gather(*[
                 llm.generate.remote(
@@ -841,12 +852,15 @@ class CustomRewardTrainer(RayPPOTrainer):
                 rn = extract_reasoning(on.outputs[0].text)
                 mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn} </think> <think>")
 
+            logger.info(f"mixed_prev_list: {len(mixed_prev_list)}")
             # Student prompts with mixed chains
             student_prompts = [
-                create_student_prompt(d, bos_token=bos_token, previous_reasoning=mp, cfg=self.cfg)
+                create_student_prompt(d, bos_token=bos_token, previous_reasoning=mp, cfg=self.cfg, eval=eval)
                 for d, mp in zip(dialogues, mixed_prev_list)
             ]
 
+            # logger.info(f'student_prompts {len(student_prompts[0])}')
+            # logger.info(f'student_prompts {student_prompts[0]}')
             # Accumulate for one-shot verifier generation later
             all_student_prompts.extend(student_prompts)
             all_dialogues.extend(dialogues)
@@ -864,6 +878,8 @@ class CustomRewardTrainer(RayPPOTrainer):
                 return len(self._prompts)
             def __getitem__(self, idx):
                 return self._prompts[idx], {"answer": self._answers[idx], "file_name": self._file_names[idx]}
+
+        logger.info(f"ver eval all_student_prompts {len(all_student_prompts)}, {len(all_answers)}, {len(all_file_names)}")
 
         inline_ds = _InlineEvalDataset(all_student_prompts, all_answers, all_file_names)
         # One-time policy (student) sync; then reuse eval for logging/dumps

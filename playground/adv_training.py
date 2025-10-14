@@ -67,7 +67,7 @@ class PPOExpConfig(BasePPOExpConfig):
     gpu_memory_utilization: float = 0.95
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
@@ -124,7 +124,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy"
 
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = 0

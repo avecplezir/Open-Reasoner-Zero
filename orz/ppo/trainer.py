@@ -578,6 +578,10 @@ class RayPPOTrainer(BaseTrainer):
                 adv_pass_at_n_dict,
             ) = await reward_fn(adv_prompts, adv_outputs_local, adv_extras, prefix='adv_student/')
 
+            adv_teacher_yes = np.array(adv_teacher_yes)
+            adv_teacher_no = np.array(adv_teacher_no)
+            adv_correct_formattings = np.array(adv_correct_formattings)
+
             # teacher_adv_match_rewards = []
             # If we have generated adversarial responses for each teacher prompt, compute
             # teacher rewards as the average agreement of adversarial final answers with
@@ -593,7 +597,6 @@ class RayPPOTrainer(BaseTrainer):
             for g in range(len(adv_teacher_index_groups)):
                 start = g * self.cfg.adv_n_samples_per_prompt
                 end = (g + 1) * self.cfg.adv_n_samples_per_prompt
-                avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
                 index_group_dict[adv_prompts[start]] = adv_teacher_index_groups[g]
 
                 # teacher_adv_match_rewards.append(avg_teacher_match)
@@ -601,15 +604,18 @@ class RayPPOTrainer(BaseTrainer):
                 # Assign teacher reward to all indices participating in this mixed group
                 for pos, idx in enumerate(adv_teacher_index_groups[g]):
                     if len(adv_teacher_index_groups[g]) == 1:
+                        avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
                         # Single-teacher groups get the direct average match reward
                         combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                     else:
                         if pos == 0:
+                            avg_teacher_match = float(np.mean(adv_teacher_yes[start:end] * adv_correct_formattings[start:end]))
                             # Mixed group, first index is "yes"
                             combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                         elif pos == 1:
+                            avg_teacher_match = float(np.mean(adv_teacher_no[start:end] * adv_correct_formattings[start:end]))
                             # Mixed group, second index is "no"
-                            combined_teacher_custom_rewards[idx][-1] = 1.0 - avg_teacher_match
+                            combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                         else:
                             assert False, "Only support mixed groups of size 2 for now"
 
@@ -634,9 +640,10 @@ class RayPPOTrainer(BaseTrainer):
                         combined_custom_rewards[idx][-1] = adj_student_match
 
             for g in range(len(adv_teacher_index_groups)):
-                idx1, idx2 = adv_teacher_index_groups[g]
-                two_index_sum = combined_teacher_custom_rewards[idx1][-1] + combined_teacher_custom_rewards[idx2][-1]
-                assert 0.99 <= two_index_sum <= 1.01, f"Sum of teacher rewards for mixed group must be 1, got {two_index_sum}"
+                if len(adv_teacher_index_groups[g]) == 2:
+                    idx1, idx2 = adv_teacher_index_groups[g]
+                    two_index_sum = combined_teacher_custom_rewards[idx1][-1] + combined_teacher_custom_rewards[idx2][-1]
+                    assert two_index_sum <= 1.01, f"Sum of teacher rewards for mixed group must be 1, got {two_index_sum}"
 
             self.log_adversarial_examples(
                 student_prompts=combined_all_student_prompts,

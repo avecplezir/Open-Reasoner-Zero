@@ -1,6 +1,6 @@
 from typing import List, Optional
-
 from jinja2 import Template
+from loguru import logger
 
 from orz.ppo import PromptDataset
 
@@ -86,7 +86,11 @@ def create_student_prompt(
     # Map to the student prompt body variant
     prompt_template_jinja = STUDENT_PROMPT_INSTRUCTION_CONTINUE_TEMPLATE_JNJA if cfg.student_prompt_continuation else STUDENT_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
-    prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
+    if isinstance(dialogue, str):
+        prompt = dialogue
+    else:
+        prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
+
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     prompt_template = Template(prompt_template_jinja)
@@ -133,7 +137,11 @@ def create_teacher_prompt_from_answer(
     if not eval:
         assert len(dialogue) == 2, "dialogue must contain 2 items"
 
-    prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
+    if isinstance(dialogue, str):
+        prompt = dialogue
+    else:
+        prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
+
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     teacher_prompt_template = Template(teacher_prompt_template_jinja)

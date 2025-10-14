@@ -221,6 +221,7 @@ class BasePPOExpConfig(BaseConfig):
     # correctness of the underlying sample (student → student correctness,
     # teacher → teacher correctness).
     verifier_use_answer_target: bool = False
+    eval_verifier: bool = False
 
 
 

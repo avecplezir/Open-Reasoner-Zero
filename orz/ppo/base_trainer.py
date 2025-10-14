@@ -683,8 +683,8 @@ class BaseTrainer:
                 key = s_prompt  # group by base student prompt
                 if key not in group:
                     new_extra = dict(extra)
-                    # stick with the yes, gonna use later to compute reward for the teacher
-                    new_extra['teacher_answer'] = "yes"  # indicate mixed answer
+                    # remove teacher answer to evaluate teacher_yes and teacher_no correctly
+                    new_extra['teacher_answer'] = None
 
                     group[key] = {
                         "s_prompt": s_prompt,
