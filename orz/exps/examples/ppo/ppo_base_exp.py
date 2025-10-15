@@ -223,6 +223,22 @@ class BasePPOExpConfig(BaseConfig):
     verifier_use_answer_target: bool = False
     eval_verifier: bool = False
 
+    # Student history settings
+    # - When True, we will collect student-generated reasoning chains per prompt
+    #   and use them to condition teacher prompts (and optionally eval prompts).
+    use_student_history: bool = False
+    # Where to dump collected history as JSON/JSONL. If None, defaults to
+    #   f"{save_path}/student_history.jsonl".
+    student_history_dump_path: Optional[str] = None
+    # One or more JSON/JSONL files to load history from when building eval
+    # datasets. If provided, matched items will receive dialogue['history'].
+    student_history_load_paths: ListConfig = ListConfig([])
+    # Number of recent attempts to retain per label (FIFO) for quick access
+    # when constructing prompts. All attempts are still appended to the JSONL log.
+    student_history_fifo_size: int = 2
+
+    turn_off_thinking_check: bool = False
+
 
 
 class BasePPOExp(BaseExp):
@@ -325,7 +341,7 @@ class BasePPOExp(BaseExp):
             # "CUDA_LAUNCH_BLOCKING": "1",
             "CUDA_LAUNCH_BLOCKING": "1",
             "NCCL_P2P_DISABLE": "1",
-            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
         }
 
         # ray.init(

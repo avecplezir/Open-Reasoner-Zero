@@ -153,12 +153,40 @@ def create_teacher_prompt_from_answer(
     teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if cfg.teacher_explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
 
     if not eval:
-        assert len(dialogue) == 2, "dialogue must contain 2 items"
+        assert isinstance(dialogue, (list, str)), "dialogue must be a list or pre-rendered string"
+        if isinstance(dialogue, list):
+            assert len(dialogue) == 2, "dialogue must contain 2 items"
 
+    # Base prompt text (question). Allow passing a pre-rendered string
     if isinstance(dialogue, str):
         prompt = dialogue
     else:
         prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
+
+    # If requested, inject previous student attempts (YES/NO) from dialogue
+    # history in eval mode. We keep the full attempts including <answer>.
+    if eval and getattr(cfg, "use_student_history", False):
+        history_yes = None
+        history_no = None
+        if isinstance(dialogue, dict):
+            hist = dialogue.get("history")
+            if isinstance(hist, dict):
+                history_yes = hist.get("yes") or hist.get("yes_attempt")
+                history_no = hist.get("no") or hist.get("no_attempt")
+            # Flat variants
+            history_yes = history_yes or dialogue.get("history_yes")
+            history_no = history_no or dialogue.get("history_no")
+
+        if history_yes or history_no:
+            parts = ["Previous student attempt(s):"]
+            if history_yes:
+                parts.append("[YES]\n" + history_yes)
+            if history_no:
+                parts.append("[NO]\n" + history_no)
+            prompt = f"{prompt}\n\n" + "\n".join(parts)
+        else:
+            # When history is required but missing, assert to catch config mismatch
+            raise AssertionError("use_student_history=True but no dialogue['history'] found for eval item")
 
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)

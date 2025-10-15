@@ -80,7 +80,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-iter50-correct-{randint}'
+    e_name = f'adv-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -132,7 +132,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
-    separate_teacher_model: bool = True
+    separate_teacher_model: bool = False
     teacher_pretrain: Optional[str] = pretrain # f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/Qwen2.5-1.5B" #
 
     skip_student_training_to_debug: bool = False
@@ -154,6 +154,8 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     adversarial_training: bool = True
+    turn_off_thinking_check: bool = True
+
     verifier_use_mixed_chains: bool = True
     eval_verifier: bool = True
 

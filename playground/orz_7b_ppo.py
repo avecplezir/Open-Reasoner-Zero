@@ -276,7 +276,7 @@ class CustomRewardTrainer(RayPPOTrainer):
             think_pos = resp_txt.find("<think>")
             answer_pos = resp_txt.find("<answer>")
             formatting_ok = has_think and has_answer and (think_pos == -1 or answer_pos == -1 or think_pos < answer_pos)
-            formatting_ok = has_answer if self.cfg.adversarial_training else formatting_ok  # In adv training, only require answer
+            formatting_ok = has_answer if self.cfg.turn_off_thinking_check else formatting_ok  # In adv training, only require answer
             output["has_think"] = has_think
             output["has_answer"] = has_answer
             output["formatting_ok"] = formatting_ok
