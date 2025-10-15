@@ -751,7 +751,10 @@ class PolicyRayActorBase(RayActor):
             if self.args.use_kl_estimator_k3:
                 kl_loss = -kl_loss
                 r = kl_loss.exp()
-                kl_loss = r - 1.0 - kl_loss
+                if not self.args.reverse_kl:
+                    kl_loss = r - 1.0 - kl_loss
+                else:
+                    kl_loss = r * kl_loss - (kl_loss - 1)
             kl_loss = masked_mean(kl_loss, action_mask, dim=-1).mean()
             logger.info(f"kl_loss: {kl_loss.item()}")
         else:
