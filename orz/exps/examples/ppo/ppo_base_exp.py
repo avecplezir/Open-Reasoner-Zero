@@ -123,6 +123,7 @@ class BasePPOExpConfig(BaseConfig):
     init_kl_coef: float = 0.
     use_kl_estimator_k3: bool = True
 
+    reverse_kl: bool = False
     use_abs_kl: bool = False
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.0

@@ -1333,6 +1333,7 @@ class BaseTrainer:
                     action_mask=None,
                     use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
                     use_abs_kl=self.cfg.use_abs_kl,
+                    reverse=self.cfg.reverse_kl,
                 )
 
                 offset = 0

@@ -71,7 +71,7 @@ class PPOExpConfig(BasePPOExpConfig):
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'aug-iter50-correct-longrun-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
+    e_name = f'reverse-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -140,6 +140,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 1.0
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
+    reverse_kl: bool = True
 
 
 if __name__ == "__main__":

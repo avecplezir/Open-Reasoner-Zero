@@ -130,6 +130,7 @@ def compute_approx_kl(
     action_mask: Optional[torch.Tensor] = None,
     use_kl_estimator_k3: bool = False,
     use_abs_kl: bool = False,
+    reverse: bool = False,
 ) -> torch.Tensor:
     """
     Compute the approximate KL divergence between two distributions.
@@ -150,7 +151,10 @@ def compute_approx_kl(
     # Besides non negative, it is also unbiased and have lower variance.
     if use_kl_estimator_k3:
         log_ratio = -log_ratio
-        log_ratio = log_ratio.exp() - 1 - log_ratio
+        if not reverse:
+            log_ratio = log_ratio.exp() - 1 - log_ratio
+        else:
+            log_ratio = log_ratio.exp() * log_ratio - (log_ratio - 1)
 
     if use_abs_kl:
         log_ratio = log_ratio.abs()
