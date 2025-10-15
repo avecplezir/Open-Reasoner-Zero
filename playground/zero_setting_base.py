@@ -258,7 +258,7 @@ class EvalCustomDataset(PromptDataset):
 # -----------------------
 
 class _StudentHistoryBuffer:
-    def __init__(self, maxlen: int = 32):
+    def __init__(self, maxlen: int = 1):
         self._buf = defaultdict(lambda: {"yes": deque(maxlen=maxlen), "no": deque(maxlen=maxlen)})  # key -> {label: deque}
 
     def add(self, key: str, attempt: str, label: str) -> bool:

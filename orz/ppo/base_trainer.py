@@ -641,11 +641,11 @@ class BaseTrainer:
         Returns adv_prompts, adv_extras.
         """
 
-        extracted_reasonings: List[str] = []
-        for resp in combined_outputs:
-            idx = resp.rfind("</think>")
-            prev = resp[:idx].strip() if idx != -1 else resp.strip()
-            extracted_reasonings.append(prev)
+        # extracted_reasonings: List[str] = []
+        # for resp in combined_outputs:
+        #     idx = resp.rfind("</think>")
+        #     prev = resp[:idx].strip() if idx != -1 else resp.strip()
+        #     extracted_reasonings.append(prev)
 
         adv_prompts: List[str] = []
         adv_extras: List[dict] = []
@@ -662,15 +662,17 @@ class BaseTrainer:
             # collect one YES chain and one NO chain per base dialogue.
             group: Dict[str, Dict[str, Any]] = {}
 
-            for i, (t_prompt, s_prompt, extra, prev_r, tgenerated) in enumerate(
+            for i, (t_prompt, s_prompt, extra, tgenerated) in enumerate(
                 zip(
                     combined_all_teacher_prompts,
                     combined_all_student_prompts,
                     combined_extras,
-                    extracted_reasonings,
                     teacher_generated,
                 )
             ):
+                prev_r = combined_outputs[i]
+                logger.info(f'extracted_reasonings: {prev_r}')
+
                 # Only consider teacher-generated samples that have explicit teacher answers
                 if not tgenerated:
                     continue
@@ -698,7 +700,6 @@ class BaseTrainer:
 
             # Build mixed previous reasoning when both sides exist; otherwise fallback to single
             for key, bundle in group.items():
-                s_prompt = bundle["s_prompt"]
                 extra = bundle["extra"]
                 yes_list = bundle["chains"]["yes"]
                 no_list = bundle["chains"]["no"]
@@ -1383,7 +1384,7 @@ class BaseTrainer:
                             ss_reward_mean = final_answer_log_propbs.mean().item()
                             ss_reward_min = final_answer_log_propbs.min().item()
                         ss_reward = (
-                            self.cfg.kl_mean_coef * ss_reward_mean
+                            ss_reward_mean
                             + self.cfg.kl_max_coef * ss_reward_min
                         )
 
@@ -1395,7 +1396,7 @@ class BaseTrainer:
                     else:
                         ss_reward_mean, ss_reward_min = -2.7, -11.8
                         ss_reward = (
-                            self.cfg.kl_mean_coef * ss_reward_mean
+                            ss_reward_mean
                             + self.cfg.kl_max_coef * ss_reward_min
                         )
                         start_kl, end_kl, end_full = offset, offset + na, offset + na
@@ -1441,12 +1442,12 @@ class BaseTrainer:
                             kl_sum = kl_episode.sum(dim=-1)
                             if self.cfg.reward_kl_reduction == "mean":
                                 kl_reward = (
-                                    -self.cfg.kl_mean_coef * kl_mean
+                                    -kl_mean
                                     - self.cfg.kl_max_coef * kl_max
                                 )
                             elif self.cfg.reward_kl_reduction == "sum":
                                 kl_reward = (
-                                    -self.cfg.kl_mean_coef * kl_sum
+                                    -kl_sum
                                     - self.cfg.kl_max_coef * kl_max
                                 )
                             kl_reward = torch.clamp(

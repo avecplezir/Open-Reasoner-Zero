@@ -141,7 +141,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
     reverse_kl: bool = True
-    kl_mean_coef: float = 0.1
+    reward_kl_coef: float = 0.1
 
 
 if __name__ == "__main__":

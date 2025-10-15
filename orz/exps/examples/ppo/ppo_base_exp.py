@@ -148,7 +148,6 @@ class BasePPOExpConfig(BaseConfig):
     boxed_pattern: bool = False
 
     kl_max_coef: float = 0.01
-    kl_mean_coef: float = 1.
     reward_kl_coef: float = 1.
     kl_reward_clamp: float = 10
     topr_reward_coef: float = 0.

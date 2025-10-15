@@ -662,10 +662,6 @@ class CustomRewardTrainer(RayPPOTrainer):
                 else:
                     final_answers.append("")
 
-            # logger.info(f"Eval sample file_names: {file_names}")
-            # logger.info(f"Eval sample prompts: {prompts}")
-            # logger.info(f"Eval sample final_answer: {final_answers}")
-
             for prompt, output, final_answer, answer, file_name in zip(
                 prompts, outputs, final_answers, answers, file_names
             ):
@@ -845,6 +841,7 @@ class CustomRewardTrainer(RayPPOTrainer):
             for oy, on in zip(out_yes, out_no):
                 ry = extract_reasoning(oy.outputs[0].text)
                 rn = extract_reasoning(on.outputs[0].text)
+                logger.info(f'eval extracted_reasonings ry: {ry}')
                 mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn}")
 
             # Student prompts with mixed chains
