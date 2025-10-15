@@ -812,22 +812,16 @@ class CustomRewardTrainer(RayPPOTrainer):
             answers = list(extras["answer"])
             file_names = extras["file_name"]
 
-            logger.info(f"Verifier eval total samples: {len(dialogues)}, {len(answers)} {len(file_names)}")
-
             # Build teacher prompts: YES and NO per item, then generate explanations
             eval = True
             teacher_prompts_yes = [
                 create_teacher_prompt_from_answer(d, self.yes_token(), bos_token, cfg=self.cfg, is_correct=None, eval=eval)
                 for d in dialogues
             ]
-            logger.info(f"teacher_prompts_yes: {len(teacher_prompts_yes)}")
-
             teacher_prompts_no = [
                 create_teacher_prompt_from_answer(d, self.no_token(), bos_token, cfg=self.cfg, is_correct=None, eval=eval)
                 for d in dialogues
             ]
-
-            logger.info(f"teacher_prompts_yes: {len(teacher_prompts_no)}")
 
             out_yes_chunks = await asyncio.gather(*[
                 llm.generate.remote(
@@ -851,17 +845,14 @@ class CustomRewardTrainer(RayPPOTrainer):
             for oy, on in zip(out_yes, out_no):
                 ry = extract_reasoning(oy.outputs[0].text)
                 rn = extract_reasoning(on.outputs[0].text)
-                mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn} </think> <think>")
+                mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn}")
 
-            logger.info(f"mixed_prev_list: {len(mixed_prev_list)}")
             # Student prompts with mixed chains
             student_prompts = [
                 create_student_prompt(d, bos_token=bos_token, previous_reasoning=mp, cfg=self.cfg, eval=eval)
                 for d, mp in zip(dialogues, mixed_prev_list)
             ]
 
-            # logger.info(f'student_prompts {len(student_prompts[0])}')
-            # logger.info(f'student_prompts {student_prompts[0]}')
             # Accumulate for one-shot verifier generation later
             all_student_prompts.extend(student_prompts)
             all_dialogues.extend(dialogues)

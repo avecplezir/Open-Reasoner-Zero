@@ -34,7 +34,6 @@ from playground.zero_setting_base import (
     create_teacher_prompt_from_answer,
 )
 
-
 class BaseTrainer:
     """
     Base trainer with shared helpers that are stable and reusable across trainers.
@@ -639,7 +638,7 @@ class BaseTrainer:
         """
         Build adversarial continuation student prompts from teacher explanations.
         Keeps one new prompt per teacher sample (already repeated for GRPO).
-        Returns adv_prompts, adv_init_prompts, adv_extras.
+        Returns adv_prompts, adv_extras.
         """
 
         extracted_reasonings: List[str] = []
@@ -649,7 +648,6 @@ class BaseTrainer:
             extracted_reasonings.append(prev)
 
         adv_prompts: List[str] = []
-        adv_init_prompts: List[str] = []
         adv_extras: List[dict] = []
         adv_init_sources: List[bool] = []
         adv_init_final_answers: List[str] = []
@@ -706,19 +704,10 @@ class BaseTrainer:
                 no_list = bundle["chains"]["no"]
                 yes_indices = bundle["t_indices"]["yes"]
                 no_indices = bundle["t_indices"]["no"]
-                yes_t_prompts = bundle["t_prompts"]["yes"]
-                no_t_prompts = bundle["t_prompts"]["no"]
 
                 assert len(yes_list) == len(no_list) and len(yes_list) > 0, "yes and no lists must match and be non-empty"
                 for i in range(len(yes_list)):
-                    # Take one chain from each and shuffle the order
-                    candidates = [("yes", yes_list[i]), ("no", no_list[i])]
-                    random.shuffle(candidates)
-                    prev_chunks = []
-                    for lbl, text in candidates:
-                        prev_chunks.append(f"[Answer: {lbl}]: " + text)
-                    mixed_prev = " ".join(prev_chunks) + " </think> <think>"
-
+                    mixed_prev = f"[Answer: yes]: {yes_list[i]} [Answer: no]: {no_list[i]}"
                     new_prompt = create_student_prompt(
                         extra["dialogue"], bos_token=bos_token, previous_reasoning=mixed_prev, cfg=self.cfg
                     )
@@ -726,15 +715,12 @@ class BaseTrainer:
                     for _ in range(self.cfg.adv_n_samples_per_prompt):
                         adv_prompts.append(new_prompt)
                         adv_extras.append(extra)
-                        adv_init_prompts.append(yes_t_prompts[i])
 
                     # Map this mixed adversarial group to both YES and NO teacher indices
                     adv_teacher_index_groups.append([yes_indices[i], no_indices[i]])
-                    # adv_init_prompts.append([yes_t_prompts[i], no_t_prompts[i]])
 
             return (
                 adv_prompts,
-                adv_init_prompts,
                 adv_extras,
                 adv_teacher_index_groups,
             )
@@ -752,12 +738,10 @@ class BaseTrainer:
             new_prompt = create_student_prompt(
                 extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, cfg=self.cfg
             )
-            init_prompt = t_prompt if tgenerated else s_prompt
             new_extra = extra
 
             for _ in range(self.cfg.adv_n_samples_per_prompt):
                 adv_prompts.append(new_prompt)
-                adv_init_prompts.append(init_prompt)
                 adv_extras.append(new_extra)
                 adv_init_sources.append(tgenerated)
                 adv_init_final_answers.append(combined_final_answers[i])
@@ -767,7 +751,6 @@ class BaseTrainer:
 
         return (
             adv_prompts,
-            adv_init_prompts,
             adv_extras,
             adv_teacher_index_groups,
         )

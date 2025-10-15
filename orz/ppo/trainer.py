@@ -21,6 +21,7 @@ from orz.ppo.utils import (
 )
 
 from orz.ppo.base_trainer import BaseTrainer, compute_loss_type_hash
+from playground.zero_setting_base import _HISTORY_BUFFER
 
 
 class RayPPOTrainer(BaseTrainer):
@@ -394,6 +395,26 @@ class RayPPOTrainer(BaseTrainer):
                 student_responses_by_prompt[sp].append(sresp)
                 student_final_answers_by_prompt[sp].append(sfinal)
 
+            # Populate in-memory FIFO history buffer using teacher_yes/teacher_no labels
+            if self.cfg.use_student_history:
+                added = 0
+                total_flagged = 0
+                for extra, sresp, sfinal, yflag, nflag, fmt_ok in zip(all_extras, outputs, final_answers, teacher_yes, teacher_no, correct_formattings):
+                    if yflag:
+                        label = "yes"
+                    elif nflag:
+                        label = "no"
+                    else:
+                        continue
+                    total_flagged += 1
+
+                    key = extra["dialogue"][0]['value']
+                    if _HISTORY_BUFFER.add(key, sresp, label):
+                        added += 1
+
+                if total_flagged > 0 and added == 0:
+                    logger.warning("use_student_history=True but no samples were added to history buffer")
+
             # create teacher prompts from student prompts
             all_teacher_prompts, indices_incorrect = self._create_teacher_prompts_from_student(all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, all_student_prompts, bos_token)
 
@@ -541,7 +562,7 @@ class RayPPOTrainer(BaseTrainer):
         if self.cfg.adversarial_training:
 
             async with Timer("Generating verification responses"):
-                adv_prompts, adv_init_prompts, adv_extras, adv_teacher_index_groups = self._build_adversarial_student_prompts(
+                adv_prompts, adv_extras, adv_teacher_index_groups = self._build_adversarial_student_prompts(
                     combined_outputs,
                     combined_all_teacher_prompts,
                     combined_all_student_prompts,

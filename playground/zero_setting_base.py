@@ -1,8 +1,11 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
+from collections import defaultdict, deque
+import random
 from jinja2 import Template
 from loguru import logger
 
 from orz.ppo import PromptDataset
+from orz.ppo.tools.math_utils import solution2answer
 
 
 # Base prompt instruction templates used in all variants
@@ -163,30 +166,17 @@ def create_teacher_prompt_from_answer(
     else:
         prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
 
-    # If requested, inject previous student attempts (YES/NO) from dialogue
-    # history in eval mode. We keep the full attempts including <answer>.
-    if eval and getattr(cfg, "use_student_history", False):
-        history_yes = None
-        history_no = None
-        if isinstance(dialogue, dict):
-            hist = dialogue.get("history")
-            if isinstance(hist, dict):
-                history_yes = hist.get("yes") or hist.get("yes_attempt")
-                history_no = hist.get("no") or hist.get("no_attempt")
-            # Flat variants
-            history_yes = history_yes or dialogue.get("history_yes")
-            history_no = history_no or dialogue.get("history_no")
-
-        if history_yes or history_no:
+    # If requested, inject previous student attempts (YES/NO) sampled from
+    # the in-memory FIFO buffer. We keep the full attempts including <answer>.
+    if cfg.use_student_history:
+        y_hist, n_hist = _HISTORY_BUFFER.sample(prompt)
+        if y_hist or n_hist:
             parts = ["Previous student attempt(s):"]
-            if history_yes:
-                parts.append("[YES]\n" + history_yes)
-            if history_no:
-                parts.append("[NO]\n" + history_no)
+            if y_hist:
+                parts.append("[YES]\n" + y_hist)
+            if n_hist:
+                parts.append("[NO]\n" + n_hist)
             prompt = f"{prompt}\n\n" + "\n".join(parts)
-        else:
-            # When history is required but missing, assert to catch config mismatch
-            raise AssertionError("use_student_history=True but no dialogue['history'] found for eval item")
 
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
@@ -217,7 +207,6 @@ def create_teacher_prompt_from_answer(
 class CustomDataset(PromptDataset):
     def __init__(self, *args, **kwargs):
         # Optional flag to control teacher prompt style
-        # self.student_prompt_template = kwargs.pop("student_prompt_template", None)
         self.cfg = kwargs.pop("cfg", None)
         super().__init__(*args, **kwargs)
 
@@ -262,3 +251,31 @@ class EvalCustomDataset(PromptDataset):
         extra = {"answer": dialogue["final_answer"], "file_name": dialogue["file_name"], "dialogue": dialogue}
 
         return prompt, extra
+
+
+# -----------------------
+# In-memory FIFO history
+# -----------------------
+
+class _StudentHistoryBuffer:
+    def __init__(self, maxlen: int = 32):
+        self._buf = defaultdict(lambda: {"yes": deque(maxlen=maxlen), "no": deque(maxlen=maxlen)})  # key -> {label: deque}
+
+    def add(self, key: str, attempt: str, label: str) -> bool:
+        label_norm = solution2answer(label).strip().lower()
+        if label_norm not in ("yes", "no"):
+            return False
+        dq = self._buf[key][label_norm]
+        dq.append(attempt)
+        return True
+
+    def sample(self, key: str) -> Tuple[Optional[str], Optional[str]]:
+        # Randomly sample one prior attempt from each label, if present
+        yes_list = list(self._buf.get(key, {}).get("yes", deque()))
+        no_list = list(self._buf.get(key, {}).get("no", deque()))
+        y = random.choice(yes_list) if yes_list else None
+        n = random.choice(no_list) if no_list else None
+        return y, n
+
+
+_HISTORY_BUFFER = _StudentHistoryBuffer()
