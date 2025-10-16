@@ -106,13 +106,13 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 8 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 1 if not DEBUG_MODE else 4
+    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 5
 
     # generate related settings
@@ -125,14 +125,14 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
+    student_training_rounds: int = 10000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
-    separate_teacher_model: bool = False
+    separate_teacher_model: bool = True
     teacher_pretrain: Optional[str] = pretrain # f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/Qwen2.5-1.5B" #
 
     skip_student_training_to_debug: bool = False

@@ -641,11 +641,11 @@ class BaseTrainer:
         Returns adv_prompts, adv_extras.
         """
 
-        # extracted_reasonings: List[str] = []
-        # for resp in combined_outputs:
-        #     idx = resp.rfind("</think>")
-        #     prev = resp[:idx].strip() if idx != -1 else resp.strip()
-        #     extracted_reasonings.append(prev)
+        extracted_reasonings: List[str] = []
+        for resp in combined_outputs:
+            idx = resp.rfind("<answer>")
+            prev = resp[:idx].strip() if idx != -1 else resp.strip()
+            extracted_reasonings.append(prev)
 
         adv_prompts: List[str] = []
         adv_extras: List[dict] = []
@@ -662,16 +662,15 @@ class BaseTrainer:
             # collect one YES chain and one NO chain per base dialogue.
             group: Dict[str, Dict[str, Any]] = {}
 
-            for i, (t_prompt, s_prompt, extra, tgenerated) in enumerate(
+            for i, (t_prompt, s_prompt, prev_r, extra, tgenerated) in enumerate(
                 zip(
                     combined_all_teacher_prompts,
                     combined_all_student_prompts,
+                    extracted_reasonings,
                     combined_extras,
                     teacher_generated,
                 )
             ):
-                prev_r = combined_outputs[i]
-                logger.info(f'extracted_reasonings: {prev_r}')
 
                 # Only consider teacher-generated samples that have explicit teacher answers
                 if not tgenerated:

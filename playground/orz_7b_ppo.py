@@ -841,7 +841,7 @@ class CustomRewardTrainer(RayPPOTrainer):
             for oy, on in zip(out_yes, out_no):
                 ry = extract_reasoning(oy.outputs[0].text)
                 rn = extract_reasoning(on.outputs[0].text)
-                logger.info(f'eval extracted_reasonings ry: {ry}')
+                # logger.info(f'eval extracted_reasonings ry: {ry}')
                 mixed_prev_list.append(f"[Answer: yes]: {ry} [Answer: no]: {rn}")
 
             # Student prompts with mixed chains
