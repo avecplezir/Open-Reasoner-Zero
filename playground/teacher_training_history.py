@@ -137,11 +137,10 @@ class PPOExpConfig(BasePPOExpConfig):
     remove_student_reward_normalization: bool = True
 
     topr_reward_coef: float = 0.0
-    reward_kl_coef: float = 1.0
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
     reverse_kl: bool = True
-    kl_mean_coef: float = 0.1
+    reward_kl_coef: float = 0.1
 
     use_student_history: bool = True
 

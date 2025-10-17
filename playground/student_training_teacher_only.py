@@ -82,14 +82,14 @@ class PPOExpConfig(BasePPOExpConfig):
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
-        "data/boolq.json",
+        # "data/boolq.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
-            "data/eval_data/booliq_dev.json",
-            "data/eval_data/booliq_train.json",
+            # "data/eval_data/booliq_dev.json",
+            # "data/eval_data/booliq_train.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -129,7 +129,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -145,6 +145,12 @@ class PPOExpConfig(BasePPOExpConfig):
     topr_type: int = 0
 
     balance_yes_no_batches: bool = True
+
+    topr_reward_coef: float = 0.0
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 0.01
+    reverse_kl: bool = True
+    reward_kl_coef: float = 0.1
 
 
 if __name__ == "__main__":
