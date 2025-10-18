@@ -258,8 +258,9 @@ class EvalCustomDataset(PromptDataset):
 # -----------------------
 
 class _StudentHistoryBuffer:
-    def __init__(self, maxlen: int = 1):
+    def __init__(self, maxlen: int = 8):
         self._buf = defaultdict(lambda: {"yes": deque(maxlen=maxlen), "no": deque(maxlen=maxlen)})  # key -> {label: deque}
+        self.sample_last = False
 
     def add(self, key: str, attempt: str, label: str) -> bool:
         label_norm = solution2answer(label).strip().lower()
@@ -270,12 +271,20 @@ class _StudentHistoryBuffer:
         return True
 
     def sample(self, key: str) -> Tuple[Optional[str], Optional[str]]:
-        # Randomly sample one prior attempt from each label, if present
-        yes_list = list(self._buf.get(key, {}).get("yes", deque()))
-        no_list = list(self._buf.get(key, {}).get("no", deque()))
-        y = random.choice(yes_list) if yes_list else None
-        n = random.choice(no_list) if no_list else None
-        return y, n
+        if not self.sample_last:
+            # Randomly sample one prior attempt from each label, if present
+            yes_list = list(self._buf.get(key, {}).get("yes", deque()))
+            no_list = list(self._buf.get(key, {}).get("no", deque()))
+            y = random.choice(yes_list) if yes_list else None
+            n = random.choice(no_list) if no_list else None
+            return y, n
+        else:
+            # Return only the last attempt from each label, if present
+            yes_dq = self._buf.get(key, {}).get("yes", deque())
+            no_dq = self._buf.get(key, {}).get("no", deque())
+            y = yes_dq[-1] if yes_dq else None
+            n = no_dq[-1] if no_dq else None
+            return y, n
 
 
 _HISTORY_BUFFER = _StudentHistoryBuffer()

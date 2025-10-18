@@ -99,8 +99,8 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128
-    rollout_batch_size: int = 128
+    train_batch_size: int = 32
+    rollout_batch_size: int = 32
     num_warmup_steps: int = 5
     prompt_max_len: int = 8000
 
@@ -108,7 +108,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 4 if not DEBUG_MODE else 2
+    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
@@ -126,8 +126,8 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 0  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 10000  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
@@ -142,7 +142,7 @@ class PPOExpConfig(BasePPOExpConfig):
     student_loss_type: str = "ppo"
     avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
     adv_student_add_initial: bool = False
-    adv_teacher_add_initial: bool = False
+    adv_teacher_add_initial: bool = True
 
     # Prompt configuration
     student_prompt_continuation: bool = True

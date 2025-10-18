@@ -4,7 +4,6 @@ import os
 import random
 from functools import partial
 from typing import Any, Awaitable, Callable, List, Optional, Tuple, Union
-import wandb
 import numpy as np
 from collections import defaultdict, Counter
 import gc
@@ -15,12 +14,10 @@ from tqdm import tqdm
 
 from orz.ppo.utils import (
     Timer,
-    compute_approx_kl,
-    masked_mean,
     normalize_advantages,
 )
 
-from orz.ppo.base_trainer import BaseTrainer, compute_loss_type_hash
+from orz.ppo.base_trainer import BaseTrainer
 from playground.zero_setting_base import _HISTORY_BUFFER
 
 
@@ -416,6 +413,7 @@ class RayPPOTrainer(BaseTrainer):
                     logger.warning("use_student_history=True but no samples were added to history buffer")
 
             # create teacher prompts from student prompts
+            _HISTORY_BUFFER.sample_last = self.train_teacher  # sample only last yes and no answer during teacher training
             all_teacher_prompts, indices_incorrect = self._create_teacher_prompts_from_student(all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, all_student_prompts, bos_token)
 
             # Log a few examples to wandb right after student generation
@@ -631,36 +629,42 @@ class RayPPOTrainer(BaseTrainer):
                         # Single-teacher groups get the direct average match reward
                         combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                     else:
+                        filter = adv_correct_formattings[start:end]
+                        if self.cfg.adv_teacher_add_initial:
+                            filter = filter * adv_initial_scores[start:end]
                         if pos == 0:
-                            avg_teacher_match = float(np.mean(adv_teacher_yes[start:end] * adv_correct_formattings[start:end]))
+                            avg_teacher_match = float(np.mean(adv_teacher_yes[start:end] * filter))
                             # Mixed group, first index is "yes"
                             combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                         elif pos == 1:
-                            avg_teacher_match = float(np.mean(adv_teacher_no[start:end] * adv_correct_formattings[start:end]))
+                            avg_teacher_match = float(np.mean(adv_teacher_no[start:end] * filter))
                             # Mixed group, second index is "no"
                             combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                         else:
                             assert False, "Only support mixed groups of size 2 for now"
 
+                        # if self.cfg.adv_teacher_add_initial:
+                        #     combined_teacher_custom_rewards[idx][-1] += float(np.mean(adv_initial_scores[start:end])) #the same as no reward for incorrect
+
                 # Compute student-side adversarial match average for this group
                 avg_student_match = float(np.mean(adv_initial_scores[start:end]))
                 # Apply negative strategy separately per teacher index using its original correctness
                 for idx in adv_teacher_index_groups[g]:
-                    adj_student_match = avg_student_match
+                    avg_student_match = avg_student_match
                     if not combined_initial_scores[idx]:
                         if self.cfg.avd_student_negative_strategy == "inverse":
-                            adj_student_match = 1 - adj_student_match
+                            avg_student_match = 1 - avg_student_match
                         elif self.cfg.avd_student_negative_strategy == "negate":
-                            adj_student_match = -adj_student_match
+                            avg_student_match = -avg_student_match
                         elif self.cfg.avd_student_negative_strategy == "inv_neg":
-                            adj_student_match = -(1 - adj_student_match)
+                            avg_student_match = -(1 - avg_student_match)
                         # "same" leaves it unchanged
 
                     if self.cfg.adv_student_add_initial:
-                        adj_student_match = adj_student_match + combined_custom_rewards[idx][-1]
+                        avg_student_match = avg_student_match + combined_custom_rewards[idx][-1]
 
                     if self.train_student:
-                        combined_custom_rewards[idx][-1] = adj_student_match
+                        combined_custom_rewards[idx][-1] = avg_student_match
 
             for g in range(len(adv_teacher_index_groups)):
                 if len(adv_teacher_index_groups[g]) == 2:

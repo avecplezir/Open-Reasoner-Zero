@@ -76,7 +76,7 @@ class PPOExpConfig(BasePPOExpConfig):
         gpu_memory_utilization: float = 0.3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen3-4B-Base" #f"{prefix}/Qwen3-1.7B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-1.5B" ##f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/checkpoints/adv_training_adv-269/iter50/policy" #f"{prefix}/Qwen3-4B-Base" #f"{prefix}/Qwen3-1.7B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-1.5B" ##f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
@@ -99,16 +99,15 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128
-    rollout_batch_size: int = 128
+    train_batch_size: int = 128 if not DEBUG_MODE else 128
     num_warmup_steps: int = 5
     prompt_max_len: int = 8000
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 4 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
@@ -126,15 +125,15 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 0  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 10000  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 10000  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = pretrain # f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/Qwen2.5-1.5B" #
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/Qwen2.5-1.5B" #
 
     skip_student_training_to_debug: bool = False
     skip_student_first_n_rounds: int = 0
