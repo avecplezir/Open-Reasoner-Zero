@@ -599,9 +599,14 @@ class BaseTrainer:
                 new_extra["teacher_answer"] = ans
 
                 index = len(all_teacher_prompts)
-                all_teacher_prompts.extend([teacher_prompt] * self.cfg.n_samples_per_prompt)
-                aug_all_student_prompts.extend([student_prompt] * self.cfg.n_samples_per_prompt)
-                aug_all_extras.extend([dict(new_extra)] * self.cfg.n_samples_per_prompt)
+
+                if is_corr and self.cfg.teacher_k_correct_per_prompt > 0:
+                    repeats = self.cfg.teacher_k_correct_per_prompt
+                else:
+                    repeats =  self.cfg.n_samples_per_prompt
+                all_teacher_prompts.extend([teacher_prompt] * repeats)
+                aug_all_student_prompts.extend([student_prompt] * repeats)
+                aug_all_extras.extend([dict(new_extra)] * repeats)
 
                 new_indicess.append(index)
                 if representative_incorrect:

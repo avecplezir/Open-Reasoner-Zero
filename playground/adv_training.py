@@ -160,6 +160,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     verifier_use_mixed_chains: bool = True
     eval_verifier: bool = True
+    adv_teacher_get_correct_reward: bool = True
 
 
 if __name__ == "__main__":

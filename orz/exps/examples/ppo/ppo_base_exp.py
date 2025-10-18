@@ -111,6 +111,9 @@ class BasePPOExpConfig(BaseConfig):
     teacher_temperature: float = 0.7
     top_k: int = -1
     stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
+    # Name of the tag that encloses hidden/internal reasoning. Used in prompt
+    # templates and parsing/stopping logic. Default keeps prior behavior.
+    hidden_tag_name: str = "think"
 
     # student generation retry logic
     # When enabled, generate multiple rounds with the student and
@@ -200,7 +203,12 @@ class BasePPOExpConfig(BaseConfig):
     adversarial_training: bool = False
     adv_student_add_initial: bool = False
     adv_teacher_add_initial: bool = False
+    adv_teacher_get_correct_reward: bool = False
     verifier_use_mixed_chains: bool = False
+
+    # Teacher correct-only sampling for student
+    # `teacher_k_correct_per_prompt` correct teacher responses
+    teacher_k_correct_per_prompt: int = -1
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = 0

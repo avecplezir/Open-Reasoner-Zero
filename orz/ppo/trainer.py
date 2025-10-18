@@ -620,31 +620,32 @@ class RayPPOTrainer(BaseTrainer):
                 end = (g + 1) * self.cfg.adv_n_samples_per_prompt
                 index_group_dict[adv_prompts[start]] = adv_teacher_index_groups[g]
 
-                # teacher_adv_match_rewards.append(avg_teacher_match)
-
                 # Assign teacher reward to all indices participating in this mixed group
                 for pos, idx in enumerate(adv_teacher_index_groups[g]):
-                    if len(adv_teacher_index_groups[g]) == 1:
-                        avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end]))
-                        # Single-teacher groups get the direct average match reward
+                    if self.cfg.adv_teacher_get_correct_reward:
+                        # Use correctness-based reward
+                        avg_teacher_match = float(np.mean(adv_initial_scores[start:end]))
                         combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                     else:
                         filter = adv_correct_formattings[start:end]
                         if self.cfg.adv_teacher_add_initial:
                             filter = filter * adv_initial_scores[start:end]
-                        if pos == 0:
-                            avg_teacher_match = float(np.mean(adv_teacher_yes[start:end] * filter))
-                            # Mixed group, first index is "yes"
-                            combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
-                        elif pos == 1:
-                            avg_teacher_match = float(np.mean(adv_teacher_no[start:end] * filter))
-                            # Mixed group, second index is "no"
+
+                        if len(adv_teacher_index_groups[g]) == 1:
+                            avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end] * filter))
+                            # Single-teacher groups get the direct average match reward
                             combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                         else:
-                            assert False, "Only support mixed groups of size 2 for now"
-
-                        # if self.cfg.adv_teacher_add_initial:
-                        #     combined_teacher_custom_rewards[idx][-1] += float(np.mean(adv_initial_scores[start:end])) #the same as no reward for incorrect
+                            if pos == 0:
+                                avg_teacher_match = float(np.mean(adv_teacher_yes[start:end] * filter))
+                                # Mixed group, first index is "yes"
+                                combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
+                            elif pos == 1:
+                                avg_teacher_match = float(np.mean(adv_teacher_no[start:end] * filter))
+                                # Mixed group, second index is "no"
+                                combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
+                            else:
+                                assert False, "Only support mixed groups of size 2 for now"
 
                 # Compute student-side adversarial match average for this group
                 avg_student_match = float(np.mean(adv_initial_scores[start:end]))
