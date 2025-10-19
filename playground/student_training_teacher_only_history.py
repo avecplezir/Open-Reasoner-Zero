@@ -101,7 +101,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -153,7 +153,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.1
 
     use_student_history: bool = True
-    teacher_k_correct_per_prompt: int = 8
+    teacher_k_correct_per_prompt: int = 16
 
 
 if __name__ == "__main__":

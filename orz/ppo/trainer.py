@@ -667,11 +667,12 @@ class RayPPOTrainer(BaseTrainer):
                     if self.train_student:
                         combined_custom_rewards[idx][-1] = avg_student_match
 
-            for g in range(len(adv_teacher_index_groups)):
-                if len(adv_teacher_index_groups[g]) == 2:
-                    idx1, idx2 = adv_teacher_index_groups[g]
-                    two_index_sum = combined_teacher_custom_rewards[idx1][-1] + combined_teacher_custom_rewards[idx2][-1]
-                    assert two_index_sum <= 1.01, f"Sum of teacher rewards for mixed group must be 1, got {two_index_sum}"
+            if not self.cfg.adv_teacher_get_correct_reward:
+                for g in range(len(adv_teacher_index_groups)):
+                    if len(adv_teacher_index_groups[g]) == 2:
+                        idx1, idx2 = adv_teacher_index_groups[g]
+                        two_index_sum = combined_teacher_custom_rewards[idx1][-1] + combined_teacher_custom_rewards[idx2][-1]
+                        assert two_index_sum <= 1.01, f"Sum of teacher rewards for mixed group must be 1, got {two_index_sum}"
 
             self.log_adversarial_examples(
                 student_prompts=combined_all_student_prompts,
