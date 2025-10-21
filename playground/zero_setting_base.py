@@ -169,13 +169,17 @@ def create_teacher_prompt_from_answer(
     # If requested, inject previous student attempts (YES/NO) sampled from
     # the in-memory FIFO buffer. We keep the full attempts including <answer>.
     if cfg.use_student_history:
-        y_hist, n_hist = _HISTORY_BUFFER.sample(prompt)
-        if y_hist or n_hist:
+        y_hist_list, n_hist_list = _HISTORY_BUFFER.sample(prompt, k=cfg.student_history_samples_per_label)
+        if y_hist_list or n_hist_list:
             parts = ["Previous student attempt(s):"]
-            if y_hist:
-                parts.append("[YES]\n" + y_hist)
-            if n_hist:
-                parts.append("[NO]\n" + n_hist)
+            if y_hist_list:
+                parts.append("[YES]")
+                for idx, y in enumerate(y_hist_list, 1):
+                    parts.append(f"- {y}")
+            if n_hist_list:
+                parts.append("[NO]")
+                for idx, n in enumerate(n_hist_list, 1):
+                    parts.append(f"- {n}")
             prompt = f"{prompt}\n\n" + "\n".join(parts)
 
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
@@ -270,20 +274,22 @@ class _StudentHistoryBuffer:
         dq.append(attempt)
         return True
 
-    def sample(self, key: str) -> Tuple[Optional[str], Optional[str]]:
+    def sample(self, key: str, k: int = 1) -> Tuple[List[str], List[str]]:
+        if k <= 0:
+            return [], []
         if not self.sample_last:
-            # Randomly sample one prior attempt from each label, if present
+            # Randomly sample up to k prior attempts from each label, if present
             yes_list = list(self._buf.get(key, {}).get("yes", deque()))
             no_list = list(self._buf.get(key, {}).get("no", deque()))
-            y = random.choice(yes_list) if yes_list else None
-            n = random.choice(no_list) if no_list else None
+            y = random.sample(yes_list, k=min(k, len(yes_list))) if yes_list else []
+            n = random.sample(no_list, k=min(k, len(no_list))) if no_list else []
             return y, n
         else:
-            # Return only the last attempt from each label, if present
-            yes_dq = self._buf.get(key, {}).get("yes", deque())
-            no_dq = self._buf.get(key, {}).get("no", deque())
-            y = yes_dq[-1] if yes_dq else None
-            n = no_dq[-1] if no_dq else None
+            # Return only the last k attempts from each label, if present
+            yes_list = self._buf.get(key, {}).get("yes", deque())
+            no_list = self._buf.get(key, {}).get("no", deque())
+            y = list(yes_list)[-k:] if yes_list else []
+            n = list(no_list)[-k:] if no_list else []
             return y, n
 
 

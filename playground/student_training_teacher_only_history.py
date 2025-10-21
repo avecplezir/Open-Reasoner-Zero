@@ -120,7 +120,7 @@ class PPOExpConfig(BasePPOExpConfig):
     student_training_rounds: int = 4  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
     generate_with_student: bool = False
@@ -153,6 +153,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.1
 
     use_student_history: bool = True
+    student_history_samples_per_label: int = 2
     teacher_k_correct_per_prompt: int = 16
 
 

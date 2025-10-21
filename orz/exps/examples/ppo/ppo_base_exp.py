@@ -237,6 +237,9 @@ class BasePPOExpConfig(BaseConfig):
     # - When True, we will collect student-generated reasoning chains per prompt
     #   and use them to condition teacher prompts (and optionally eval prompts).
     use_student_history: bool = False
+    # Number of prior student attempts to append per label (yes/no)
+    # when constructing teacher prompts from history.
+    student_history_samples_per_label: int = 1
     turn_off_thinking_check: bool = False
 
 

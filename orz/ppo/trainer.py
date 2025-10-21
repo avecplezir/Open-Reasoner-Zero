@@ -330,6 +330,7 @@ class RayPPOTrainer(BaseTrainer):
         student_responses_by_prompt = defaultdict(list)
         student_final_answers_by_prompt = defaultdict(list)
         student_response_ptr = defaultdict(int)
+        _HISTORY_BUFFER.sample_last = self.train_teacher  # sample only last yes and no answer during teacher training
 
         # Prepare BOS token for logging
         if self.tokenizer.bos_token_id is None:
@@ -413,7 +414,6 @@ class RayPPOTrainer(BaseTrainer):
                     logger.warning("use_student_history=True but no samples were added to history buffer")
 
             # create teacher prompts from student prompts
-            _HISTORY_BUFFER.sample_last = self.train_teacher  # sample only last yes and no answer during teacher training
             all_teacher_prompts, indices_incorrect = self._create_teacher_prompts_from_student(all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, all_student_prompts, bos_token)
 
             # Log a few examples to wandb right after student generation
