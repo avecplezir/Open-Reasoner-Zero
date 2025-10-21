@@ -85,7 +85,6 @@ class BasePPOExpConfig(BaseConfig):
     micro_forward_batch_size: int = 1
     freezing_actor_steps: int = -1
 
-
     train_batch_size: int = 256
     rollout_batch_size: int = 128
     micro_rollout_batch_size: int = 128
@@ -201,6 +200,7 @@ class BasePPOExpConfig(BaseConfig):
     teacher_add_role_prefix: bool = False
 
     adversarial_training: bool = False
+    adv_n_samples_per_prompt: int = 1
     adv_student_add_initial: bool = False
     adv_teacher_add_initial: bool = False
     adv_teacher_get_correct_reward: bool = False

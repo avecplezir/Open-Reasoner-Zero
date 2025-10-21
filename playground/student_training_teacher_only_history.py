@@ -123,7 +123,7 @@ class PPOExpConfig(BasePPOExpConfig):
     enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
-    generate_with_student: bool = False
+    generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect

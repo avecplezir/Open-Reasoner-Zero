@@ -81,15 +81,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/strategyqa.json",
-        # "data/boolq.json",
+        "data/proofwriter_train.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
-            # "data/eval_data/booliq_dev.json",
-            # "data/eval_data/booliq_train.json",
+            "data/eval_data/ruletaker_dev.json",
+            "data/eval_data/proofwriter_dev.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -120,10 +117,10 @@ class PPOExpConfig(BasePPOExpConfig):
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
-    enable_eval: bool = True if not DEBUG_MODE else True
+    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
 
-    generate_with_student: bool = False
+    generate_with_student: bool = True
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect

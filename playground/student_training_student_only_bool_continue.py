@@ -75,7 +75,7 @@ class PPOExpConfig(BasePPOExpConfig):
         gpu_memory_utilization: float = 0.3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] = f"{prefix}/checkpoints/student_training_teacher_only_iter50-t-iter50-topr-1-20/iter250/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
@@ -146,8 +146,8 @@ class PPOExpConfig(BasePPOExpConfig):
     train_student_on_teacher_data_only: bool = False
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
-    separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = pretrain
+    separate_teacher_model: bool = False
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/student_training_teacher_only_iter50-t-iter50-topr-1-20/iterteacher-250/policy"
 
     general_propmt_yes_no: bool = True
     student_loss_type: str = "ppo"
