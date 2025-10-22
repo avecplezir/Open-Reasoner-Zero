@@ -107,14 +107,14 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 4 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
 
     enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 10
+    eval_interval: int = 2
 
     # generate related settings
     generate_max_len: int = 4000 #12000 #8000  # 2000 #4000 # TODO: change to larger later
