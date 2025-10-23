@@ -181,6 +181,8 @@ class BasePPOExpConfig(BaseConfig):
     filter_for_correct_formatting_student: bool = False
     filter_for_correct_formatting_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
+    student_use_only_student_negatives: bool = False
+    student_use_only_student_positives: bool = False
 
     eval_teacher: bool = False
 

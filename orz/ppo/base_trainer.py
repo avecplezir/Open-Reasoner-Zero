@@ -481,7 +481,7 @@ class BaseTrainer:
         # each unique prompt exactly n_samples_per_prompt times.
         added_teacher_prompt_keys = set()
 
-        allowed_strategies = {"correct", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
+        allowed_strategies = {"correct", "wrong", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
         assert self.cfg.augment_strategy in allowed_strategies, (
             f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
         )
@@ -513,6 +513,16 @@ class BaseTrainer:
                 representative_incorrect = bool(student_score is not None and not student_score)
                 teacher_answer = extra["answer"]
                 is_correct = True
+
+            elif self.cfg.augment_strategy == "wrong":
+                representative_incorrect = bool(student_score is not None and not student_score)
+                if student_score and teacher_yes[i]:
+                    teacher_answer = self.no_token()
+                elif student_score and teacher_no[i]:
+                    teacher_answer = self.yes_token()
+                else:
+                    continue
+                is_correct = False
 
             elif self.cfg.augment_strategy == "correct_incorrect":
                 representative_incorrect = not bool(student_score)
@@ -587,12 +597,14 @@ class BaseTrainer:
             teacher_answers = [teacher_answer] if teacher_answers is None else teacher_answers
             is_corrects = [is_correct] if len(teacher_answers) == 1 else is_corrects
 
+            repeat_prompts = not (self.cfg.use_student_history and self.train_student)
+
             for ans, is_corr in zip(teacher_answers, is_corrects):
                 teacher_prompt = create_teacher_prompt_from_answer(
                     extra["dialogue"], ans, bos_token, cfg=self.cfg, is_correct=is_corr
                 )
                 key = teacher_prompt
-                if key in added_teacher_prompt_keys:
+                if key in added_teacher_prompt_keys and repeat_prompts:
                     continue
 
                 new_extra = dict(extra)
@@ -600,7 +612,9 @@ class BaseTrainer:
 
                 index = len(all_teacher_prompts)
 
-                if is_corr and self.cfg.teacher_k_correct_per_prompt > 0:
+                if not repeat_prompts:
+                    repeats = 1
+                elif is_corr and self.cfg.teacher_k_correct_per_prompt > 0:
                     repeats = self.cfg.teacher_k_correct_per_prompt
                 else:
                     repeats =  self.cfg.n_samples_per_prompt
@@ -1026,6 +1040,36 @@ class BaseTrainer:
             logger.info(f"Formatting filter: dropping {dropped}/{len(correct_formattings)} samples with bad formatting")
             if hasattr(self, "writer") and self.writer is not None and len(correct_formattings) > 0:
                 self.writer.add_scalar("teacher_training_dropped_samples", dropped / len(correct_formattings), self.global_step)
+            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+            outputs = [outputs[i] for i in keep_idx]
+            custom_rewards = [custom_rewards[i] for i in keep_idx]
+            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+            answer_indices = [answer_indices[i] for i in keep_idx]
+            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+            initial_scores = [initial_scores[i] for i in keep_idx]
+            teacher_generated = [teacher_generated[i] for i in keep_idx]
+            correct_formattings = [correct_formattings[i] for i in keep_idx]
+
+        if self.cfg.student_use_only_student_negatives and self.train_student:
+            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or not corr]
+            dropped = len(teacher_generated) - len(keep_idx)
+            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
+            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
+            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
+            outputs = [outputs[i] for i in keep_idx]
+            custom_rewards = [custom_rewards[i] for i in keep_idx]
+            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
+            answer_indices = [answer_indices[i] for i in keep_idx]
+            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
+            initial_scores = [initial_scores[i] for i in keep_idx]
+            teacher_generated = [teacher_generated[i] for i in keep_idx]
+            correct_formattings = [correct_formattings[i] for i in keep_idx]
+
+        if self.cfg.student_use_only_student_positives and self.train_student:
+            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or corr]
+            dropped = len(teacher_generated) - len(keep_idx)
+            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
             all_student_prompts = [all_student_prompts[i] for i in keep_idx]
             all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
             outputs = [outputs[i] for i in keep_idx]
