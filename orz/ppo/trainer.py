@@ -341,8 +341,9 @@ class RayPPOTrainer(BaseTrainer):
         # the same, but now generate data with student prompts
         # Create paired data (positive/negative for each prompt)
         paired_data = []
+        n_student_samples_per_prompt = self.cfg.n_student_samples_per_prompt if self.cfg.n_student_samples_per_prompt > 0 else self.cfg.n_samples_per_prompt
         for prompt in all_inputs:
-            for _ in range(self.cfg.n_samples_per_prompt):
+            for _ in range(n_student_samples_per_prompt):
                 paired_data.append((
                     prompt[0],  # student prompt
                     prompt[1]  # extra info
@@ -603,7 +604,6 @@ class RayPPOTrainer(BaseTrainer):
             adv_teacher_no = np.array(adv_teacher_no)
             adv_correct_formattings = np.array(adv_correct_formattings)
 
-            # teacher_adv_match_rewards = []
             # If we have generated adversarial responses for each teacher prompt, compute
             # teacher rewards as the average agreement of adversarial final answers with
             # the teacher-declared answer embedded in the prompts. This averages over

@@ -98,7 +98,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -113,8 +113,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 10
-    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    initial_teacher_training_rounds: int = 20
+    student_training_rounds: int = 4  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     enable_eval: bool = True if not DEBUG_MODE else False
@@ -150,7 +150,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_coef: float = 0.1
 
     use_student_history: bool = True
-    student_history_samples_per_label: int = 2
+    student_history_samples_per_label: int = 1
 
 
 if __name__ == "__main__":

@@ -102,6 +102,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     num_episodes: int = 20
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_student_samples_per_prompt: int = 4 if not DEBUG_MODE else 1
+    n_teacher_samples_per_prompt: int = 12 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001

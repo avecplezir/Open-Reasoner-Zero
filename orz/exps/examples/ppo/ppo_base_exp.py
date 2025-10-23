@@ -244,6 +244,9 @@ class BasePPOExpConfig(BaseConfig):
     student_history_samples_per_label: int = 1
     turn_off_thinking_check: bool = False
 
+    n_student_samples_per_prompt: int = -1
+    n_teacher_samples_per_prompt: int = -1
+    repeat_randomply_once: bool = False
 
 
 class BasePPOExp(BaseExp):
