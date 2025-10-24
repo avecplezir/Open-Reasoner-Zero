@@ -142,8 +142,8 @@ class PPOExpConfig(BasePPOExpConfig):
     student_loss_type: str = "ppo"
     avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
     adv_student_add_initial: bool = False
-    adv_teacher_add_initial: bool = True
-    teacher_match_coef: float = 1
+    adv_teacher_add_initial: bool = False
+    teacher_match_coef: float = 1.
 
     # Prompt configuration
     student_prompt_continuation: bool = True

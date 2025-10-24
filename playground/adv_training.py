@@ -107,8 +107,8 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    adv_n_samples_per_prompt: int = 1 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
@@ -143,6 +143,7 @@ class PPOExpConfig(BasePPOExpConfig):
     avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
     adv_student_add_initial: bool = False
     adv_teacher_add_initial: bool = False
+    teacher_match_coef: float = 1.0
 
     # Prompt configuration
     student_prompt_continuation: bool = True
@@ -161,7 +162,7 @@ class PPOExpConfig(BasePPOExpConfig):
     verifier_use_mixed_chains: bool = True
     eval_verifier: bool = True
     adv_teacher_get_correct_reward: bool = True
-    repeat_randomply_once: bool = True
+    repeat_randomly_once: bool = True
 
 
 if __name__ == "__main__":

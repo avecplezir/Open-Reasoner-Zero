@@ -394,24 +394,30 @@ class RayPPOTrainer(BaseTrainer):
                 student_responses_by_prompt[sp].append(sresp)
                 student_final_answers_by_prompt[sp].append(sfinal)
 
-            # Populate in-memory FIFO history buffer using teacher_yes/teacher_no labels
+            # Populate in-memory FIFO history buffer with yes/no and correctness labels
             if self.cfg.use_student_history:
                 added = 0
-                total_flagged = 0
-                for extra, sresp, sfinal, yflag, nflag, fmt_ok in zip(all_extras, outputs, final_answers, teacher_yes, teacher_no, correct_formattings):
-                    if yflag:
-                        label = "yes"
-                    elif nflag:
-                        label = "no"
+                for extra, sresp, sfinal, yflag, nflag, fmt_ok, student_score in zip(
+                    all_extras, outputs, final_answers, teacher_yes, teacher_no, correct_formattings, initial_scores
+                ):
+                    # Add by explicit yes/no when available
+                    label = None
+
+                    if self.cfg.augment_strategy == "correct_incorrect":
+                        key = extra["dialogue"][0]['value']
+                        if student_score is not None:
+                            if _HISTORY_BUFFER.add_correctness(key, sresp, bool(student_score)):
+                                added += 1
                     else:
-                        continue
-                    total_flagged += 1
+                        if yflag:
+                            label = "yes"
+                        elif nflag:
+                            label = "no"
+                        if label is not None:
+                            if _HISTORY_BUFFER.add(key, sresp, label):
+                                added += 1
 
-                    key = extra["dialogue"][0]['value']
-                    if _HISTORY_BUFFER.add(key, sresp, label):
-                        added += 1
-
-                if total_flagged > 0 and added == 0:
+                if len(initial_scores) > 0 and added == 0:
                     logger.warning("use_student_history=True but no samples were added to history buffer")
 
             # create teacher prompts from student prompts
@@ -628,8 +634,6 @@ class RayPPOTrainer(BaseTrainer):
                         combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                     else:
                         filter = adv_correct_formattings[start:end]
-                        if self.cfg.adv_teacher_add_initial:
-                            filter = filter * adv_initial_scores[start:end]
 
                         if len(adv_teacher_index_groups[g]) == 1:
                             avg_teacher_match = float(np.mean(adv_initial_teacher_scores[start:end] * filter))
@@ -646,6 +650,9 @@ class RayPPOTrainer(BaseTrainer):
                                 combined_teacher_custom_rewards[idx][-1] = avg_teacher_match
                             else:
                                 assert False, "Only support mixed groups of size 2 for now"
+
+                if self.cfg.adv_teacher_add_initial:
+                    combined_teacher_custom_rewards[idx][-1] = self.cfg.teacher_match_coef * combined_teacher_custom_rewards[idx][-1] * float(np.mean(adv_initial_scores[start:end]))
 
                 # Compute student-side adversarial match average for this group
                 avg_student_match = float(np.mean(adv_initial_scores[start:end]))
@@ -667,7 +674,7 @@ class RayPPOTrainer(BaseTrainer):
                     if self.train_student:
                         combined_custom_rewards[idx][-1] = avg_student_match
 
-            if not self.cfg.adv_teacher_get_correct_reward:
+            if not self.cfg.adv_teacher_get_correct_reward and not self.cfg.repeat_randomly_once:
                 for g in range(len(adv_teacher_index_groups)):
                     if len(adv_teacher_index_groups[g]) == 2:
                         idx1, idx2 = adv_teacher_index_groups[g]

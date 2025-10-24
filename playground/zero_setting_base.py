@@ -166,20 +166,30 @@ def create_teacher_prompt_from_answer(
     else:
         prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
 
-    # If requested, inject previous student attempts (YES/NO) sampled from
+    # If requested, inject previous student attempts sampled from
     # the in-memory FIFO buffer. We keep the full attempts including <answer>.
     if cfg.use_student_history:
-        y_hist_list, n_hist_list = _HISTORY_BUFFER.sample(prompt, k=cfg.student_history_samples_per_label)
-        if y_hist_list or n_hist_list:
+        if getattr(cfg, "augment_strategy", None) == "correct_incorrect":
+            a_title, b_title = "[CORRECT]", "[INCORRECT]"
+            a_list, b_list = _HISTORY_BUFFER.sample_by_labels(
+                prompt, ("correct", "incorrect"), k=cfg.student_history_samples_per_label
+            )
+        else:
+            a_title, b_title = "[YES]", "[NO]"
+            a_list, b_list = _HISTORY_BUFFER.sample_by_labels(
+                prompt, ("yes", "no"), k=cfg.student_history_samples_per_label
+            )
+
+        if a_list or b_list:
             parts = ["Previous student attempt(s):"]
-            if y_hist_list:
-                parts.append("[YES]")
-                for idx, y in enumerate(y_hist_list, 1):
-                    parts.append(f"- {y}")
-            if n_hist_list:
-                parts.append("[NO]")
-                for idx, n in enumerate(n_hist_list, 1):
-                    parts.append(f"- {n}")
+            if a_list:
+                parts.append(a_title)
+                for item in a_list:
+                    parts.append(f"- {item}")
+            if b_list:
+                parts.append(b_title)
+                for item in b_list:
+                    parts.append(f"- {item}")
             prompt = f"{prompt}\n\n" + "\n".join(parts)
 
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
@@ -263,34 +273,66 @@ class EvalCustomDataset(PromptDataset):
 
 class _StudentHistoryBuffer:
     def __init__(self, maxlen: int = 8):
-        self._buf = defaultdict(lambda: {"yes": deque(maxlen=maxlen), "no": deque(maxlen=maxlen)})  # key -> {label: deque}
+        # key -> {label: deque}
+        self._buf = defaultdict(
+            lambda: {
+                "yes": deque(maxlen=maxlen),
+                "no": deque(maxlen=maxlen),
+                "correct": deque(maxlen=maxlen),
+                "incorrect": deque(maxlen=maxlen),
+            }
+        )
         self.sample_last = False
 
     def add(self, key: str, attempt: str, label: str) -> bool:
-        label_norm = solution2answer(label).strip().lower()
-        if label_norm not in ("yes", "no"):
+        """Add an attempt under a label.
+
+        Accepts label in {yes, no} (normalized via solution2answer) or
+        {correct, incorrect} directly. Returns True if added.
+        """
+        if label is None:
             return False
-        dq = self._buf[key][label_norm]
+        raw = str(label).strip().lower()
+        mapped = solution2answer(raw).strip().lower()
+        if mapped in ("yes", "no"):
+            lab = mapped
+        elif raw in ("correct", "incorrect"):
+            lab = raw
+        else:
+            return False
+        dq = self._buf[key][lab]
         dq.append(attempt)
         return True
 
-    def sample(self, key: str, k: int = 1) -> Tuple[List[str], List[str]]:
+    def add_correctness(self, key: str, attempt: str, is_correct: bool) -> bool:
+        """Convenience method to add using a boolean correctness label."""
+        lab = "correct" if bool(is_correct) else "incorrect"
+        dq = self._buf[key][lab]
+        dq.append(attempt)
+        return True
+
+    def sample_by_labels(self, key: str, labels: Tuple[str, str], k: int = 1) -> Tuple[List[str], List[str]]:
+        """Sample up to k attempts for each of the two provided labels.
+
+        Labels should be present in the buffer (e.g., ("yes","no") or ("correct","incorrect")).
+        Respects `sample_last` to either take last-k or random-k.
+        """
         if k <= 0:
             return [], []
+        a_label, b_label = labels
+        a_list = list(self._buf.get(key, {}).get(a_label, deque()))
+        b_list = list(self._buf.get(key, {}).get(b_label, deque()))
         if not self.sample_last:
-            # Randomly sample up to k prior attempts from each label, if present
-            yes_list = list(self._buf.get(key, {}).get("yes", deque()))
-            no_list = list(self._buf.get(key, {}).get("no", deque()))
-            y = random.sample(yes_list, k=min(k, len(yes_list))) if yes_list else []
-            n = random.sample(no_list, k=min(k, len(no_list))) if no_list else []
-            return y, n
+            a = random.sample(a_list, k=min(k, len(a_list))) if a_list else []
+            b = random.sample(b_list, k=min(k, len(b_list))) if b_list else []
         else:
-            # Return only the last k attempts from each label, if present
-            yes_list = self._buf.get(key, {}).get("yes", deque())
-            no_list = self._buf.get(key, {}).get("no", deque())
-            y = list(yes_list)[-k:] if yes_list else []
-            n = list(no_list)[-k:] if no_list else []
-            return y, n
+            a = a_list[-k:] if a_list else []
+            b = b_list[-k:] if b_list else []
+        return a, b
+
+    def sample(self, key: str, k: int = 1) -> Tuple[List[str], List[str]]:
+        """Backward-compatible yes/no sampling."""
+        return self.sample_by_labels(key, ("yes", "no"), k)
 
 
 _HISTORY_BUFFER = _StudentHistoryBuffer()

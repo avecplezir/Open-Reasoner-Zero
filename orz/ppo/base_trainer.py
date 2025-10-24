@@ -612,12 +612,12 @@ class BaseTrainer:
                 new_extra["teacher_answer"] = ans
 
                 index = len(all_teacher_prompts)
-                if  self.cfg.verifier_use_mixed_chains and self.cfg.adversarial_training and self.cfg.augment_strategy == "yes_no" and self.cfg.repeat_randomply_once:
+                if  self.cfg.verifier_use_mixed_chains and self.cfg.adversarial_training and self.cfg.augment_strategy == "yes_no" and self.cfg.repeat_randomly_once:
                     if ans_idx == random_ans_idx:
-                        logger.info(f"Randomly selected answer index repeat once")
+                        # logger.info(f"Randomly selected answer index repeat once")
                         repeats = 1
                     else:
-                        logger.info(f"Randomly selected answer repeated {self.cfg.n_samples_per_prompt} times.")
+                        # logger.info(f"Randomly selected answer repeated {self.cfg.n_samples_per_prompt} times.")
                         repeats = self.cfg.n_samples_per_prompt
                 elif not repeat_prompts:
                     repeats = self.cfg.n_teacher_samples_per_prompt if self.cfg.n_teacher_samples_per_prompt > 0 else 1
@@ -731,14 +731,14 @@ class BaseTrainer:
                 yes_indices = bundle["t_indices"]["yes"]
                 no_indices = bundle["t_indices"]["no"]
 
-                if not self.cfg.repeat_randomply_once:
+                if not self.cfg.repeat_randomly_once:
                     assert len(yes_list) == len(no_list) and len(yes_list) > 0, "yes and no lists must match and be non-empty"
 
                 list_len = max(len(yes_list), len(no_list))
                 for i in range(list_len):
                     i_yes = i % len(yes_list)
                     i_no = i % len(no_list)
-                    logger.info(f"Mixing adversarial reasoning chains: YES index {i_yes}, NO index {i_no}")
+                    # logger.info(f"Mixing adversarial reasoning chains: YES index {i_yes}, NO index {i_no}")
                     mixed_prev = f"[Answer: yes]: {yes_list[i_yes]} [Answer: no]: {no_list[i_no]}"
                     new_prompt = create_student_prompt(
                         extra["dialogue"], bos_token=bos_token, previous_reasoning=mixed_prev, cfg=self.cfg
@@ -749,7 +749,7 @@ class BaseTrainer:
                         adv_extras.append(extra)
 
                     # Map this mixed adversarial group to both YES and NO teacher indices
-                    adv_teacher_index_groups.append([yes_indices[i], no_indices[i]])
+                    adv_teacher_index_groups.append([yes_indices[i_yes], no_indices[i_no]])
 
             return (
                 adv_prompts,
@@ -1136,8 +1136,9 @@ class BaseTrainer:
                     prompt = all_teacher_prompts[prompt_idx]
                     teacher_score = final_reward_list[prompt_idx].item()
                     teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
-                    if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-                        teacher_score /= teacher_std
+                    if not self.cfg.teacher_turn_off_std_normalization:
+                        if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                            teacher_score /= teacher_std
 
                 teacher_score_sum += teacher_score
                 teacher_exp.info['custom_rewards'][i][-1] = teacher_score

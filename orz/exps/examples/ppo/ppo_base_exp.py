@@ -205,6 +205,7 @@ class BasePPOExpConfig(BaseConfig):
     adv_n_samples_per_prompt: int = 1
     adv_student_add_initial: bool = False
     adv_teacher_add_initial: bool = False
+    teacher_match_coef: float = 1.0
     adv_teacher_get_correct_reward: bool = False
     verifier_use_mixed_chains: bool = False
 
@@ -247,6 +248,8 @@ class BasePPOExpConfig(BaseConfig):
     n_student_samples_per_prompt: int = -1
     n_teacher_samples_per_prompt: int = -1
     repeat_randomply_once: bool = False
+    teacher_turn_off_std_normalization: bool = False
+
 
 
 class BasePPOExp(BaseExp):
