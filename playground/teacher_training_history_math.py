@@ -79,13 +79,10 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        # "data/strategyqa.json",
         "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            # "data/eval_data/strategyqa_test.json",
-            # "data/eval_data/strategyqa_train.json",
             "data/eval_data/math500.json",
             "data/eval_data/aime2024.json",
         ]
@@ -136,7 +133,10 @@ class PPOExpConfig(BasePPOExpConfig):
 
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = False
-    use_ss_reward_for_student: bool = True
+    use_ss_reward_for_student: bool = False
+
+    use_student_history: bool = True
+    student_history_samples_per_label: int = 1
 
 
 if __name__ == "__main__":

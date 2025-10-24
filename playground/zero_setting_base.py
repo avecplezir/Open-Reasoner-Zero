@@ -169,7 +169,7 @@ def create_teacher_prompt_from_answer(
     # If requested, inject previous student attempts sampled from
     # the in-memory FIFO buffer. We keep the full attempts including <answer>.
     if cfg.use_student_history:
-        if getattr(cfg, "augment_strategy", None) == "correct_incorrect":
+        if cfg.augment_strategy == "correct_incorrect":
             a_title, b_title = "[CORRECT]", "[INCORRECT]"
             a_list, b_list = _HISTORY_BUFFER.sample_by_labels(
                 prompt, ("correct", "incorrect"), k=cfg.student_history_samples_per_label

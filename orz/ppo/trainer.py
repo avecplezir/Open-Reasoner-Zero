@@ -105,7 +105,7 @@ class RayPPOTrainer(BaseTrainer):
                     self.initial_teacher_training_step += 1
                     self.teacher_steps_total += 1
                 else:
-                    if self.cfg.student_training_rounds > 0:
+                    if self.cfg.student_training_rounds > 0 or self.cfg.teacher_training_rounds > 0:
                         if self.teacher_training_step < self.cfg.teacher_training_rounds:
                             logger.info(f'training teacher model, {self.global_step} global step, {self.teacher_training_step} teacher step')
                             self.train_teacher = True
@@ -508,7 +508,7 @@ class RayPPOTrainer(BaseTrainer):
             if len(outputs) <= 0:
                 return
 
-            assert len(all_teacher_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
+            assert len(all_teacher_prompts) == len(outputs), f"generate objects number must be equal to all inputs number {len(all_teacher_prompts)}, {len(outputs)}"
 
             # 1.2 calculate custom rewards if has custom reward function
             if self.cfg.use_compute_reward_fn:

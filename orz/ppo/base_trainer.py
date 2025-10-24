@@ -675,8 +675,6 @@ class BaseTrainer:
 
         adv_prompts: List[str] = []
         adv_extras: List[dict] = []
-        adv_init_sources: List[bool] = []
-        adv_init_final_answers: List[str] = []
         # For each adversarial group (one mixed pair or one single),
         # record which original teacher indices should receive the verifier reward.
         adv_teacher_index_groups: List[List[int]] = []
