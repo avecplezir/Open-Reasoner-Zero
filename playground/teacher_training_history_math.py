@@ -128,12 +128,17 @@ class PPOExpConfig(BasePPOExpConfig):
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
-    filter_for_correct_formatting_student: bool = False
-    filter_for_correct_formatting_teacher: bool = False
 
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = False
     use_ss_reward_for_student: bool = False
+    remove_student_reward_normalization: bool = True
+
+    topr_reward_coef: float = 0.0
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 0.01
+    reverse_kl: bool = True
+    reward_kl_coef: float = 0.1
 
     use_student_history: bool = True
     student_history_samples_per_label: int = 1

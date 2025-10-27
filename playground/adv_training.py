@@ -46,7 +46,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
-    total_num_nodes: int = 4
+    total_num_nodes: int = 8
 
     actor_num = 2
 
@@ -99,22 +99,22 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128
-    rollout_batch_size: int = 128
+    train_batch_size: int = 32
+    rollout_batch_size: int = 32
     num_warmup_steps: int = 5
     prompt_max_len: int = 8000
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 1 if not DEBUG_MODE else 2
+    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.00
 
     enable_eval: bool = True if not DEBUG_MODE else False
-    eval_interval: int = 2
+    eval_interval: int = 10
 
     # generate related settings
     generate_max_len: int = 4000 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -126,8 +126,8 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 0  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 10000  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 10  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
