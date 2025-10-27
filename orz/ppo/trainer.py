@@ -479,7 +479,6 @@ class RayPPOTrainer(BaseTrainer):
         else:
             final_answers = initial_scores = initial_teacher_scores = teacher_yes = teacher_no = []
 
-
         generate_with_teacher = not (self.train_teacher and self.cfg.train_teacher_on_student_data_only)
         if not generate_with_teacher:
             logger.info("Skipping teacher generation since only training teacher on student data")
@@ -497,7 +496,18 @@ class RayPPOTrainer(BaseTrainer):
                     await self._major_sync_policy_weights_to_vllm()
 
             # create the complementary teacher prompt(s) and collect data with it
-            all_teacher_prompts, all_student_prompts, aug_all_extras, indices_incorrect, new_indicess = self._augment_student_generation_with_teacher(all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, bos_token)
+            if 0 <= self.cfg.mix_teacher_for_student_ratio <= 1:
+                n_teacher = int(len(all_student_prompts) * self.cfg.mix_teacher_for_student_ratio)
+                rng = random.Random(getattr(self.cfg, "seed", 42))
+                teacher_indices = rng.sample(range(len(all_student_prompts)), k=n_teacher)
+            else:
+                teacher_indices = np.arange(len(all_student_prompts))
+
+            logger.info(f'student for teacher ration {len(all_student_prompts)} {len(teacher_indices)}')
+
+            all_teacher_prompts, all_student_prompts, aug_all_extras, indices_incorrect, new_indicess = self._augment_student_generation_with_teacher(
+                all_student_prompts[teacher_indices], all_extras[teacher_indices], final_answers[teacher_indices], initial_scores[teacher_indices], initial_teacher_scores[teacher_indices],
+                teacher_yes[teacher_indices], teacher_no[teacher_indices], bos_token)
             logger.info(f"extras, double extras, and augmented extras lengths, {len(all_extras)} {2 * len(all_extras)} {len(aug_all_extras)}")
             all_extras = aug_all_extras
 

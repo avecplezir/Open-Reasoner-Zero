@@ -614,10 +614,8 @@ class BaseTrainer:
                 index = len(all_teacher_prompts)
                 if  self.cfg.verifier_use_mixed_chains and self.cfg.adversarial_training and self.cfg.augment_strategy == "yes_no" and self.cfg.repeat_randomly_once:
                     if ans_idx == random_ans_idx:
-                        # logger.info(f"Randomly selected answer index repeat once")
                         repeats = 1
                     else:
-                        # logger.info(f"Randomly selected answer repeated {self.cfg.n_samples_per_prompt} times.")
                         repeats = self.cfg.n_samples_per_prompt
                 elif not repeat_prompts:
                     repeats = self.cfg.n_teacher_samples_per_prompt if self.cfg.n_teacher_samples_per_prompt > 0 else 1

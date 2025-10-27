@@ -178,6 +178,9 @@ class BasePPOExpConfig(BaseConfig):
     train_teacher_on_teacher_data_only: bool = True
     # When training the student, include only teacher-generated data
     train_student_on_teacher_data_only: bool = False
+    # When training the student, mix in a fraction of teacher-generated data.
+    # Enable via `mix_teacher_student_for_student`, and control fraction via
+    mix_teacher_for_student_ratio: float = -1
     filter_for_correct_formatting_student: bool = False
     filter_for_correct_formatting_teacher: bool = False
     train_teacher_on_student_data_only: bool = False
