@@ -48,6 +48,8 @@ class BasePPOExpConfig(BaseConfig):
     # training related settings
     seed: int = 42
     load_checkpoint: bool = False
+    # When True, save/load DeepSpeed engine checkpoints (incl. optimizer/scheduler)
+    save_deepspeed_ckpt: bool = False
     zero_stage: int = 3
 
     bf16: bool = True
@@ -113,6 +115,9 @@ class BasePPOExpConfig(BaseConfig):
     # Name of the tag that encloses hidden/internal reasoning. Used in prompt
     # templates and parsing/stopping logic. Default keeps prior behavior.
     hidden_tag_name: str = "think"
+    # When True, teacher prompts instruct using <say>...</say> to mark
+    # student-visible content; only these segments are shown to the student.
+    teacher_use_say_operator: bool = False
 
     # student generation retry logic
     # When enabled, generate multiple rounds with the student and
@@ -173,6 +178,7 @@ class BasePPOExpConfig(BaseConfig):
     synce_teacher_weights_interval: int = -1
 
     teacher_explain_only: bool = True
+    teacher_no_prompt_answer: bool = False
     # When training the teacher, use only teacher-generated data
     # (replaces deprecated use_teacher_only_data_for_teacher)
     train_teacher_on_teacher_data_only: bool = True
@@ -252,6 +258,7 @@ class BasePPOExpConfig(BaseConfig):
     n_teacher_samples_per_prompt: int = -1
     repeat_randomply_once: bool = False
     teacher_turn_off_std_normalization: bool = False
+
 
 
 

@@ -104,7 +104,7 @@ class PPOExpConfig(BasePPOExpConfig):
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
 
-    enable_eval: bool = True if not DEBUG_MODE else False
+    enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
 
     # generate related settings
@@ -126,7 +126,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = pretrain
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/iter104/policy" #pretrain
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
@@ -140,7 +140,7 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
     reverse_kl: bool = True
-    reward_kl_coef: float = 0.1
+    reward_kl_coef: float = 0.05
 
 
 if __name__ == "__main__":

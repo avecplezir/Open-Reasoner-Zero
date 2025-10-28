@@ -377,7 +377,7 @@ class RayPPOTrainer(BaseTrainer):
             if len(outputs) <= 0:
                 return
 
-            assert len(all_student_prompts) == len(outputs), "generate objects number must be equal to all inputs number"
+            assert len(all_student_prompts) == len(outputs), f"generate objects number must be equal to all inputs number {len(all_student_prompts)} {len(outputs)}"
 
             # 1.2 calculate custom rewards if has custom reward function
             if self.cfg.use_compute_reward_fn:
@@ -422,6 +422,9 @@ class RayPPOTrainer(BaseTrainer):
 
             # create teacher prompts from student prompts
             all_teacher_prompts, indices_incorrect = self._create_teacher_prompts_from_student(all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, all_student_prompts, bos_token)
+
+            # Log grouped student responses per prompt (captures multiple attempts)
+            self.log_student_responses_by_prompt(student_responses_by_prompt=student_responses_by_prompt, student_final_answers_by_prompt=student_final_answers_by_prompt, step=self.global_step)
 
             # Log a few examples to wandb right after student generation
             self.log_student_generation_examples(
@@ -500,17 +503,27 @@ class RayPPOTrainer(BaseTrainer):
                 n_teacher = int(len(all_student_prompts) * self.cfg.mix_teacher_for_student_ratio)
                 rng = random.Random(getattr(self.cfg, "seed", 42))
                 teacher_indices = rng.sample(range(len(all_student_prompts)), k=n_teacher)
+
+                all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no = (
+                    np.array(all_student_prompts), np.array(all_extras), np.array(final_answers),
+                    np.array(initial_scores),
+                    np.array(initial_teacher_scores), np.array(teacher_yes), np.array(teacher_no))
+
+                all_student_prompts, all_extras = all_student_prompts[teacher_indices], all_extras[teacher_indices]
+                if len(final_answers) > 0:
+                    final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no = final_answers[teacher_indices], initial_scores[teacher_indices], initial_teacher_scores[teacher_indices], teacher_yes[teacher_indices], teacher_no[teacher_indices]
             else:
                 teacher_indices = np.arange(len(all_student_prompts))
 
             logger.info(f'student for teacher ration {len(all_student_prompts)} {len(teacher_indices)}')
 
             all_teacher_prompts, all_student_prompts, aug_all_extras, indices_incorrect, new_indicess = self._augment_student_generation_with_teacher(
-                all_student_prompts[teacher_indices], all_extras[teacher_indices], final_answers[teacher_indices], initial_scores[teacher_indices], initial_teacher_scores[teacher_indices],
-                teacher_yes[teacher_indices], teacher_no[teacher_indices], bos_token)
+                all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores,
+                teacher_yes, teacher_no, bos_token)
             logger.info(f"extras, double extras, and augmented extras lengths, {len(all_extras)} {2 * len(all_extras)} {len(aug_all_extras)}")
             all_extras = aug_all_extras
 
+            logger.info(f'len of all_teacher_prompts and all_extras: {len(all_teacher_prompts)} {len(all_extras)}')
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
             outputs = await self._distributed_generate(all_teacher_prompts, all_extras, teacher=True, desc="Generate complimentary teacher sequences via vllm engines", **generate_kwargs)
 

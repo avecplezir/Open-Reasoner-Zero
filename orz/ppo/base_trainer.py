@@ -32,6 +32,7 @@ from orz.ppo.utils import (
 from playground.zero_setting_base import (
     create_student_prompt,
     create_teacher_prompt_from_answer,
+    extract_visible_reasoning,
 )
 
 class BaseTrainer:
@@ -212,6 +213,47 @@ class BaseTrainer:
                 "teacher_correct",
             ],
             data=table_data,
+            step=step,
+        )
+
+    def log_student_responses_by_prompt(
+        self,
+        *,
+        student_responses_by_prompt: Dict[str, List[str]],
+        student_final_answers_by_prompt: Optional[Dict[str, List[str]]] = None,
+        max_prompts: int = 3,
+        step: Optional[int] = None,
+    ) -> None:
+        """
+        Log a W&B table aggregating all student responses for each unique prompt.
+        Creates one row per (prompt, response_idx) so multiple responses for the
+        same prompt are captured and queryable.
+        """
+        if not student_responses_by_prompt:
+            return
+
+        rows: List[List[Any]] = []
+        # Limit the number of prompts to avoid oversized tables each step
+        prompts = list(student_responses_by_prompt.keys())[:max_prompts]
+        for p in prompts:
+            responses = student_responses_by_prompt.get(p, [])
+            finals = []
+            if student_final_answers_by_prompt is not None:
+                finals = student_final_answers_by_prompt.get(p, [])
+
+            for idx, resp in enumerate(responses):
+                final = finals[idx] if idx < len(finals) else ""
+                rows.append([p, idx, resp, final])
+
+        self._log_wandb_table(
+            name="student_responses_by_prompt",
+            columns=[
+                "prompt",
+                "response_idx",
+                "student_response",
+                "student_final_answer",
+            ],
+            data=rows,
             step=step,
         )
 
@@ -667,9 +709,7 @@ class BaseTrainer:
 
         extracted_reasonings: List[str] = []
         for resp in combined_outputs:
-            idx = resp.rfind("<answer>")
-            prev = resp[:idx].strip() if idx != -1 else resp.strip()
-            extracted_reasonings.append(prev)
+            extracted_reasonings.append(extract_visible_reasoning(resp, use_say=self.cfg.teacher_use_say_operator))
 
         adv_prompts: List[str] = []
         adv_extras: List[dict] = []
@@ -801,6 +841,7 @@ class BaseTrainer:
                 dp_inputs = prompts[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
                 dp_extras = None if extras is None else extras[dp_rank * dp_prompt_size : (dp_rank + 1) * dp_prompt_size]
                 if len(dp_inputs) == 0:
+                    logger.info(f'len of dp_inputs is 0!')
                     continue
                 gen_func = self._get_generate_function(dp_rank)
                 dp_tasks.append(

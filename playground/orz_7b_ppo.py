@@ -42,6 +42,7 @@ from playground.zero_setting_base import (
     EvalCustomDataset,
     create_student_prompt,
     create_teacher_prompt_from_answer,
+    extract_visible_reasoning,
 )
 
 DEBUG_MODE = False if os.environ.get("DEBUG_MODE", "False") == "False" else True  # Global debug flag
@@ -769,11 +770,9 @@ class CustomRewardTrainer(RayPPOTrainer):
         dataloader = DataLoader(dataset, batch_size=len(dataset), shuffle=False, drop_last=False)
         prompt_pre_llm = (len(dataset) + self.cfg.vllm_num_engines - 1) // self.cfg.vllm_num_engines
 
-        # Helper to trim to the last </think>
+        # Helper to extract visible reasoning (SAY-aware when enabled)
         def extract_reasoning(txt: str) -> str:
-            idx = txt.rfind("</think>")
-            prev = txt[:idx].strip() if idx != -1 else txt.strip()
-            return prev
+            return extract_visible_reasoning(txt, use_say=self.cfg.teacher_use_say_operator)
 
         # BOS token
         if self.tokenizer.bos_token_id is None:

@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from collections import defaultdict, deque
 import random
+import re
 from jinja2 import Template
 from loguru import logger
 
@@ -65,6 +66,69 @@ Assistant: <think>\
 TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA = """\
 {{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. The Assistant reconstructs only the reasoning process in the mind that leads to this answer. \
 Output only the reasoning process inside <think> </think> tags and DO NOT output the <answer> tag. User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
+
+
+# Teacher variant (SAY mode): explanation + answer, but only content wrapped in
+# <say>...</say> is intended to be visible to the student. The rest of the
+# reasoning inside <think> is internal and should not be exposed.
+TEACHER_PROMPT_INSTRUCTION_SAY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. \ 
+The Assistant reasons internally inside <think>...</think> and may include one or more <say>...</say> segments to mark \ 
+brief student-visible statements. Only the text inside <say>...</say> will be visible to the student; all other text \ 
+remains internal. End by restating the final answer in <answer>...</answer> tags. \ 
+User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
+
+# SAY mode: explanation-only (no <answer> in the output). We will append the
+# provided answer programmatically after generation. The teacher should still
+# place student-visible statements inside <say>...</say> blocks.
+TEACHER_PROMPT_EXPLAIN_ONLY_SAY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question and its final answer. \ 
+The Assistant reconstructs only the internal reasoning inside <think>...</think>. Any student-visible statements must be \ 
+explicitly wrapped inside <say>...</say> blocks. Output only the content within <think>...</think> and DO NOT output the \ 
+<answer> tag. User: {{prompt}} The final answer is {{answer}}. 
+Assistant: <think>\
+"""
+
+# SAY mode: correctness-guided variants
+TEACHER_PROMPT_CORRECT_ONLY_SAY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question. The Assistant must solve it correctly. \ 
+The Assistant first reasons internally inside <think>...</think>, using <say>...</say> blocks for any student-visible \ 
+statements. Finish with a correct final answer inside <answer>...</answer> tags. \ 
+User: {{prompt}} 
+Assistant: <think>\
+"""
+
+TEACHER_PROMPT_INCORRECT_ONLY_SAY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question. The Assistant must provide a plausible \ 
+but incorrect answer. The Assistant reasons internally inside <think>...</think>, using <say>...</say> blocks for any \ 
+student-visible statements, and ends with an incorrect final answer inside <answer>...</answer> tags. Avoid trivial mistakes; \ 
+the solution should be coherent but lead to a wrong final answer. \ 
+User: {{prompt}} 
+Assistant: <think>\
+"""
+
+
+# Teacher variant: correctness-guided without revealing the answer.
+# We ask the teacher to solve the question and end with a correct or incorrect
+# final answer depending on the instruction. This is used by the
+# `correct_incorrect_generate` augmentation strategy.
+TEACHER_PROMPT_CORRECT_ONLY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question. The Assistant must solve it correctly. \
+The Assistant first reasons in the mind and then provides the User with a correct final answer. \
+The reasoning process is enclosed within <think> </think> and the final answer must be enclosed within <answer> </answer> tags, i.e., <think> reasoning process here </think> <answer> answer here </answer>. \
+User: {{prompt}} 
+Assistant: <think>\
+"""
+
+TEACHER_PROMPT_INCORRECT_ONLY_TEMPLATE_JNJA = """\
+{{bos_token}}A conversation between User and Assistant. The User gives a question. The Assistant must provide a plausible but incorrect answer. \
+The Assistant first reasons in the mind and then provides the User with an incorrect final answer. Avoid trivial mistakes; the solution should be coherent but lead to a wrong final answer. \
+The reasoning process is enclosed within <think> </think> and the final answer must be enclosed within <answer> </answer> tags, i.e., <think> reasoning process here </think> <answer> answer here </answer>. \
+User: {{prompt}} 
 Assistant: <think>\
 """
 
@@ -153,7 +217,35 @@ def create_teacher_prompt_from_answer(
     """
     prompt_instruction_template_jinja = get_instruction_template_from_flags(cfg.general_propmt_yes_no)
 
-    teacher_prompt_template_jinja = TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA if cfg.teacher_explain_only else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+    # Choose base template. If the augmentation strategy requests correctness-guided
+    # generation without revealing the answer, switch to the corresponding templates.
+    use_say = getattr(cfg, "teacher_use_say_operator", False)
+    if cfg.augment_strategy == "correct_incorrect" and cfg.teacher_no_prompt_answer:
+        assert is_correct is not None, "is_correct must be provided for correctness-guided teacher prompts"
+        assert not cfg.teacher_explain_only, "correct_incorrect requires teacher_explain_only=False to emit <answer> when teacher_no_prompt_answer is True"
+        if use_say:
+            teacher_prompt_template_jinja = (
+                TEACHER_PROMPT_CORRECT_ONLY_SAY_TEMPLATE_JNJA
+                if is_correct
+                else TEACHER_PROMPT_INCORRECT_ONLY_SAY_TEMPLATE_JNJA
+            )
+        else:
+            teacher_prompt_template_jinja = (
+                TEACHER_PROMPT_CORRECT_ONLY_TEMPLATE_JNJA if is_correct else TEACHER_PROMPT_INCORRECT_ONLY_TEMPLATE_JNJA
+            )
+    else:
+        if use_say:
+            teacher_prompt_template_jinja = (
+                TEACHER_PROMPT_EXPLAIN_ONLY_SAY_TEMPLATE_JNJA
+                if cfg.teacher_explain_only
+                else TEACHER_PROMPT_INSTRUCTION_SAY_TEMPLATE_JNJA
+            )
+        else:
+            teacher_prompt_template_jinja = (
+                TEACHER_PROMPT_EXPLAIN_ONLY_TEMPLATE_JNJA
+                if cfg.teacher_explain_only
+                else TEACHER_PROMPT_INSTRUCTION_TEMPLATE_JNJA
+            )
 
     if not eval:
         assert isinstance(dialogue, (list, str)), "dialogue must be a list or pre-rendered string"
@@ -336,3 +428,33 @@ class _StudentHistoryBuffer:
 
 
 _HISTORY_BUFFER = _StudentHistoryBuffer()
+
+
+# -----------------------
+# Visible reasoning extractor
+# -----------------------
+def extract_visible_reasoning(response: str, *, use_say: bool) -> str:
+    """Extract the portion of a teacher response that should be visible.
+
+    Behavior:
+    - Always ignore anything after the last <answer> tag (if present).
+    - When use_say=True: return the concatenation of all <say>...</say> blocks
+      found before <answer>. If none are found, return an empty string.
+    - When use_say=False: return the segment before the last </think> if found;
+      otherwise, return everything before <answer>.
+    """
+    # Trim to content before the final answer, if any
+    idx_ans = response.rfind("<answer>")
+    head = response[:idx_ans] if idx_ans != -1 else response
+
+    if use_say:
+        # Extract all <say>...</say> occurrences
+        parts = re.findall(r"<say>(.*?)</say>", head, flags=re.DOTALL)
+        cleaned = [p.strip() for p in parts if p is not None and p.strip()]
+        return "\n".join(cleaned)
+
+    # Default behavior: prefer to cut at the last </think>
+    idx_think_end = head.rfind("</think>")
+    if idx_think_end != -1:
+        return head[:idx_think_end].strip()
+    return head.strip()
