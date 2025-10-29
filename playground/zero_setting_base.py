@@ -219,11 +219,10 @@ def create_teacher_prompt_from_answer(
 
     # Choose base template. If the augmentation strategy requests correctness-guided
     # generation without revealing the answer, switch to the corresponding templates.
-    use_say = getattr(cfg, "teacher_use_say_operator", False)
     if cfg.augment_strategy == "correct_incorrect" and cfg.teacher_no_prompt_answer:
         assert is_correct is not None, "is_correct must be provided for correctness-guided teacher prompts"
         assert not cfg.teacher_explain_only, "correct_incorrect requires teacher_explain_only=False to emit <answer> when teacher_no_prompt_answer is True"
-        if use_say:
+        if cfg.teacher_use_say_operator:
             teacher_prompt_template_jinja = (
                 TEACHER_PROMPT_CORRECT_ONLY_SAY_TEMPLATE_JNJA
                 if is_correct
@@ -234,7 +233,7 @@ def create_teacher_prompt_from_answer(
                 TEACHER_PROMPT_CORRECT_ONLY_TEMPLATE_JNJA if is_correct else TEACHER_PROMPT_INCORRECT_ONLY_TEMPLATE_JNJA
             )
     else:
-        if use_say:
+        if cfg.teacher_use_say_operator:
             teacher_prompt_template_jinja = (
                 TEACHER_PROMPT_EXPLAIN_ONLY_SAY_TEMPLATE_JNJA
                 if cfg.teacher_explain_only
@@ -298,7 +297,6 @@ def create_teacher_prompt_from_answer(
             role = "You are a teacher explaining an incorrect final answer. "
         else:
             assert 0, f"is_correct {is_correct} must be True or False if teacher_add_role_prefix is True"
-            # role = "You are a teacher explaining the provided final answer. "
         bos_with_role = f"{bos_token}{role}"
 
     teacher_prompt_answer = teacher_prompt_template.render(

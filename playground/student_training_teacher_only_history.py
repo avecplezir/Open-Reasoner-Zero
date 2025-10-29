@@ -154,7 +154,6 @@ class PPOExpConfig(BasePPOExpConfig):
 
     use_student_history: bool = True
     student_history_samples_per_label: int = 1
-    # teacher_k_correct_per_prompt: int = 1
 
 
 if __name__ == "__main__":

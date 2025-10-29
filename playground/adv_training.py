@@ -46,7 +46,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
-    total_num_nodes: int = 8
+    total_num_nodes: int = 4
 
     actor_num = 2
 
@@ -99,15 +99,15 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 32
-    rollout_batch_size: int = 32
+    train_batch_size: int = 8
+    rollout_batch_size: int = 8
     num_warmup_steps: int = 5
     prompt_max_len: int = 8000
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 18 if not DEBUG_MODE else 4
     adv_n_samples_per_prompt: int = 16 if not DEBUG_MODE else 2
 
     # 更换KL loss + k3
@@ -163,6 +163,7 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_verifier: bool = True
     adv_teacher_get_correct_reward: bool = True
     repeat_randomly_once: bool = True
+    teacher_use_say_operator: bool = False
 
 
 if __name__ == "__main__":

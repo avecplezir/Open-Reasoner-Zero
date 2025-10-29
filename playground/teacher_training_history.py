@@ -106,6 +106,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
+    eval_teacher: bool = True
 
     # generate related settings
     generate_max_len: int = 2048 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -126,7 +127,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = pretrain
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy"
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
@@ -140,9 +141,10 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
     reverse_kl: bool = True
-    reward_kl_coef: float = 0.1
+    reward_kl_coef: float = 0.2
 
     use_student_history: bool = True
+    student_history_samples_per_label: int = 1
 
 
 if __name__ == "__main__":

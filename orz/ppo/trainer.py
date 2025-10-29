@@ -402,9 +402,9 @@ class RayPPOTrainer(BaseTrainer):
                 ):
                     # Add by explicit yes/no when available
                     label = None
+                    key = extra["dialogue"][0]['value']
 
                     if self.cfg.augment_strategy == "correct_incorrect":
-                        key = extra["dialogue"][0]['value']
                         if student_score is not None:
                             if _HISTORY_BUFFER.add_correctness(key, sresp, bool(student_score)):
                                 added += 1
@@ -499,10 +499,11 @@ class RayPPOTrainer(BaseTrainer):
                     await self._major_sync_policy_weights_to_vllm()
 
             # create the complementary teacher prompt(s) and collect data with it
-            if 0 <= self.cfg.mix_teacher_for_student_ratio <= 1:
+            if 0 <= self.cfg.mix_teacher_for_student_ratio <= 1 and self.train_student:
                 n_teacher = int(len(all_student_prompts) * self.cfg.mix_teacher_for_student_ratio)
                 rng = random.Random(getattr(self.cfg, "seed", 42))
                 teacher_indices = rng.sample(range(len(all_student_prompts)), k=n_teacher)
+                logger.info(f'selected teacher indices length: {len(teacher_indices)}')
 
                 all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no = (
                     np.array(all_student_prompts), np.array(all_extras), np.array(final_answers),

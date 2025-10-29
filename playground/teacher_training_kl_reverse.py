@@ -47,39 +47,31 @@ class PPOExpConfig(BasePPOExpConfig):
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
-    actor_num = 2
 
+    actor_num = 2
     # resource related settings
-    colocate_all: bool = True
+    ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
+    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
+    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
+    reward_num_nodes: int = actor_num
     reward_num_gpus_per_node: int = 1
+    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    if not colocate_all:
-        ref_num_nodes: int = actor_num
-        actor_num_nodes: int = actor_num
-        critic_num_nodes: int = actor_num
-        reward_num_nodes: int = actor_num
-        vllm_num_engines: int = total_num_nodes - actor_num
-        gpu_memory_utilization: float = 0.95
-    else:
-        ref_num_nodes: int = total_num_nodes
-        actor_num_nodes: int = total_num_nodes
-        critic_num_nodes: int = total_num_nodes
-        reward_num_nodes: int = total_num_nodes
-        vllm_num_engines: int = total_num_nodes
-        gpu_memory_utilization: float = 0.3
+    vllm_num_engines: int = total_num_nodes - actor_num
+    gpu_memory_utilization: float = 0.95
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
-    save_interval: int = 30
+    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'originalqwen-studentonly-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
+    e_name = f'reverse-{randint}' #f'aug-qwenoriginal-correct-longrun-{randint}' #f'aug-iter50-correct-longrun-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -87,19 +79,21 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/orz_math_57k_collected.json"
+        "data/strategyqa.json",
+        # "data/boolq.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/math500.json",
-            "data/eval_data/aime2024.json",
+            "data/eval_data/strategyqa_test.json",
+            "data/eval_data/strategyqa_train.json",
+            # "data/eval_data/booliq_dev.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 256 if not DEBUG_MODE else 128
-    num_warmup_steps: int = 20
+    train_batch_size: int = 256 if not DEBUG_MODE else 32
+    num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
@@ -108,14 +102,15 @@ class PPOExpConfig(BasePPOExpConfig):
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
+    kl_loss_coef: float = 0.001
 
-    enable_eval: bool = True if not DEBUG_MODE else False
+    enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
+    eval_teacher: bool = True
 
     # generate related settings
-    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -123,21 +118,30 @@ class PPOExpConfig(BasePPOExpConfig):
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
     initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 10000000  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 0  # number teacher training rounds, -1 means no teacher training
+    student_training_rounds: int = 1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
+    generate_with_student: bool = False
+    augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = False
-    augment_strategy: str = "correct_incorrect"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = pretrain
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #pretrain
 
+    skip_student_training_to_pretrain_teacher: bool = True
+    skip_student_first_n_rounds: int = 0
+
+    teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
-    student_loss_type: str = "ppo"
+    use_ss_reward_for_student: bool = False
+    remove_student_reward_normalization: bool = True
 
-    turn_off_thinking_check: bool = False
+    topr_reward_coef: float = 0.0
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 0.01
+    reverse_kl: bool = True
+    reward_kl_coef: float = 0.8
 
 
 if __name__ == "__main__":

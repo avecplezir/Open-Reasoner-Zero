@@ -80,13 +80,13 @@ class PPOExpConfig(BasePPOExpConfig):
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
-        "data/boolq.json",
+        # "data/boolq.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
-            "data/eval_data/booliq_dev.json",
+            # "data/eval_data/booliq_dev.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -106,6 +106,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
+    eval_teacher: bool = True
 
     # generate related settings
     generate_max_len: int = 2048 #2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -126,21 +127,21 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/iter104/policy" #pretrain
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #pretrain
 
     skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
 
     teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
-    use_ss_reward_for_student: bool = True
+    use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
     topr_reward_coef: float = 0.0
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.01
-    reverse_kl: bool = True
-    reward_kl_coef: float = 0.05
+    reverse_kl: bool = False
+    reward_kl_coef: float = 1.
 
 
 if __name__ == "__main__":
