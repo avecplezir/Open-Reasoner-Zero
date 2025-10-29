@@ -35,6 +35,11 @@ class BasePPOExpConfig(BaseConfig):
     vllm_tensor_parallel_size: int = 1
     vllm_sync_backend: str = "nccl" #"gloo" #"nccl"
     local_rank: int = -1
+    # When True, we will tear down and recreate vLLM engines
+    # when switching between student and teacher generation/eval.
+    # Use this when student/teacher have different architectures
+    # and cannot share the same vLLM engine.
+    vllm_recreate_on_switch: bool = False
 
     # path related settings
     pretrain: Optional[str] = "example_path"
@@ -345,6 +350,7 @@ class BasePPOExp(BaseExp):
             self.cfg.gpu_memory_utilization,
             self.cfg.micro_rollout_batch_size,
             self.get_colocate_pg,
+            return_pg_handles=True,
         )
 
     async def run(self):

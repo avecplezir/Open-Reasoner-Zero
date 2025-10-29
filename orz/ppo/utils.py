@@ -380,8 +380,10 @@ def create_vllm_engines(
     gpu_memory_utilization: float = 0.85,
     max_num_seqs: int = 256,
     colocate_pg: Optional[PlacementGroup] = None,
+    return_pg_handles: bool = False,
 ):
     vllm_engines = []
+    pg_handles: list[PlacementGroup] = []
     if tensor_parallel_size > 1:
         assert not colocate_with_actor, "colocate_with_actor is not supported when tensor_parallel_size > 1"
         num_gpus = 0
@@ -389,6 +391,7 @@ def create_vllm_engines(
             bundles = [{"GPU": 1, "CPU": 1}] * tensor_parallel_size
             pg = placement_group(bundles, strategy="PACK")
             ray.get(pg.ready())
+            pg_handles.append(pg)
 
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=0
@@ -417,6 +420,7 @@ def create_vllm_engines(
             bundles = [{"GPU": 1, "CPU": 1}] * num_engines
             pg = placement_group(bundles, strategy="PACK")
             ray.get(pg.ready())
+            pg_handles.append(pg)
         else:
             num_gpus = 0.2
             num_cpus = 0.2
@@ -456,7 +460,10 @@ def create_vllm_engines(
             ray.get(offload_refs)
             logger.info("Offloaded all vLLM engines to CPU")
 
-    return vllm_engines
+    if return_pg_handles:
+        return vllm_engines, pg_handles
+    else:
+        return vllm_engines
 
 
 # reflection pattern checking related

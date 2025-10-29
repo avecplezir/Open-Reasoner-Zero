@@ -129,7 +129,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter80/policy"  #f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -144,6 +144,8 @@ class PPOExpConfig(BasePPOExpConfig):
     balance_yes_no_batches: bool = True
     student_loss_type: str = "sft"
     teacher_explain_only: bool = False
+
+    vllm_recreate_on_switch: bool = True
 
 
 if __name__ == "__main__":

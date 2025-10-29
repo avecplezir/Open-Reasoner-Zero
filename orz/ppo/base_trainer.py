@@ -51,6 +51,7 @@ class BaseTrainer:
         eval_dataset=None,
         vllm_engines=None,
         colocate_pg: Optional[PlacementGroup] = None,
+        vllm_pg_handles: Optional[list] = [],
     ):
         self.cfg = cfg
         self.strategy = strategy
@@ -60,6 +61,10 @@ class BaseTrainer:
         self.vllm_engines = vllm_engines
         self.prompts_dataloader = self.build_dataloader(train_dataset)
         self.colocate_pg = colocate_pg
+        # Track which role the current vLLM engines are set up for.
+        # Engines created at startup use cfg.pretrain (student) by default.
+        self._vllm_current_role: Optional[str] = "student" if cfg.vllm_recreate_on_switch else None
+        self._vllm_pg_handles = vllm_pg_handles
 
         self.writer = SummaryWriter(log_dir=self.cfg.tensorboard_log_dir)
         self.student_replay_buffer = NaiveReplayBuffer(
@@ -524,7 +529,7 @@ class BaseTrainer:
         added_teacher_prompt_keys = set()
 
         if self.cfg.augment_strategy == "distill":
-            return all_student_prompts, all_student_prompts, all_extras, indices_incorrect, new_indicess
+            return all_student_prompts, all_student_prompts, all_extras, indices_incorrect, np.arange(8)
 
 
         allowed_strategies = {"correct", "wrong", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
@@ -3058,6 +3063,70 @@ class BaseTrainer:
             await self.teacher_model.offload_to_cpu()
         else:
             await self._sync_teacher_weights_to_vllm()
+
+    async def _destroy_vllm_engines(self):
+        """Terminate current vLLM Ray actors to free GPU memory."""
+        for eng in self.vllm_engines:
+            ray.kill(eng)
+        self.vllm_engines = []
+
+        for pg in self._vllm_pg_handles:
+            ray.util.remove_placement_group(pg)
+
+    async def _recreate_vllm_engines(self, *, pretrain: str, role: str = "student"):
+        """Create fresh vLLM engines with the provided model, re-init comm groups, and return handles.
+
+        This is used when teacher and student models have different architectures
+        and we want to switch the vLLM backend between them infrequently.
+        """
+        # 1) Tear down old engines
+        logger.info(f"Recreating vLLM engines for role '{role}' with pretrain '{pretrain}'")
+        logger.info("Destroying old vLLM engines...")
+        await self._destroy_vllm_engines()
+
+        # 2) Create new engines using the same resource config
+        from orz.ppo.utils import create_vllm_engines
+        logger.info("Creating new vLLM engines...")
+        self.vllm_engines, self._vllm_pg_handles = create_vllm_engines(
+            self.cfg.vllm_num_engines,
+            self.cfg.vllm_tensor_parallel_size,
+            pretrain,
+            self.cfg.seed,
+            self.cfg.enable_prefix_caching,
+            self.cfg.enforce_eager,
+            self.cfg.max_len,
+            self.cfg.colocate_all,
+            self.cfg.enable_chunked_prefill,
+            self.cfg.max_num_batched_tokens,
+            self.cfg.gpu_memory_utilization,
+            self.cfg.micro_rollout_batch_size,
+            self.colocate_pg,
+            return_pg_handles=True,
+        )
+
+        # 3) Re-initialize the comm groups on policy/teacher models for these engines
+        if role == "student":
+            await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+        elif role == "teacher":
+            await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
+    async def _ensure_vllm_role(self, role: str):
+        """Ensure vLLM engines are created for the requested role ('student'|'teacher').
+
+        When cfg.vllm_recreate_on_switch is False, this is a no-op.
+        When True and role changes, we recreate engines with the appropriate model
+        and sync corresponding weights to the engines.
+        """
+        if not self.cfg.vllm_recreate_on_switch:
+            return
+        if role == self._vllm_current_role:
+            return
+
+        # Choose model for the role
+        pretrain_model = self.cfg.teacher_pretrain if role == "teacher" else self.cfg.pretrain
+
+        # Recreate and re-sync
+        await self._recreate_vllm_engines(pretrain=pretrain_model, role=role)
+        self._vllm_current_role = role
 
     async def _sync_policy_weights_to_teacher(self):
         async with Timer("Saving current policy"):

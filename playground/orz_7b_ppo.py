@@ -878,7 +878,8 @@ class CustomRewardTrainer(RayPPOTrainer):
 class PPOExp(BasePPOExp):
     @cached_property
     def trainer(self):
-        vllm_engines = self.create_inference_engine()
+        vllm_engines, vllm_pg_handles = self.create_inference_engine()
+        logger.info(f'vllm_engines vllm_pg_handles {vllm_engines} {vllm_pg_handles}')
         return CustomRewardTrainer(
             cfg=self.cfg,
             strategy=self.strategy,
@@ -887,6 +888,7 @@ class PPOExp(BasePPOExp):
             eval_dataset=self.eval_dataset,
             vllm_engines=vllm_engines,
             colocate_pg=self.get_colocate_pg,
+            vllm_pg_handles=vllm_pg_handles,
         )
 
     @override

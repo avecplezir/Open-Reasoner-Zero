@@ -683,7 +683,11 @@ class PolicyRayActorBase(RayActor):
         num_actions = torch.cat(experience.num_actions, dim=0).long().tolist()
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
-        action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0) if experience.action_mask[0] is not None else None
+        # logger.info(f"experience.action_mask: {experience.action_mask}")
+        if experience.action_mask is not None:
+            action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0) if experience.action_mask[0] is not None else None
+        else:
+            action_mask = None
         loss_type = experience.info['loss_type'][0].item()
         ratio_clipped_0_1 = torch.cat(experience.ratio_clipped_0_1, dim=0).unsqueeze(0) if loss_type == 2 else None
 

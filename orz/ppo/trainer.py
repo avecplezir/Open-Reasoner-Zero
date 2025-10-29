@@ -78,11 +78,15 @@ class RayPPOTrainer(BaseTrainer):
                 ):
 
                     async with Timer("Eval of the student model"):
+                        # Ensure vLLM engines are set for student before syncing
+                        await self._ensure_vllm_role("student")
                         await self._major_sync_policy_weights_to_vllm()
                         await self.eval(prefix="")
 
                     if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
                         async with Timer("Eval of the teacher model"):
+                            # Switch vLLM engines to teacher if needed
+                            await self._ensure_vllm_role("teacher")
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
 
@@ -369,6 +373,8 @@ class RayPPOTrainer(BaseTrainer):
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
             async with Timer("Sync policy weights to VLLM engines for student generation"):
+                # Ensure vLLM engines are configured for student
+                await self._ensure_vllm_role("student")
                 await self._major_sync_policy_weights_to_vllm()
 
             outputs = await self._distributed_generate(all_student_prompts, all_extras, teacher=False, desc="Generate student sequences via vllm engines", **generate_kwargs)
@@ -493,9 +499,12 @@ class RayPPOTrainer(BaseTrainer):
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
+                    # Switch vLLM engines to teacher
+                    await self._ensure_vllm_role("teacher")
                     await self._major_sync_teacher_weights_to_vllm()
             elif not self.cfg.generate_with_student:
                 async with Timer("Sync policy weights to VLLM engines for teacher generation (there is no separate teacher model)"):
+                    await self._ensure_vllm_role("student")
                     await self._major_sync_policy_weights_to_vllm()
 
             # create the complementary teacher prompt(s) and collect data with it
@@ -604,6 +613,7 @@ class RayPPOTrainer(BaseTrainer):
             if self.cfg.separate_teacher_model:
                 # Sync student weights and generate adversarial student responses
                 async with Timer("Sync policy weights to VLLM engines for adversarial student gen"):
+                    await self._ensure_vllm_role("student")
                     await self._major_sync_policy_weights_to_vllm()
 
             adv_outputs_local: List[str] = await self._distributed_generate(
