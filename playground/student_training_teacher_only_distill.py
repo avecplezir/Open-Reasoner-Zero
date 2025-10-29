@@ -101,7 +101,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -126,10 +126,10 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
-    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_reverse-601/iterteacher-150/policy" #f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -137,20 +137,12 @@ class PPOExpConfig(BasePPOExpConfig):
     filter_for_correct_formatting_teacher: bool = False
 
     # Prompt configuration
-    teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
     use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
-    topr_type: int = 0
-
     balance_yes_no_batches: bool = True
-
-    topr_reward_coef: float = 0.0
-    kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.01
-    reverse_kl: bool = True
-    reward_kl_coef: float = 0.1
+    student_loss_type: str = "sft"
 
 
 if __name__ == "__main__":
