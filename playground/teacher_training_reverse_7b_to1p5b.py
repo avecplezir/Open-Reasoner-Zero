@@ -48,10 +48,10 @@ class PPOExpConfig(BasePPOExpConfig):
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
-    actor_num = 2
+    actor_num = 3
 
     # resource related settings
-    colocate_all: bool = True
+    colocate_all: bool = False
     ref_num_gpus_per_node: int = 1
     actor_num_gpus_per_node: int = 1
     critic_num_gpus_per_node: int = 1
@@ -76,11 +76,11 @@ class PPOExpConfig(BasePPOExpConfig):
         gpu_memory_utilization: float = 0.3
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen3-4B-Base" #f"{prefix}/Qwen3-1.7B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-1.5B" ##f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
-    save_interval: int = 50
+    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy" #f"{prefix}/binary_noncol_orz_7b_ppo_7B-student-data-v0-759/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    save_interval: int = 30
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'adv-{randint}'
+    e_name = f'{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -99,26 +99,25 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    train_batch_size: int = 128
-    rollout_batch_size: int = 128
     num_warmup_steps: int = 5
-    prompt_max_len: int = 8000
+    prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
-    adv_n_samples_per_prompt: int = 4 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
-    kl_loss_coef: float = 0.00
+    kl_loss_coef: float = 0.001
 
-    enable_eval: bool = True if not DEBUG_MODE else False
+    enable_eval: bool = True if not DEBUG_MODE else True
+    eval_student: bool = False
     eval_interval: int = 10
+    eval_teacher: bool = False
 
     # generate related settings
-    generate_max_len: int = 4000 #12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12000 #12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048  # 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072  # 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
@@ -127,43 +126,30 @@ class PPOExpConfig(BasePPOExpConfig):
 
     initial_teacher_training_rounds: int = 0
     student_training_rounds: int = 1  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    teacher_training_rounds: int = 10  # number teacher training rounds, -1 means no teacher training
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite
 
-    separate_teacher_model: bool = False
-    teacher_pretrain: Optional[str] = pretrain # f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/Qwen2.5-3B" #f"{prefix}/Qwen3-4B-Instruct-2507" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/Qwen2.5-1.5B" #
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter80/policy"
 
-    skip_student_training_to_debug: bool = False
+    skip_student_training_to_pretrain_teacher: bool = True
     skip_student_first_n_rounds: int = 0
 
-    student_loss_type: str = "ppo"
-    avd_student_negative_strategy: str = "same"  # options: negate | same | inverse | inv_neg
-    adv_student_add_initial: bool = False
-    adv_teacher_add_initial: bool = False
-    teacher_match_coef: float = 1.0
-
-    # Prompt configuration
-    student_prompt_continuation: bool = True
-    teacher_add_role_prefix: bool = False
+    teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
     use_ss_reward_for_student: bool = False
-    remove_student_reward_normalization: bool = False
+    remove_student_reward_normalization: bool = True
 
-    reward_kl_coef: float = 1.
-    reward_match_coef: float = 0.
-    ss_reward_coef: float = 0.1
+    topr_reward_coef: float = 0.0
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 0.01
+    reverse_kl: bool = True
+    reward_kl_coef: float = 0.1
 
-    adversarial_training: bool = True
-    turn_off_thinking_check: bool = True
-
-    verifier_use_mixed_chains: bool = True
-    eval_verifier: bool = True
-    adv_teacher_get_correct_reward: bool = False
-    repeat_randomly_once: bool = False
-    teacher_use_say_operator: bool = False
+    vllm_recreate_on_switch: bool = True
 
 
 if __name__ == "__main__":

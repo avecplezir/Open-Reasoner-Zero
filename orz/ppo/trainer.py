@@ -76,14 +76,14 @@ class RayPPOTrainer(BaseTrainer):
                 if self.cfg.enable_eval and (
                     self.global_step % self.cfg.eval_interval == 0 or iter == len(self.prompts_dataloader) - 1
                 ):
+                    if self.cfg.eval_student:
+                        async with Timer("Eval of the student model"):
+                            # Ensure vLLM engines are set for student before syncing
+                            await self._ensure_vllm_role("student")
+                            await self._major_sync_policy_weights_to_vllm()
+                            await self.eval(prefix="")
 
-                    async with Timer("Eval of the student model"):
-                        # Ensure vLLM engines are set for student before syncing
-                        await self._ensure_vllm_role("student")
-                        await self._major_sync_policy_weights_to_vllm()
-                        await self.eval(prefix="")
-
-                    if self.cfg.separate_teacher_model and self.cfg.enable_eval and self.cfg.eval_teacher:
+                    if self.cfg.separate_teacher_model and self.cfg.eval_teacher:
                         async with Timer("Eval of the teacher model"):
                             # Switch vLLM engines to teacher if needed
                             await self._ensure_vllm_role("teacher")

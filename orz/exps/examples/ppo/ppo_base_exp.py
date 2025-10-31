@@ -154,6 +154,7 @@ class BasePPOExpConfig(BaseConfig):
     ref_reward_offload: bool = False
 
     enable_eval: bool = False
+    eval_student: bool = True
     eval_interval: int = -1
     update_ref_every_epoch: bool = True
 

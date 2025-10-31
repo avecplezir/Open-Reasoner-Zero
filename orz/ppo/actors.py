@@ -25,7 +25,7 @@ from safetensors.torch import load_file as safe_load
 # from openrlhf.models import Actor
 from transformers.trainer import get_scheduler
 
-from orz.exp_engine.parallels.orz_distributed_c10d import CUDAIPCHandle, orz_init_process_group
+from orz.exp_engine.parallels.orz_distributed_c10d import CUDAIPCHandle, orz_init_process_group, orz_destroy_process_group
 from orz.ppo.models import Actor, get_llm_for_sequence_regression
 from orz.ppo.replay_buffer import Experience
 from orz.ppo.utils import ORZDeepspeedStrategy as DeepspeedStrategy
@@ -455,6 +455,7 @@ class PolicyRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
         self.args = strategy.args
         self._setup_distributed(strategy)
+        self._model_update_group = None
 
         ds_config = strategy.get_ds_train_config(is_actor=True)
         actor = Actor(
@@ -813,6 +814,13 @@ class PolicyRayActorBase(RayActor):
         #   2. Broadcast parameters from rank 0 to all vllm engines
 
         if vllm_engines is not None and torch.distributed.get_rank() == 0:
+
+            if self._model_update_group is not None:
+                logger.info(f"destroy {self._model_update_group_name} to avoid group name already created errors.")
+                orz_destroy_process_group(self._model_update_group)
+                self._model_update_group = None
+                self._model_update_group_name = None
+
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
                 sock.bind(("", 0))
@@ -863,6 +871,12 @@ class PolicyRayActorBase(RayActor):
         logger.info("Initializing teacher vLLM engines actor group")
 
         if vllm_engines is not None and torch.distributed.get_rank() == 0:
+            if self._model_update_group is not None:
+                logger.info(f"destroy {self._model_update_group_name} to avoid group name already created errors.")
+                orz_destroy_process_group(self._model_update_group)
+                self._model_update_group = None
+                self._model_update_group_name = None
+
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
                 sock.bind(("", 0))
@@ -1005,8 +1019,8 @@ class CriticRayActorBase(RayActor):
         self._setup_distributed(strategy)
 
         ds_config = strategy.get_ds_train_config(is_actor=False)
-        with torch.device("meta"):
-            AutoModel.from_pretrained(pretrain, trust_remote_code=True)
+        # with torch.device("meta"):
+        #     AutoModel.from_pretrained(pretrain, trust_remote_code=True)
         critic = get_llm_for_sequence_regression(
             pretrain,
             "critic",
@@ -1139,6 +1153,8 @@ class CriticRayActorBase(RayActor):
         num_actions = torch.cat(experience.num_actions, dim=0).long().tolist()
         packed_seq_lens = torch.cat(experience.packed_seq_lens, dim=0).long().tolist()
         attention_mask = torch.cat(experience.attention_mask, dim=0).unsqueeze(0)
+        # logger.info(f"experience.action_mask: {experience.action_mask}")
+        action_mask = None
 
         # critic loss
         values, output = self.model(
@@ -1153,7 +1169,7 @@ class CriticRayActorBase(RayActor):
             values,
             old_values,
             returns,
-            action_mask=experience.action_mask,
+            action_mask=action_mask,
         )
 
         loss = loss / accumulation_steps
@@ -1164,7 +1180,7 @@ class CriticRayActorBase(RayActor):
         # status
         status = {
             "critic_loss": loss.item(),
-            "values": masked_mean(values, experience.action_mask).item(),
+            "values": masked_mean(values, action_mask).item(),
             "critic_lr": self.scheduler.get_last_lr()[0],
         }
         return status
@@ -1173,8 +1189,8 @@ class CriticRayActorBase(RayActor):
 class RewardRayActorBase(RayActor):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
         self._setup_distributed(strategy)
-        with torch.device("meta"):
-            AutoModel.from_pretrained(pretrain, trust_remote_code=True)
+        # with torch.device("meta"):
+        #     AutoModel.from_pretrained(pretrain, trust_remote_code=True)
         model = get_llm_for_sequence_regression(
             pretrain,
             "reward",
