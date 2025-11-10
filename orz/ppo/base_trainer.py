@@ -469,7 +469,6 @@ class BaseTrainer:
         if self.cfg.augment_strategy == "distill":
             return all_student_prompts, all_student_prompts, all_extras, indices_incorrect, np.arange(8)
 
-
         allowed_strategies = {"correct", "wrong", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
         assert self.cfg.augment_strategy in allowed_strategies, (
             f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
