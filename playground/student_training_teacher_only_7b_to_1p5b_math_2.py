@@ -88,15 +88,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/strategyqa.json",
-        # "data/boolq.json",
+        "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
-            # "data/eval_data/booliq_dev.json",
-            # "data/eval_data/booliq_train.json",
+            "data/eval_data/math500.json",
+            "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -133,10 +130,10 @@ class PPOExpConfig(BasePPOExpConfig):
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
-    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "correct"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_reverse_7b_to1p5b_952/iterteacher-30/policy"
+    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/teacher_training_7b_to1p5b_math_2_281/iterteacher-30/policy"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -145,13 +142,11 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # Prompt configuration
     teacher_add_role_prefix: bool = True
-    general_propmt_yes_no: bool = True
-    use_ss_reward_for_student: bool = True
+    general_propmt_yes_no: bool = False
+    use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
     topr_type: int = 0
-
-    balance_yes_no_batches: bool = True
 
     topr_reward_coef: float = 0.0
     kl_loss_window_size: int = 10

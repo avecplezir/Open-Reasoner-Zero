@@ -536,7 +536,7 @@ class BaseTrainer:
         assert self.cfg.augment_strategy in allowed_strategies, (
             f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
         )
-        if self.cfg.augment_strategy in {"only_wrong", "only_correct", "opposite", "correct_incorrect"}:
+        if self.cfg.augment_strategy in {"only_wrong", "only_correct", "opposite"}:
             assert (
                 self.cfg.generate_with_student
             ), f"{self.cfg.augment_strategy} strategy require student generation to be enabled"
@@ -545,10 +545,13 @@ class BaseTrainer:
         candidate_student_negs = defaultdict(list)
         dataset_answer_pool: List[str] = []
         if self.cfg.augment_strategy == "correct_incorrect":
-            for sp, ex, fa, sc in zip(all_student_prompts, all_extras, final_answers, initial_scores):
-                if not sc and len(fa.strip()) > 0:
-                    candidate_student_negs[sp].append(fa)
+            if self.cfg.generate_with_student:
+                for sp, ex, fa, sc in zip(all_student_prompts, all_extras, final_answers, initial_scores):
+                    if not sc and len(fa.strip()) > 0:
+                        candidate_student_negs[sp].append(fa)
+
             dataset_answer_pool = [ex["answer"] for ex in all_extras if len(ex["answer"]) > 0]
+
 
         for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
             include = True
@@ -585,7 +588,10 @@ class BaseTrainer:
                         neg_ans = neg_cands[-1]
                 if neg_ans is None:
                     # Fallback: sample a different dataset answer
-                    neg_ans = dataset_answer_pool[-1]
+                    if self.train_teacher:
+                        neg_ans = dataset_answer_pool[-1]
+                    else:
+                        neg_ans = random.choice(dataset_answer_pool)
                 assert neg_ans is not None, "Negative answer must be not None by now"
                 teacher_answers = [correct_ans, neg_ans]
                 is_corrects = [True, False]
@@ -1057,7 +1063,7 @@ class BaseTrainer:
                 correct_formattings = [correct_formattings[i] for i in keep_idx]
         # 1. SFT filtering
         if self.train_student and self.cfg.student_loss_type == 'sft':
-            keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc) and bool(tsc)]
+            keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc)]
             dropped = len(initial_scores) - len(keep_idx)
             logger.info(f"SFT student filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
             all_student_prompts = [all_student_prompts[i] for i in keep_idx]
@@ -3126,6 +3132,8 @@ class BaseTrainer:
 
         # Recreate and re-sync
         await self._recreate_vllm_engines(pretrain=pretrain_model, role=role)
+        await self._backload_vllm_engines()
+
         self._vllm_current_role = role
 
     async def _sync_policy_weights_to_teacher(self):

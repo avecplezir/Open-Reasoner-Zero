@@ -45,34 +45,27 @@ class PPOExpConfig(BasePPOExpConfig):
     use_compute_reward_fn: bool = True
     use_orm_score: bool = False
 
+    # Conditional settings with production values first
+    # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
 
     actor_num = 2
-
     # resource related settings
-    colocate_all: bool = True
+    ref_num_nodes: int = actor_num
     ref_num_gpus_per_node: int = 1
+    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
+    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
+    reward_num_nodes: int = actor_num
     reward_num_gpus_per_node: int = 1
+    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    if not colocate_all:
-        ref_num_nodes: int = actor_num
-        actor_num_nodes: int = actor_num
-        critic_num_nodes: int = actor_num
-        reward_num_nodes: int = actor_num
-        vllm_num_engines: int = total_num_nodes - actor_num
-        gpu_memory_utilization: float = 0.95
-    else:
-        ref_num_nodes: int = total_num_nodes
-        actor_num_nodes: int = total_num_nodes
-        critic_num_nodes: int = total_num_nodes
-        reward_num_nodes: int = total_num_nodes
-        vllm_num_engines: int = total_num_nodes
-        gpu_memory_utilization: float = 0.3
+    vllm_num_engines: int = total_num_nodes - actor_num
+    gpu_memory_utilization: float = 0.95
 
     # path related settings
     pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
@@ -88,15 +81,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # data related settings
     prompt_data: ListConfig = ListConfig([
-        "data/strategyqa.json",
-        # "data/boolq.json",
+        "data/orz_math_57k_collected.json"
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            "data/eval_data/strategyqa_test.json",
-            "data/eval_data/strategyqa_train.json",
-            # "data/eval_data/booliq_dev.json",
-            # "data/eval_data/booliq_train.json",
+            "data/eval_data/math500.json",
+            "data/eval_data/aime2024.json",
         ]
     )
     prompt_data_probs: ListConfig = ListConfig([1.0])
@@ -108,7 +98,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
 
     # 更换KL loss + k3
     kl_loss_coef: float = 0.001
@@ -129,14 +119,15 @@ class PPOExpConfig(BasePPOExpConfig):
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
+    eval_teacher: bool = False
 
     generate_with_student: bool = False
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
-    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_reverse_7b_to1p5b_952/iterteacher-30/policy"
+    teacher_pretrain: Optional[str] = f"{prefix}/orz_ckpt/student_training_student_only_math_originalqwen-studentonly-231/iter100/policy"  #f"{prefix}//orz_ckpt/teacher_training_reverse-554/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -144,20 +135,13 @@ class PPOExpConfig(BasePPOExpConfig):
     filter_for_correct_formatting_teacher: bool = False
 
     # Prompt configuration
-    teacher_add_role_prefix: bool = True
-    general_propmt_yes_no: bool = True
-    use_ss_reward_for_student: bool = True
+    general_propmt_yes_no: bool = False
+    use_ss_reward_for_student: bool = False
     remove_student_reward_normalization: bool = True
 
-    topr_type: int = 0
-
-    balance_yes_no_batches: bool = True
-
-    topr_reward_coef: float = 0.0
-    kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.01
-    reverse_kl: bool = True
-    reward_kl_coef: float = 0.1
+    balance_yes_no_batches: bool = False
+    student_loss_type: str = "sft"
+    teacher_explain_only: bool = False
 
     vllm_recreate_on_switch: bool = True
 
