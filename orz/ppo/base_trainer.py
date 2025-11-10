@@ -368,69 +368,7 @@ class BaseTrainer:
             step=step,
         )
 
-    def log_adversarial_examples(
-        self,
-        *,
-        student_prompts: List[str],
-        teacher_prompts: List[str],
-        combined_custom_rewards,
-        combined_teacher_custom_rewards,
-        index_group_dict,
-        adv_prompts: List[str],
-        adv_outputs: List[Any],
-        adv_final_answers: List[Any],
-        adv_extras: List[dict],
-        adv_initial_scores: List[Any],
-        adv_initial_teacher_scores: List[Any],
-        step: Optional[int] = None,
-    ) -> None:
-        n = min(8, len(adv_prompts))
-        indices = [-i-1 for i in range(n)] + [i for i in range(n)]
-        table_data: List[List[Any]] = []
-        for idx in indices:
-            index_group = index_group_dict[adv_prompts[idx]]
-            if len(index_group) == 1:
-                prompt_index = index_group
-                prompt_index_2 = None
-            else:
-                prompt_index, prompt_index_2 = index_group
-
-            table_data.append([
-                student_prompts[prompt_index],
-                teacher_prompts[prompt_index],
-                teacher_prompts[prompt_index_2] if prompt_index_2 is not None else "",
-                adv_prompts[idx],
-                adv_outputs[idx],
-                adv_final_answers[idx],
-                adv_extras[idx].get("teacher_answer", ""),
-                bool(adv_initial_scores[idx]),
-                bool(adv_initial_teacher_scores[idx]),
-                combined_teacher_custom_rewards[prompt_index][-1].item(),
-                combined_teacher_custom_rewards[prompt_index_2][-1].item() if prompt_index_2 is not None else None,
-                combined_custom_rewards[prompt_index][-1].item(),
-                combined_custom_rewards[prompt_index_2][-1].item() if prompt_index_2 is not None else None,
-
-            ])
-        self._log_wandb_table(
-            name="adversarial_examples",
-            columns=[
-                "student_prompts",
-                "teacher_prompts_1",
-                "teacher_prompts_2",
-                "adv_prompt",
-                "adv_response",
-                "adv_final_answer",
-                "teacher_answer",
-                "student_correct",
-                "teacher_correct",
-                "teacher_adv_match_reward",
-                "teacher_adv_match_reward_2",
-                "student_adv_match_reward",
-                "student_adv_match_reward_2",
-            ],
-            data=table_data,
-            step=step,
-        )
+    # Removed: adversarial example logging
 
     def log_reasoning_examples(
         self,
@@ -669,12 +607,7 @@ class BaseTrainer:
                 new_extra["teacher_answer"] = ans
 
                 index = len(all_teacher_prompts)
-                if  self.cfg.verifier_use_mixed_chains and self.cfg.adversarial_training and self.cfg.augment_strategy == "yes_no" and self.cfg.repeat_randomly_once:
-                    if ans_idx == random_ans_idx:
-                        repeats = 1
-                    else:
-                        repeats = self.cfg.n_samples_per_prompt
-                elif not repeat_prompts:
+                if not repeat_prompts:
                     repeats = self.cfg.n_teacher_samples_per_prompt if self.cfg.n_teacher_samples_per_prompt > 0 else 1
                 elif is_corr and self.cfg.teacher_k_correct_per_prompt > 0:
                     repeats = self.cfg.teacher_k_correct_per_prompt
@@ -704,136 +637,6 @@ class BaseTrainer:
             aug_all_extras,
             indices_incorrect,
             new_indicess,
-        )
-
-    def _build_adversarial_student_prompts(
-        self,
-        combined_outputs: List[str],
-        combined_all_teacher_prompts: List[str],
-        combined_all_student_prompts: List[str],
-        combined_extras: List[dict],
-        teacher_generated: List[bool],
-        bos_token: str,
-        combined_final_answers: List[str],
-    ) -> Tuple[List[str], List[str], List[dict], List[bool], List[str], List[List[int]]]:
-        """
-        Build adversarial continuation student prompts from teacher explanations.
-        Keeps one new prompt per teacher sample (already repeated for GRPO).
-        Returns adv_prompts, adv_extras.
-        """
-
-        extracted_reasonings: List[str] = []
-        for resp in combined_outputs:
-            extracted_reasonings.append(extract_visible_reasoning(resp, use_say=self.cfg.teacher_use_say_operator))
-
-        adv_prompts: List[str] = []
-        adv_extras: List[dict] = []
-        # For each adversarial group (one mixed pair or one single),
-        # record which original teacher indices should receive the verifier reward.
-        adv_teacher_index_groups: List[List[int]] = []
-
-        # Special handling for yes_no augmentation: mix YES/NO teacher chains
-        if self.cfg.augment_strategy == "yes_no" and self.cfg.verifier_use_mixed_chains:
-            assert not self.cfg.generate_with_student, "Cannot mix chains when student generation is enabled"
-            # Group teacher generations by the underlying student prompt so we can
-            # collect one YES chain and one NO chain per base dialogue.
-            group: Dict[str, Dict[str, Any]] = {}
-
-            for i, (t_prompt, s_prompt, prev_r, extra, tgenerated) in enumerate(
-                zip(
-                    combined_all_teacher_prompts,
-                    combined_all_student_prompts,
-                    extracted_reasonings,
-                    combined_extras,
-                    teacher_generated,
-                )
-            ):
-
-                # Only consider teacher-generated samples that have explicit teacher answers
-                if not tgenerated:
-                    continue
-                label = extra["teacher_answer"]
-                if label not in ("yes", "no"):
-                    assert False, f"teacher_answer must be yes or no to mix chains, got {label}"
-
-                key = s_prompt  # group by base student prompt
-                if key not in group:
-                    new_extra = dict(extra)
-                    # remove teacher answer to evaluate teacher_yes and teacher_no correctly
-                    new_extra['teacher_answer'] = None
-
-                    group[key] = {
-                        "s_prompt": s_prompt,
-                        "t_prompts": {"yes": [], "no": []},
-                        "extra": new_extra,
-                        "chains": {"yes": [], "no": []},
-                        "t_indices": {"yes": [], "no": []},
-                    }
-
-                group[key]["chains"][label].append(prev_r)
-                group[key]["t_indices"][label].append(i)
-                group[key]["t_prompts"][label].append(t_prompt)
-
-            # Build mixed previous reasoning when both sides exist; otherwise fallback to single
-            for key, bundle in group.items():
-                extra = bundle["extra"]
-                yes_list = bundle["chains"]["yes"]
-                no_list = bundle["chains"]["no"]
-                yes_indices = bundle["t_indices"]["yes"]
-                no_indices = bundle["t_indices"]["no"]
-
-                if not self.cfg.repeat_randomly_once:
-                    assert len(yes_list) == len(no_list) and len(yes_list) > 0, "yes and no lists must match and be non-empty"
-
-                list_len = max(len(yes_list), len(no_list))
-                for i in range(list_len):
-                    i_yes = i % len(yes_list)
-                    i_no = i % len(no_list)
-                    # logger.info(f"Mixing adversarial reasoning chains: YES index {i_yes}, NO index {i_no}")
-                    mixed_prev = f"[Answer: yes]: {yes_list[i_yes]} [Answer: no]: {no_list[i_no]}"
-                    new_prompt = create_student_prompt(
-                        extra["dialogue"], bos_token=bos_token, previous_reasoning=mixed_prev, cfg=self.cfg
-                    )
-
-                    for _ in range(self.cfg.adv_n_samples_per_prompt):
-                        adv_prompts.append(new_prompt)
-                        adv_extras.append(extra)
-
-                    # Map this mixed adversarial group to both YES and NO teacher indices
-                    adv_teacher_index_groups.append([yes_indices[i_yes], no_indices[i_no]])
-
-            return (
-                adv_prompts,
-                adv_extras,
-                adv_teacher_index_groups,
-            )
-
-        # Default behavior: build from single teacher chain (no mixing)
-        for i, (t_prompt, s_prompt, extra, prev_r, tgenerated) in enumerate(
-            zip(
-                combined_all_teacher_prompts,
-                combined_all_student_prompts,
-                combined_extras,
-                extracted_reasonings,
-                teacher_generated,
-            )
-        ):
-            new_prompt = create_student_prompt(
-                extra["dialogue"], bos_token=bos_token, previous_reasoning=prev_r, cfg=self.cfg
-            )
-            new_extra = extra
-
-            for _ in range(self.cfg.adv_n_samples_per_prompt):
-                adv_prompts.append(new_prompt)
-                adv_extras.append(new_extra)
-
-            # Non-mixed: reward applies back to this single teacher index
-            adv_teacher_index_groups.append([i])
-
-        return (
-            adv_prompts,
-            adv_extras,
-            adv_teacher_index_groups,
         )
 
     async def _distributed_generate(
@@ -1025,42 +828,9 @@ class BaseTrainer:
         List[str], List[str], List[str], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]
     ]]:
         """
-        Apply adversarial-origin filtering (if enabled), SFT filtering (student/teacher),
-        and formatting correctness filtering. Returns filtered lists.
+        Apply SFT filtering (student/teacher) and formatting correctness filtering.
+        Returns filtered lists.
         """
-        # 0. Adversarial-origin filtering: when adversarial training is enabled,
-        #    select samples by origin based on which model is being trained.
-        if self.cfg.adversarial_training:
-            if self.train_teacher:
-                # Keep only teacher-generated samples (code == 1)
-                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg == 1]
-                dropped = len(teacher_generated) - len(keep_idx)
-                logger.info(f"ADV filter (teacher): dropping {dropped}/{len(teacher_generated)} non-teacher samples")
-                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-                outputs = [outputs[i] for i in keep_idx]
-                custom_rewards = [custom_rewards[i] for i in keep_idx]
-                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-                answer_indices = [answer_indices[i] for i in keep_idx]
-                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-                initial_scores = [initial_scores[i] for i in keep_idx]
-                teacher_generated = [teacher_generated[i] for i in keep_idx]
-                correct_formattings = [correct_formattings[i] for i in keep_idx]
-            elif self.train_student:
-                # Keep student or adversarial samples (codes 0 and -1), drop teacher (code 1)
-                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg != 1]
-                dropped = len(teacher_generated) - len(keep_idx)
-                logger.info(f"ADV filter (student): dropping {dropped}/{len(teacher_generated)} teacher samples")
-                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-                outputs = [outputs[i] for i in keep_idx]
-                custom_rewards = [custom_rewards[i] for i in keep_idx]
-                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-                answer_indices = [answer_indices[i] for i in keep_idx]
-                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-                initial_scores = [initial_scores[i] for i in keep_idx]
-                teacher_generated = [teacher_generated[i] for i in keep_idx]
-                correct_formattings = [correct_formattings[i] for i in keep_idx]
         # 1. SFT filtering
         if self.train_student and self.cfg.student_loss_type == 'sft':
             keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc)]

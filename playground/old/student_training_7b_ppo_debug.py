@@ -196,7 +196,7 @@ class PPOExpConfig(BasePPOExpConfig):
     student_loss_type: str = "sft"
     teacher_loss_type: str = "ppo"
 
-    adversarial_training: bool = False
+    # Adversarial training removed
 
 
 if __name__ == "__main__":
