@@ -158,13 +158,13 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.001
     reverse_kl: bool = True
-    reward_kl_coef: float = 0.7  # KL as part of teacher reward
+    reward_kl_coef: float = 2  # KL as part of teacher reward
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.1
     reward_kl_reduction: str = "mean"   # mean or sum over tokens
     kl_max_coef: float = 0.1
     kl_reward_clamp: float = 10.0
-    ss_reward_coef: float = 0.3
+    ss_reward_coef: float = 1.0
 
     vllm_recreate_on_switch: bool = True
 

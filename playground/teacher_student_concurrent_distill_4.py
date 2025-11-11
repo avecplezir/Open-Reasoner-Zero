@@ -121,9 +121,9 @@ class PPOExpConfig(BasePPOExpConfig):
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 10
-    student_training_rounds: int = 5  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 5  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = 5
+    student_training_rounds: int = 2  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = 4  # number teacher training rounds, -1 means no teacher training
 
     enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
@@ -158,12 +158,12 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.001
     reverse_kl: bool = True
-    reward_kl_coef: float = 0.7  # KL as part of teacher reward
+    reward_kl_coef: float = 1.  # KL as part of teacher reward
     kl_loss_window_size: int = 10
     kl_window_loss_coef: float = 0.1
     reward_kl_reduction: str = "mean"   # mean or sum over tokens
     kl_max_coef: float = 0.1
-    kl_reward_clamp: float = 10.0
+    kl_reward_clamp: float = 5.0
     ss_reward_coef: float = 0.3
 
     vllm_recreate_on_switch: bool = True

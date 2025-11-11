@@ -467,6 +467,8 @@ class BaseTrainer:
         added_teacher_prompt_keys = set()
 
         if self.cfg.augment_strategy == "distill":
+            for extra in all_extras:
+                extra["teacher_answer"] = extra["answer"]
             return all_student_prompts, all_student_prompts, all_extras, indices_incorrect, np.arange(8)
 
         allowed_strategies = {"correct", "wrong", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
@@ -1367,7 +1369,7 @@ class BaseTrainer:
                         )
                         final_reward_list.append(final_teacher_reward.item())
                     else:
-                        final_reward_list.append(-2.0)
+                        final_reward_list.append(self.cfg.teacher_incorrect_reward)
                     teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(
                         final_reward_list[-1]
                     )

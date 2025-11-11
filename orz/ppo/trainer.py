@@ -74,19 +74,21 @@ class RayPPOTrainer(BaseTrainer):
 
                 if self.cfg.eval_student:
                     if self.student_steps_total % self.cfg.eval_interval == 0:
-                        async with Timer("Eval of the student model"):
+                        async with Timer(f"Eval of the student model on global step {self.global_step}"):
                             # Ensure vLLM engines are set for student before syncing
                             await self._ensure_vllm_role("student")
                             await self._major_sync_policy_weights_to_vllm()
                             await self.eval(prefix="")
+                            self.student_steps_total += 1 # ToDo: hack to avoid multiple evals per student training step
 
                 if self.cfg.separate_teacher_model and self.cfg.eval_teacher:
                     if self.teacher_steps_total % self.cfg.eval_interval == 0:
-                        async with Timer("Eval of the teacher model"):
+                        async with Timer(f"Eval of the teacher model on global step {self.global_step}"):
                             # Switch vLLM engines to teacher if needed
                             await self._ensure_vllm_role("teacher")
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
+                            self.teacher_steps_total += 1 # ToDo: hack to avoid multiple evals per teacher training step
 
                 # 2. determine what model to train
                 self.train_teacher = False

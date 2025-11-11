@@ -169,6 +169,10 @@ class BasePPOExpConfig(BaseConfig):
     reward_kl_toward_ref_model: bool = False
     ss_reward_coef: float = 0.1
     ss_tokens_offset: int = 0
+    # When True, map teacher match reward to +/-1 instead of 0/1
+    use_minus_plus_one_teacher_reward: bool = False
+    # Reward value to assign when teacher answer is incorrect
+    teacher_incorrect_reward: float = -3.0
 
     use_ref_model: bool = False
 
