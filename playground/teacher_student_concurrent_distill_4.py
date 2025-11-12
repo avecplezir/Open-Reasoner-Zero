@@ -105,11 +105,8 @@ class PPOExpConfig(BasePPOExpConfig):
 
     advantage_normalize: bool = False
 
-    num_episodes: int = 20
-    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
-
-    # 更换KL loss + k3
-    kl_loss_coef: float = 0.001
+    num_episodes: int = 50
+    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -117,20 +114,19 @@ class PPOExpConfig(BasePPOExpConfig):
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
-    use_grpo: bool = True #False
+    use_grpo: bool = True
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 5
-    student_training_rounds: int = 2  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 4  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = -1
+    student_training_rounds: int = -1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
 
-    enable_eval: bool = True if not DEBUG_MODE else True
     eval_interval: int = 10
-    eval_student: bool = True
-    eval_teacher: bool = True
+    eval_student: bool = True if not DEBUG_MODE else False
+    eval_teacher: bool = True if not DEBUG_MODE else False
 
-    generate_with_student: bool = False
+    generate_with_student: int = 20
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
@@ -145,7 +141,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # Prompt configuration
     general_propmt_yes_no: bool = True
-    remove_student_reward_normalization: bool = True
+    remove_student_reward_normalization: bool = False
 
     balance_yes_no_batches: bool = True
     teacher_explain_only: bool = False
@@ -155,16 +151,17 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_loss_type: str = "ppo"      # teacher optimized by PPO
 
     # KL shaping: penalize teacher deviations from student
+    reward_match_coef: float = 1.
     use_kl_loss: bool = True
-    kl_loss_coef: float = 0.001
-    reverse_kl: bool = True
-    reward_kl_coef: float = 1.  # KL as part of teacher reward
+    kl_loss_coef: float = 0.1
+    reverse_kl: bool = False
+    reward_kl_coef: float = 2.  # KL as part of teacher reward
     kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.1
+    kl_window_loss_coef: float = 0.
     reward_kl_reduction: str = "mean"   # mean or sum over tokens
     kl_max_coef: float = 0.1
-    kl_reward_clamp: float = 5.0
-    ss_reward_coef: float = 0.3
+    kl_reward_clamp: float = 10.0
+    ss_reward_coef: float = 0.
 
     vllm_recreate_on_switch: bool = True
 

@@ -18,7 +18,6 @@ from orz.ppo.utils import (
 )
 
 from orz.ppo.base_trainer import BaseTrainer
-from playground.zero_setting_base import _HISTORY_BUFFER
 
 
 class RayPPOTrainer(BaseTrainer):
@@ -329,42 +328,19 @@ class RayPPOTrainer(BaseTrainer):
         student_responses_by_prompt = defaultdict(list)
         student_final_answers_by_prompt = defaultdict(list)
         student_response_ptr = defaultdict(int)
-        _HISTORY_BUFFER.sample_last = self.train_teacher  # sample only last yes and no answer during teacher training
+        student_correct_by_prompt = defaultdict(list)
 
-        # Prepare BOS token for logging
-        if self.tokenizer.bos_token_id is None:
-            bos_token = ""
-        else:
-            bos_token = self.tokenizer.decode([self.tokenizer.bos_token_id])
+        if self.global_step % self.cfg.generate_with_student == 0:
 
-        # the same, but now generate data with student prompts
-        # Create paired data (positive/negative for each prompt)
-        paired_data = []
-        n_student_samples_per_prompt = self.cfg.n_student_samples_per_prompt if self.cfg.n_student_samples_per_prompt > 0 else self.cfg.n_samples_per_prompt
-        for prompt in all_inputs:
-            for _ in range(n_student_samples_per_prompt):
-                paired_data.append((
-                    prompt[0],  # student prompt
-                    prompt[1]  # extra info
-                ))
-
-        # Shuffle the pairs to randomize order, but keep pairs together
-        rng = random.Random(42)
-        rng.shuffle(paired_data)
-
-        # Flatten into separate lists, ensuring each pair stays together
-        all_student_prompts = []
-        all_extras = []
-        for student, extra in paired_data:
-            # Add both positive and negative examples
-            all_student_prompts.extend([student])
-            all_extras.extend([dict(extra)])
-
-        if self.cfg.generate_with_student:
-
-            # Generate with student; optionally retry prompts with too few successes.
-            prompt_to_extra = {p: e for p, e in all_inputs}
-            original_prompts = list(set(prompt_to_extra.keys()))
+            n_student_samples_per_prompt = self.cfg.n_student_samples_per_prompt if self.cfg.n_student_samples_per_prompt > 0 else self.cfg.n_samples_per_prompt
+            all_student_prompts = sum([[prompt[0]] * n_student_samples_per_prompt for prompt in all_inputs], [])
+            all_extras = sum([[prompt[1]] * n_student_samples_per_prompt for prompt in all_inputs], [])
+            # shuffle all_prompts and all_extras together
+            indices = list(range(len(all_student_prompts)))
+            rng = random.Random(42)
+            rng.shuffle(indices)
+            all_student_prompts = [all_student_prompts[i] for i in indices]
+            all_extras = [all_extras[i] for i in indices]
 
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
             async with Timer("Sync policy weights to VLLM engines for student generation"):
@@ -391,105 +367,39 @@ class RayPPOTrainer(BaseTrainer):
             else:
                 all_student_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, teacher_yes, teacher_no, correct_formattings, pass_at_n_dict = all_student_prompts, outputs, None, None, None, None, None, None, None, None, None, None
 
-            for sp, sresp, sfinal in zip(all_student_prompts, outputs, final_answers):
+
+            for sp, sresp, sfinal, score in zip(all_student_prompts, outputs, final_answers, initial_scores):
                 student_responses_by_prompt[sp].append(sresp)
                 student_final_answers_by_prompt[sp].append(sfinal)
+                student_correct_by_prompt[sp].append(score)
 
-            # Populate in-memory FIFO history buffer with yes/no and correctness labels
-            if self.cfg.use_student_history:
-                added = 0
-                for extra, sresp, sfinal, yflag, nflag, fmt_ok, student_score in zip(
-                    all_extras, outputs, final_answers, teacher_yes, teacher_no, correct_formattings, initial_scores
-                ):
-                    # Add by explicit yes/no when available
-                    label = None
-                    key = extra["dialogue"][0]['value']
-
-                    if self.cfg.augment_strategy == "correct_incorrect":
-                        if student_score is not None:
-                            if _HISTORY_BUFFER.add_correctness(key, sresp, bool(student_score)):
-                                added += 1
-                    else:
-                        if yflag:
-                            label = "yes"
-                        elif nflag:
-                            label = "no"
-                        if label is not None:
-                            if _HISTORY_BUFFER.add(key, sresp, label):
-                                added += 1
-
-                if len(initial_scores) > 0 and added == 0:
-                    logger.warning("use_student_history=True but no samples were added to history buffer")
-
-            # create teacher prompts from student prompts
-            all_teacher_prompts, indices_incorrect = self._create_teacher_prompts_from_student(all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no, all_student_prompts, bos_token)
+            self.buffer = [all_student_prompts, outputs, initial_scores, all_extras]
 
             # Log grouped student responses per prompt (captures multiple attempts)
-            self.log_student_responses_by_prompt(student_responses_by_prompt=student_responses_by_prompt, student_final_answers_by_prompt=student_final_answers_by_prompt, step=self.global_step)
+            self.log_student_responses_by_prompt(student_responses_by_prompt, student_final_answers_by_prompt, student_correct_by_prompt, step=self.global_step)
 
-            # Log a few examples to wandb right after student generation
-            self.log_student_generation_examples(
-                all_student_prompts=all_student_prompts,
-                all_teacher_prompts=all_teacher_prompts,
-                outputs=outputs,
-                final_answers=final_answers,
-                initial_scores=initial_scores,
-                initial_teacher_scores=initial_teacher_scores,
-                indices_incorrect=indices_incorrect,
-                step=self.global_step,
-            )
+        if self.cfg.augment_student_generation_with_teacher:
 
-            # Optionally skip student-generated data when configured to train only on
-            # teacher-generated data for either teacher-only or student-only runs.
-            if (not self.train_student and self.train_teacher and self.cfg.train_teacher_on_teacher_data_only) or (self.train_student and not self.train_teacher and self.cfg.train_student_on_teacher_data_only):
-                logger.info(f"Skipping student-generated data due to train_teacher_on_teacher_data_only={self.cfg.train_teacher_on_teacher_data_only} and train_teacher_on_teacher_data_only={self.cfg.train_student_on_teacher_data_only} flags")
-            else:
-                # Remember where the original student-generated block starts so we can
-                # attach student-side match rewards later (after adversarial gen)
-                teacher_generated.extend([0] * len(all_student_prompts))
-                combined_all_student_prompts.extend(all_student_prompts)
-                combined_all_teacher_prompts.extend(all_teacher_prompts)
-                combined_outputs.extend(outputs)
-                combined_custom_rewards.extend(custom_rewards)
-                combined_teacher_custom_rewards.extend(teacher_custom_rewards)
-                combined_answer_indices.extend(answer_indices)
-                combined_initial_scores.extend(initial_scores)
-                combined_initial_teacher_scores.extend(initial_teacher_scores)
-                combined_final_answers.extend(final_answers)
-                combined_correct_formattings.extend(correct_formattings)
-                combined_extras.extend(all_extras)
+            if self.cfg.add_student_pregenerated_answers_responses:
+                # Add previous student responses to the prompt for teacher generation
+                r_indices = np.random.randint(0, len(all_inputs), len(all_inputs) // 4)
+                for idx in r_indices:
+                    if not self.buffer[2][idx]:
+                        tuncated_len = np.random.randint(len(self.buffer[1])-5)
+                        prompt = self.buffer[0][idx] + self.buffer[1][idx][:-tuncated_len]
+                        logger.info(f"new prompt by truncated student generation: {prompt}")
+                        all_inputs.append((prompt, self.buffer[3][idx]))
 
-            # Optional retry rounds based on per-prompt success counts (pass@N)
-            await self._retry_student_generation_pass_at_n(
-                original_prompts=original_prompts,
-                prompt_to_extra=prompt_to_extra,
-                pass_at_n_dict=pass_at_n_dict,
-                bos_token=bos_token,
-                generate_kwargs=generate_kwargs,
-                extras_for_append=all_extras,
-                combined_all_student_prompts=combined_all_student_prompts,
-                combined_all_teacher_prompts=combined_all_teacher_prompts,
-                combined_outputs=combined_outputs,
-                combined_custom_rewards=combined_custom_rewards,
-                combined_teacher_custom_rewards=combined_teacher_custom_rewards,
-                combined_answer_indices=combined_answer_indices,
-                combined_initial_scores=combined_initial_scores,
-                combined_initial_teacher_scores=combined_initial_teacher_scores,
-                combined_final_answers=combined_final_answers,
-                combined_correct_formattings=combined_correct_formattings,
-                combined_extras=combined_extras,
-                teacher_generated=teacher_generated,
-            )
-        else:
-            final_answers = initial_scores = initial_teacher_scores = teacher_yes = teacher_no = []
+            n_teacher_samples_per_prompt = self.cfg.n_teacher_samples_per_prompt if self.cfg.n_teacher_samples_per_prompt > 0 else self.cfg.n_samples_per_prompt
+            all_student_prompts = sum([[prompt[0]] * n_teacher_samples_per_prompt for prompt in all_inputs], [])
+            all_extras = sum([[prompt[1]] * n_teacher_samples_per_prompt for prompt in all_inputs], [])
 
-        generate_with_teacher = not (self.train_teacher and self.cfg.train_teacher_on_student_data_only)
-        if not generate_with_teacher:
-            logger.info("Skipping teacher generation since only training teacher on student data")
-        else:
-            logger.info(f"Do generation with the teacher")
-
-        if generate_with_teacher and self.cfg.augment_student_generation_with_teacher:
+            # shuffle all_prompts and all_extras together
+            indices = list(range(len(all_student_prompts)))
+            rng = random.Random(42)
+            rng.shuffle(indices)
+            all_student_prompts = [all_student_prompts[i] for i in indices]
+            all_extras = [all_extras[i] for i in indices]
 
             # Sync teacher model weights to VLLM engines before generation
             if self.cfg.separate_teacher_model:
@@ -502,31 +412,13 @@ class RayPPOTrainer(BaseTrainer):
                     await self._ensure_vllm_role("student")
                     await self._major_sync_policy_weights_to_vllm()
 
-            # create the complementary teacher prompt(s) and collect data with it
-            if 0 <= self.cfg.mix_teacher_for_student_ratio <= 1 and self.train_student:
-                n_teacher = int(len(all_student_prompts) * self.cfg.mix_teacher_for_student_ratio)
-                rng = random.Random(getattr(self.cfg, "seed", 42))
-                teacher_indices = rng.sample(range(len(all_student_prompts)), k=n_teacher)
-                logger.info(f'selected teacher indices length: {len(teacher_indices)}')
+            assert self.cfg.augment_strategy == "distill", f"Only distill augmentation strategy is supported currently, but got {self.cfg.augment_strategy}"
+            all_teacher_prompts = all_student_prompts
+            for extra in all_extras:
+                extra["teacher_answer"] = extra["answer"]
 
-                all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no = (
-                    np.array(all_student_prompts), np.array(all_extras), np.array(final_answers),
-                    np.array(initial_scores),
-                    np.array(initial_teacher_scores), np.array(teacher_yes), np.array(teacher_no))
-
-                all_student_prompts, all_extras = all_student_prompts[teacher_indices], all_extras[teacher_indices]
-                if len(final_answers) > 0:
-                    final_answers, initial_scores, initial_teacher_scores, teacher_yes, teacher_no = final_answers[teacher_indices], initial_scores[teacher_indices], initial_teacher_scores[teacher_indices], teacher_yes[teacher_indices], teacher_no[teacher_indices]
-            else:
-                teacher_indices = np.arange(len(all_student_prompts))
-
-            logger.info(f'student for teacher ration {len(all_student_prompts)} {len(teacher_indices)}')
-
-            all_teacher_prompts, all_student_prompts, aug_all_extras, indices_incorrect, new_indicess = self._augment_student_generation_with_teacher(
-                all_student_prompts, all_extras, final_answers, initial_scores, initial_teacher_scores,
-                teacher_yes, teacher_no, bos_token)
-            logger.info(f"extras, double extras, and augmented extras lengths, {len(all_extras)} {2 * len(all_extras)} {len(aug_all_extras)}")
-            all_extras = aug_all_extras
+            indices_incorrect = []
+            new_indicess = np.arange(8)
 
             logger.info(f'len of all_teacher_prompts and all_extras: {len(all_teacher_prompts)} {len(all_extras)}')
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
@@ -562,6 +454,7 @@ class RayPPOTrainer(BaseTrainer):
                 student_responses_by_prompt=student_responses_by_prompt,
                 student_final_answers_by_prompt=student_final_answers_by_prompt,
                 student_response_ptr=student_response_ptr,
+                student_correct_by_prompt=student_correct_by_prompt,
                 step=self.global_step,
             )
 
@@ -578,28 +471,12 @@ class RayPPOTrainer(BaseTrainer):
                 step=self.global_step,
             )
 
-            teacher_generated.extend([1] * len(all_student_prompts))
-            combined_all_student_prompts.extend(all_student_prompts)
-            combined_all_teacher_prompts.extend(all_teacher_prompts)
-            combined_outputs.extend(outputs)
-            combined_custom_rewards.extend(custom_rewards)
-            combined_teacher_custom_rewards.extend(teacher_custom_rewards)
-            combined_answer_indices.extend(answer_indices)
-            combined_initial_scores.extend(initial_scores)
-            combined_initial_teacher_scores.extend(initial_teacher_scores)
-            combined_final_answers.extend(final_answers)
-            combined_correct_formattings.extend(correct_formattings)
-            combined_extras.extend(all_extras)
-
-        # Removed adversarial verification round generation
+            teacher_generated = [1] * len(all_student_prompts)
 
         # offload vllm engines when colocate all models
         if self.cfg.colocate_all:
             async with Timer("Offload vllm engines to cpu"):
                 await self._offload_vllm_engines()
-
-        all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, final_answers, correct_formattings = \
-            combined_all_student_prompts, combined_all_teacher_prompts, combined_outputs, combined_custom_rewards, combined_teacher_custom_rewards, combined_answer_indices, combined_initial_scores, combined_initial_teacher_scores, combined_final_answers, combined_correct_formattings
 
         # Randomize order of all arrays
         indices = np.random.permutation(len(all_student_prompts))
@@ -612,25 +489,11 @@ class RayPPOTrainer(BaseTrainer):
         initial_scores = [initial_scores[i] for i in indices]
         initial_teacher_scores = [initial_teacher_scores[i] for i in indices]
         teacher_generated = [teacher_generated[i] for i in indices]
-        correct_formattings = [correct_formattings[i] for i in indices]
 
         del final_answers
 
         assert self.cfg.student_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"student loss type {self.cfg.student_loss_type} must be ppo, sft or topr")
         assert self.cfg.teacher_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo, sft or topr")
-
-        all_student_prompts, all_teacher_prompts, outputs, custom_rewards, teacher_custom_rewards, answer_indices, initial_scores, initial_teacher_scores, teacher_generated, correct_formattings  = self._filter_samples_for_training(
-            all_student_prompts,
-            all_teacher_prompts,
-            outputs,
-            custom_rewards,
-            teacher_custom_rewards,
-            answer_indices,
-            initial_scores,
-            initial_teacher_scores,
-            teacher_generated,
-            correct_formattings,
-        )
 
         initial_scores, initial_teacher_scores, teacher_generated = np.array(initial_scores), np.array(initial_teacher_scores), np.array(teacher_generated)
         # Fraction of teacher-generated samples (code == 1)
@@ -644,7 +507,7 @@ class RayPPOTrainer(BaseTrainer):
 
         # 1.3 packing samples
         async with Timer("Packing samples"):
-            # Pack student sequences (for training)
+            # Pack student and teacher sequences
             (
                 ret_sequences,
                 ret_attention_masks,

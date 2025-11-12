@@ -40,9 +40,6 @@ from orz.ppo.utils import check_reflection_pattern
 from playground.zero_setting_base import (
     CustomDataset,
     EvalCustomDataset,
-    create_student_prompt,
-    create_teacher_prompt_from_answer,
-    extract_visible_reasoning,
 )
 
 DEBUG_MODE = False if os.environ.get("DEBUG_MODE", "False") == "False" else True  # Global debug flag

@@ -133,6 +133,7 @@ class PolicyLoss(nn.Module):
     ) -> torch.Tensor:
         if loss_type == 1: #'ppo':
             logger.info(f"Using PPO loss")
+            logger.info(f"advantages: {advantages.max()} {advantages.min()} {advantages.mean()}")
             ratio = (log_probs - old_log_probs).exp()
             surr1 = ratio * advantages
             surr2 = ratio.clamp(1 - self.clip_eps, 1 + self.clip_eps) * advantages
@@ -148,6 +149,7 @@ class PolicyLoss(nn.Module):
             loss = masked_mean(per_example_loss, action_mask, dim=-1).mean()
         elif loss_type == 3: #'sft':
             logger.info(f"Using sft loss")
+            logger.info(f"advantages: {advantages.max()} {advantages.min()} {advantages.mean()}")
             ratio = -log_probs * advantages
             # oldprobs = torch.exp(old_log_probs)
             # ratio = -oldprobs * log_probs * advantages

@@ -263,6 +263,8 @@ class BasePPOExpConfig(BaseConfig):
     repeat_randomply_once: bool = False
     teacher_turn_off_std_normalization: bool = False
 
+    add_student_pregenerated_answers_responses: bool = False
+
 
 
 

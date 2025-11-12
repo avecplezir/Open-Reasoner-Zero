@@ -30,9 +30,7 @@ from orz.ppo.utils import (
     masked_mean,
 )
 from playground.zero_setting_base import (
-    create_student_prompt,
     create_teacher_prompt_from_answer,
-    extract_visible_reasoning,
 )
 
 class BaseTrainer:
@@ -173,59 +171,11 @@ class BaseTrainer:
         )
         return all_teacher_prompts, indices_incorrect
 
-    def log_student_generation_examples(
-        self,
-        *,
-        all_student_prompts: List[str],
-        all_teacher_prompts: List[str],
-        outputs: List[Any],
-        final_answers: List[Any],
-        initial_scores: List[Any],
-        initial_teacher_scores: List[Any],
-        indices_incorrect: List[int],
-        step: Optional[int] = None,
-    ) -> None:
-        n = min(5, len(all_student_prompts))
-        table_data: List[List[Any]] = []
-        for i in range(n):
-            table_data.append([
-                all_student_prompts[i],
-                all_teacher_prompts[i],
-                outputs[i],
-                final_answers[i],
-                bool(initial_scores[i]),
-                bool(initial_teacher_scores[i]),
-            ])
-        n_inc = min(5, len(indices_incorrect))
-        for i in range(n_inc):
-            idx = indices_incorrect[i]
-            table_data.append([
-                all_student_prompts[idx],
-                all_teacher_prompts[idx],
-                outputs[idx],
-                final_answers[idx],
-                bool(initial_scores[idx]),
-                bool(initial_teacher_scores[idx]),
-            ])
-        self._log_wandb_table(
-            name="student_generation_examples",
-            columns=[
-                "student_prompt",
-                "teacher_prompt",
-                "output",
-                "final_answer",
-                "student_correct",
-                "teacher_correct",
-            ],
-            data=table_data,
-            step=step,
-        )
-
     def log_student_responses_by_prompt(
         self,
-        *,
-        student_responses_by_prompt: Dict[str, List[str]],
-        student_final_answers_by_prompt: Optional[Dict[str, List[str]]] = None,
+        student_responses_by_prompt,
+        student_final_answers_by_prompt,
+        student_correct_by_prompt,
         max_prompts: int = 3,
         step: Optional[int] = None,
     ) -> None:
@@ -242,13 +192,9 @@ class BaseTrainer:
         prompts = list(student_responses_by_prompt.keys())[:max_prompts]
         for p in prompts:
             responses = student_responses_by_prompt.get(p, [])
-            finals = []
-            if student_final_answers_by_prompt is not None:
-                finals = student_final_answers_by_prompt.get(p, [])
 
             for idx, resp in enumerate(responses):
-                final = finals[idx] if idx < len(finals) else ""
-                rows.append([p, idx, resp, final])
+                rows.append([p, idx, resp, student_final_answers_by_prompt[p][idx], student_correct_by_prompt[p][idx]])
 
         self._log_wandb_table(
             name="student_responses_by_prompt",
@@ -257,6 +203,7 @@ class BaseTrainer:
                 "response_idx",
                 "student_response",
                 "student_final_answer",
+                "correct",
             ],
             data=rows,
             step=step,
@@ -274,35 +221,62 @@ class BaseTrainer:
         student_responses_by_prompt: Dict[str, List[str]],
         student_final_answers_by_prompt: Dict[str, List[str]],
         student_response_ptr: Dict[str, int],
+        student_correct_by_prompt=None,
         step: Optional[int] = None,
     ) -> None:
-        paired_table: List[List[Any]] = []
-        max_pairs = min(10, len(all_teacher_prompts))
-        for i in range(max_pairs):
+
+        paired_table_correct = []
+        paired_table_incorrect = []
+
+        if len(student_responses_by_prompt) == 0:
+            return
+
+        for i in range(len(all_teacher_prompts)):
             s_prompt = all_student_prompts[i]
             t_prompt = all_teacher_prompts[i]
             t_resp = outputs[i]
             t_final = final_answers[i]
-            t_score = bool(initial_teacher_scores[i])
+
             s_list = student_responses_by_prompt.get(s_prompt, [])
             s_final_list = student_final_answers_by_prompt.get(s_prompt, [])
+            student_correct_list = student_correct_by_prompt.get(s_prompt, [])
             idx = student_response_ptr.get(s_prompt, 0)
-            s_resp = s_list[idx] if idx < len(s_list) else ""
-            s_final = s_final_list[idx] if idx < len(s_final_list) else ""
+            s_resp = s_list[idx]
+            s_final = s_final_list[idx]
+            s_correct = student_correct_list[idx]
+
             student_response_ptr[s_prompt] = idx + 1
+
             correct_answer = all_extras[i].get("answer", "")
-            paired_table.append([
-                s_prompt,
-                s_resp,
-                s_final,
-                t_prompt,
-                t_resp,
-                t_final,
-                correct_answer,
-                t_score,
-            ])
+            t_correct = initial_teacher_scores[i]
+
+            if t_correct:
+                if s_correct and len(paired_table_correct) < 20:
+                    paired_table_correct.append([
+                        s_prompt,
+                        s_resp,
+                        s_final,
+                        t_prompt,
+                        t_resp,
+                        t_final,
+                        correct_answer,
+                    ])
+                elif not s_correct and len(paired_table_incorrect) < 20:
+                    paired_table_incorrect.append([
+                        s_prompt,
+                        s_resp,
+                        s_final,
+                        t_prompt,
+                        t_resp,
+                        t_final,
+                        correct_answer,
+                    ])
+
+            if len(paired_table_correct) >= 20 and len(paired_table_incorrect) >= 20:
+                break
+
         self._log_wandb_table(
-            name="paired_generation_examples",
+            name="paired_correct_examples",
             columns=[
                 "student_prompt",
                 "student_response",
@@ -311,9 +285,23 @@ class BaseTrainer:
                 "teacher_response",
                 "teacher_final_answer",
                 "correct_answer",
-                "teacher_correct",
             ],
-            data=paired_table,
+            data=paired_table_correct,
+            step=step,
+        )
+
+        self._log_wandb_table(
+            name="paired_incorrect_examples",
+            columns=[
+                "student_prompt",
+                "student_response",
+                "student_final_answer",
+                "teacher_prompt",
+                "teacher_response",
+                "teacher_final_answer",
+                "correct_answer",
+            ],
+            data=paired_table_incorrect,
             step=step,
         )
 
@@ -434,210 +422,6 @@ class BaseTrainer:
             ],
             data=examples,
             step=step,
-        )
-
-    def _augment_student_generation_with_teacher(
-        self,
-        all_student_prompts: List[str],
-        all_extras: List[dict],
-        final_answers: List[str],
-        initial_scores: List[bool],
-        initial_teacher_scores: List[bool],
-        teacher_yes: List[bool],
-        teacher_no: List[bool],
-        bos_token: str,
-    ) -> Tuple[List[str], List[str], List[dict], List[int], List[int]]:
-        """
-        Create complementary teacher prompts based on configured augment_strategy.
-        Returns:
-          - all_teacher_prompts: teacher prompts for generation
-          - aug_all_student_prompts: repeated student prompts aligned to teacher prompts
-          - aug_all_extras: repeated extras aligned to teacher prompts
-          - indices_incorrect: representative incorrect indices for logging
-          - new_indicess: indices mapping to representative examples for logs
-        """
-        all_teacher_prompts: List[str] = []
-        aug_all_student_prompts: List[str] = []
-        aug_all_extras: List[dict] = []
-        indices_incorrect: List[int] = []
-        new_indicess: List[int] = []
-
-        # Track which teacher prompts were already added so we can repeat
-        # each unique prompt exactly n_samples_per_prompt times.
-        added_teacher_prompt_keys = set()
-
-        if self.cfg.augment_strategy == "distill":
-            for extra in all_extras:
-                extra["teacher_answer"] = extra["answer"]
-            return all_student_prompts, all_student_prompts, all_extras, indices_incorrect, np.arange(8)
-
-        allowed_strategies = {"correct", "wrong", "yes_no", "only_wrong", "only_correct", "opposite", "correct_incorrect"}
-        assert self.cfg.augment_strategy in allowed_strategies, (
-            f"augment_strategy must be one of {allowed_strategies}, got {self.cfg.augment_strategy}"
-        )
-        if self.cfg.augment_strategy in {"only_wrong", "only_correct", "opposite"}:
-            assert (
-                self.cfg.generate_with_student
-            ), f"{self.cfg.augment_strategy} strategy require student generation to be enabled"
-
-        # Precompute candidate negatives if needed
-        candidate_student_negs = defaultdict(list)
-        dataset_answer_pool: List[str] = []
-        if self.cfg.augment_strategy == "correct_incorrect":
-            if self.cfg.generate_with_student:
-                for sp, ex, fa, sc in zip(all_student_prompts, all_extras, final_answers, initial_scores):
-                    if not sc and len(fa.strip()) > 0:
-                        candidate_student_negs[sp].append(fa)
-
-            dataset_answer_pool = [ex["answer"] for ex in all_extras if len(ex["answer"]) > 0]
-
-
-        for i, (extra, student_prompt) in enumerate(zip(all_extras, all_student_prompts)):
-            include = True
-            teacher_answer = None
-            teacher_answers = None
-            is_correct = None
-
-            teacher_score = initial_teacher_scores[i] if self.cfg.generate_with_student else None
-            student_score = initial_scores[i] if self.cfg.generate_with_student else None
-            final_answer = final_answers[i] if self.cfg.generate_with_student else None
-
-            if self.cfg.augment_strategy == "correct":
-                representative_incorrect = bool(student_score is not None and not student_score)
-                teacher_answer = extra["answer"]
-                is_correct = True
-
-            elif self.cfg.augment_strategy == "wrong":
-                representative_incorrect = bool(student_score is not None and not student_score)
-                if student_score and teacher_yes[i]:
-                    teacher_answer = self.no_token()
-                elif student_score and teacher_no[i]:
-                    teacher_answer = self.yes_token()
-                else:
-                    continue
-                is_correct = False
-
-            elif self.cfg.augment_strategy == "correct_incorrect":
-                representative_incorrect = not bool(student_score)
-                correct_ans = extra["answer"]
-                neg_ans = None
-                if self.cfg.generate_with_student:
-                    neg_cands = candidate_student_negs.get(student_prompt, [])
-                    if len(neg_cands) > 0:
-                        neg_ans = neg_cands[-1]
-                if neg_ans is None:
-                    # Fallback: sample a different dataset answer
-                    if self.train_teacher:
-                        neg_ans = dataset_answer_pool[-1]
-                    else:
-                        neg_ans = random.choice(dataset_answer_pool)
-                assert neg_ans is not None, "Negative answer must be not None by now"
-                teacher_answers = [correct_ans, neg_ans]
-                is_corrects = [True, False]
-
-            elif self.cfg.augment_strategy == "yes_no":
-                representative_incorrect = bool(student_score is not None and not student_score)
-                teacher_answers = [self.yes_token(), self.no_token()]
-                assert extra["answer"] in ["yes", "no"], (
-                    f"Ground-truth answer must be yes or no for yes_no strategy, got {extra['answer']}"
-                )
-                is_corrects = [extra["answer"] == "yes", extra["answer"] == "no"]
-
-            elif self.cfg.augment_strategy == "only_wrong":
-                if teacher_score and (not student_score):
-                    representative_incorrect = True
-                    if teacher_yes[i]:
-                        teacher_answer = self.no_token()
-                    elif teacher_no[i]:
-                        teacher_answer = self.yes_token()
-                    else:
-                        assert False, f"final_answer {final_answer} must be yes or no"
-                else:
-                    include = False
-                    representative_incorrect = False
-                is_correct = True
-
-            elif self.cfg.augment_strategy == "only_correct":
-                if teacher_score and student_score:
-                    representative_incorrect = False
-                    if teacher_yes[i]:
-                        teacher_answer = self.no_token()
-                    elif teacher_no[i]:
-                        teacher_answer = self.yes_token()
-                    else:
-                        assert False, f"final_answer {final_answer} must be yes or no"
-                else:
-                    include = False
-                    representative_incorrect = True
-                is_correct = False
-
-            elif self.cfg.augment_strategy == "opposite":
-                if teacher_score:
-                    representative_incorrect = not bool(student_score)
-                    if teacher_yes[i]:
-                        teacher_answer = self.no_token()
-                    elif teacher_no[i]:
-                        teacher_answer = self.yes_token()
-                    else:
-                        assert False, f"final_answer {final_answer} must be yes or no"
-                    is_correct = not bool(student_score)
-                else:
-                    include = False
-                    representative_incorrect = False
-            else:
-                assert False, "One student augmenting strategy must be chosen"
-
-            if not include:
-                continue
-
-            teacher_answers = [teacher_answer] if teacher_answers is None else teacher_answers
-            is_corrects = [is_correct] if len(teacher_answers) == 1 else is_corrects
-
-            repeat_prompts = not (self.cfg.use_student_history and self.train_student)
-
-            random_ans_idx = np.random.randint(0, 2)
-            for ans_idx, (ans, is_corr) in enumerate(zip(teacher_answers, is_corrects)):
-                teacher_prompt = create_teacher_prompt_from_answer(
-                    extra["dialogue"], ans, bos_token, cfg=self.cfg, is_correct=is_corr
-                )
-                key = teacher_prompt
-                if key in added_teacher_prompt_keys and repeat_prompts:
-                    continue
-
-                new_extra = dict(extra)
-                new_extra["teacher_answer"] = ans
-
-                index = len(all_teacher_prompts)
-                if not repeat_prompts:
-                    repeats = self.cfg.n_teacher_samples_per_prompt if self.cfg.n_teacher_samples_per_prompt > 0 else 1
-                elif is_corr and self.cfg.teacher_k_correct_per_prompt > 0:
-                    repeats = self.cfg.teacher_k_correct_per_prompt
-                else:
-                    repeats =  self.cfg.n_samples_per_prompt
-                all_teacher_prompts.extend([teacher_prompt] * repeats)
-                aug_all_student_prompts.extend([student_prompt] * repeats)
-                aug_all_extras.extend([dict(new_extra)] * repeats)
-
-                new_indicess.append(index)
-                if representative_incorrect:
-                    indices_incorrect.append(index)
-                added_teacher_prompt_keys.add(key)
-
-        if self.cfg.augment_strategy in ["correct", "opposite"] and len(all_extras) != len(aug_all_extras):
-            logger.warning(
-                f"extras don't match augmented extras in length, {len(all_extras)} {len(aug_all_extras)}"
-            )
-        elif self.cfg.augment_strategy in ["yes_no", "correct_incorrect"] and 2 * len(all_extras) != len(aug_all_extras):
-            logger.warning(
-                f"double extras don't match augmented extras in length, {2 * len(all_extras)} {len(aug_all_extras)}"
-            )
-
-        return (
-            all_teacher_prompts,
-            aug_all_student_prompts,
-            aug_all_extras,
-            indices_incorrect,
-            new_indicess,
         )
 
     async def _distributed_generate(
@@ -813,120 +597,6 @@ class BaseTrainer:
             if hasattr(self, "writer") and self.writer is not None:
                 self.writer.add_scalar(f"pass_at_n_retry_{round_idx+2}", pass_at_n_retry, self.global_step)
 
-    def _filter_samples_for_training(
-        self,
-        all_student_prompts: List[str],
-        all_teacher_prompts: List[str],
-        outputs: List[str],
-        custom_rewards: List[Any],
-        teacher_custom_rewards: List[Any],
-        answer_indices: List[Any],
-        initial_scores: List[Any],
-        initial_teacher_scores: List[Any],
-        teacher_generated: List[Any],
-        correct_formattings: List[Any],
-    ) -> Optional[Tuple[
-        List[str], List[str], List[str], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]
-    ]]:
-        """
-        Apply SFT filtering (student/teacher) and formatting correctness filtering.
-        Returns filtered lists.
-        """
-        # 1. SFT filtering
-        if self.train_student and self.cfg.student_loss_type == 'sft':
-            keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc)]
-            dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT student filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-        elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
-            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
-            dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_teacher_scores)} incorrect samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-        else:
-            if self.train_teacher:
-                logger.info(f"Using {self.cfg.teacher_loss_type} to train teacher")
-            if self.train_student:
-                logger.info(f"Using {self.cfg.student_loss_type} to train student")
-
-        # 2. Formatting correctness filtering
-        if (self.cfg.filter_for_correct_formatting_student and self.train_student) or (self.cfg.filter_for_correct_formatting_teacher and self.train_teacher):
-            keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
-            dropped = len(correct_formattings) - len(keep_idx)
-            logger.info(f"Formatting filter: dropping {dropped}/{len(correct_formattings)} samples with bad formatting")
-            if hasattr(self, "writer") and self.writer is not None and len(correct_formattings) > 0:
-                self.writer.add_scalar("teacher_training_dropped_samples", dropped / len(correct_formattings), self.global_step)
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        if self.cfg.student_use_only_student_negatives and self.train_student:
-            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or not corr]
-            dropped = len(teacher_generated) - len(keep_idx)
-            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        if self.cfg.student_use_only_student_positives and self.train_student:
-            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or corr]
-            dropped = len(teacher_generated) - len(keep_idx)
-            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        return (
-            all_student_prompts,
-            all_teacher_prompts,
-            outputs,
-            custom_rewards,
-            teacher_custom_rewards,
-            answer_indices,
-            initial_scores,
-            initial_teacher_scores,
-            teacher_generated,
-            correct_formattings,
-        )
 
     async def _apply_grpo_normalization(
         self,
@@ -1288,12 +958,7 @@ class BaseTrainer:
                         if start_kl < end_full:
                             student_ratio_clipped_0_1_scalar = torch.exp(
                                 self.cfg.topr_temperature
-                                * (
-                                    student_exp.action_log_probs[:, start_kl:end_full]
-                                    .sum(-1)
-                                    - teacher_exp.action_log_probs[:, start_kl:end_full]
-                                    .sum(-1)
-                                ).clamp(max=0.0)
+                                * (student_exp.action_log_probs[:, start_kl:end_full].sum(-1) - teacher_exp.action_log_probs[:, start_kl:end_full].sum(-1)).clamp(max=0.0)
                             )
                         else:
                             student_ratio_clipped_0_1_scalar = torch.tensor(0)
@@ -1324,18 +989,11 @@ class BaseTrainer:
                             kl_mean = masked_mean(kl_episode, None, dim=-1)
                             kl_sum = kl_episode.sum(dim=-1)
                             if self.cfg.reward_kl_reduction == "mean":
-                                kl_reward = (
-                                    -kl_mean
-                                    - self.cfg.kl_max_coef * kl_max
-                                )
+                                kl_reward = -kl_mean- self.cfg.kl_max_coef * kl_max
                             elif self.cfg.reward_kl_reduction == "sum":
-                                kl_reward = (
-                                    -kl_sum
-                                    - self.cfg.kl_max_coef * kl_max
-                                )
-                            kl_reward = torch.clamp(
-                                kl_reward, min=-self.cfg.kl_reward_clamp
-                            )
+                                kl_reward = -kl_sum - self.cfg.kl_max_coef * kl_max
+
+                            kl_reward = torch.clamp(kl_reward, min=-self.cfg.kl_reward_clamp)
 
                             # Optional: rolling-window KL loss (max over mean of windows of size N)
                             window_kl_reward = torch.tensor(0.0, device=kl_div_all.device)
@@ -1359,20 +1017,18 @@ class BaseTrainer:
                     assert (
                         match_reward_check == match_reward
                     ), "match_reward_check and match_reward must be equal"
-                    if teacher_score:
-                        final_teacher_reward = (
-                            self.cfg.topr_reward_coef * student_ratio_clipped_0_1_scalar
-                            + self.cfg.ss_reward_coef * ss_reward_list[-1]
-                            + self.cfg.reward_kl_coef * kl_reward
-                            + self.cfg.kl_window_loss_coef * window_kl_reward
-                            + self.cfg.reward_match_coef * match_reward
-                        )
-                        final_reward_list.append(final_teacher_reward.item())
-                    else:
-                        final_reward_list.append(self.cfg.teacher_incorrect_reward)
-                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(
-                        final_reward_list[-1]
+                    # if teacher_score:
+                    final_teacher_reward = (
+                        self.cfg.topr_reward_coef * student_ratio_clipped_0_1_scalar
+                        + self.cfg.ss_reward_coef * ss_reward_list[-1]
+                        + self.cfg.reward_kl_coef * kl_reward
+                        + self.cfg.kl_window_loss_coef * window_kl_reward
+                        + self.cfg.reward_match_coef * match_reward
                     )
+                    final_reward_list.append(final_teacher_reward.item())
+                    # else:
+                    #     final_reward_list.append(self.cfg.teacher_incorrect_reward)
+                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(final_reward_list[-1])
                     # For student normalization, optionally use signed exp(ss_reward)
                     if self.cfg.use_ss_reward_for_student:
                         signed = (
@@ -1389,16 +1045,9 @@ class BaseTrainer:
                     kl_sum_list.append(kl_sum.item())
                     teacher_match_reward_list.append(match_reward.item())
 
-                    student_exp.info["loss_type"] = (
-                        torch.tensor(compute_loss_type_hash(self.cfg.student_loss_type))
-                        .unsqueeze(0)
-                        .float()
-                    )
-                    teacher_exp.info["loss_type"] = (
-                        torch.tensor(compute_loss_type_hash(self.cfg.teacher_loss_type))
-                        .unsqueeze(0)
-                        .float()
-                    )
+                    student_exp.info["loss_type"] = torch.tensor(compute_loss_type_hash(self.cfg.student_loss_type)).unsqueeze(0).float()
+
+                    teacher_exp.info["loss_type"] = torch.tensor(compute_loss_type_hash(self.cfg.teacher_loss_type)).unsqueeze(0).float()
 
                     # compute ratio_clipped_0_1 for TOPR
                     if self.cfg.student_loss_type == "topr":
@@ -1433,7 +1082,6 @@ class BaseTrainer:
                                 student_exp.ratio_clipped_0_1[
                                     :, start_kl:end_full
                                 ] = student_ratio_clipped_0_1_scalar
-                                # logger.info(f'student_ratio_clipped_0_1_scalar {student_ratio_clipped_0_1_scalar}')
                                 student_ratio_clipped_0_1_scalar = (
                                     student_ratio_clipped_0_1_scalar.mean()
                                 )

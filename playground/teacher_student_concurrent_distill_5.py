@@ -147,7 +147,7 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_explain_only: bool = False
 
     # Losses
-    student_loss_type: str = "sft"      # distill from teacher outputs
+    student_loss_type: str = "topr"      # distill from teacher outputs
     teacher_loss_type: str = "ppo"      # teacher optimized by PPO
 
     # KL shaping: penalize teacher deviations from student
@@ -155,9 +155,9 @@ class PPOExpConfig(BasePPOExpConfig):
     use_kl_loss: bool = True
     kl_loss_coef: float = 0.01
     reverse_kl: bool = False
-    reward_kl_coef: float = 1.  # KL as part of teacher reward
+    reward_kl_coef: float = 0.5  # KL as part of teacher reward
     kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.1
+    kl_window_loss_coef: float = 0.
     reward_kl_reduction: str = "mean"   # mean or sum over tokens
     kl_max_coef: float = 0.1
     kl_reward_clamp: float = 10.0

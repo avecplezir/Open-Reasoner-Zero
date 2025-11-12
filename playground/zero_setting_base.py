@@ -257,32 +257,6 @@ def create_teacher_prompt_from_answer(
     else:
         prompt = dialogue["prompt"][0]["value"] if eval else dialogue[0]["value"]
 
-    # If requested, inject previous student attempts sampled from
-    # the in-memory FIFO buffer. We keep the full attempts including <answer>.
-    if cfg.use_student_history:
-        if cfg.augment_strategy == "correct_incorrect":
-            a_title, b_title = "[CORRECT]", "[INCORRECT]"
-            a_list, b_list = _HISTORY_BUFFER.sample_by_labels(
-                prompt, ("correct", "incorrect"), k=cfg.student_history_samples_per_label
-            )
-        else:
-            a_title, b_title = "[YES]", "[NO]"
-            a_list, b_list = _HISTORY_BUFFER.sample_by_labels(
-                prompt, ("yes", "no"), k=cfg.student_history_samples_per_label
-            )
-
-        if a_list or b_list:
-            parts = ["Previous student attempt(s):"]
-            if a_list:
-                parts.append(a_title)
-                for item in a_list:
-                    parts.append(f"- {item}")
-            if b_list:
-                parts.append(b_title)
-                for item in b_list:
-                    parts.append(f"- {item}")
-            prompt = f"{prompt}\n\n" + "\n".join(parts)
-
     prompt_instruction_template = Template(prompt_instruction_template_jinja)
     prompt_instruction = prompt_instruction_template.render(prompt=prompt)
     teacher_prompt_template = Template(teacher_prompt_template_jinja)
@@ -425,34 +399,4 @@ class _StudentHistoryBuffer:
         return self.sample_by_labels(key, ("yes", "no"), k)
 
 
-_HISTORY_BUFFER = _StudentHistoryBuffer()
 
-
-# -----------------------
-# Visible reasoning extractor
-# -----------------------
-def extract_visible_reasoning(response: str, *, use_say: bool) -> str:
-    """Extract the portion of a teacher response that should be visible.
-
-    Behavior:
-    - Always ignore anything after the last <answer> tag (if present).
-    - When use_say=True: return the concatenation of all <say>...</say> blocks
-      found before <answer>. If none are found, return an empty string.
-    - When use_say=False: return the segment before the last </think> if found;
-      otherwise, return everything before <answer>.
-    """
-    # Trim to content before the final answer, if any
-    idx_ans = response.rfind("<answer>")
-    head = response[:idx_ans] if idx_ans != -1 else response
-
-    if use_say:
-        # Extract all <say>...</say> occurrences
-        parts = re.findall(r"<say>(.*?)</say>", head, flags=re.DOTALL)
-        cleaned = [p.strip() for p in parts if p is not None and p.strip()]
-        return "\n".join(cleaned)
-
-    # Default behavior: prefer to cut at the last </think>
-    idx_think_end = head.rfind("</think>")
-    if idx_think_end != -1:
-        return head[:idx_think_end].strip()
-    return head.strip()
