@@ -105,7 +105,7 @@ class PPOExpConfig(BasePPOExpConfig):
 
     advantage_normalize: bool = False
 
-    num_episodes: int = 50
+    num_episodes: int = 20
     n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
 
     # generate related settings

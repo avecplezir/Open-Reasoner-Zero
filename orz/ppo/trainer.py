@@ -330,7 +330,7 @@ class RayPPOTrainer(BaseTrainer):
         student_response_ptr = defaultdict(int)
         student_correct_by_prompt = defaultdict(list)
 
-        if self.global_step % self.cfg.generate_with_student == 0:
+        if self.cfg.generate_with_student > 0 and self.global_step % self.cfg.generate_with_student == 0:
 
             n_student_samples_per_prompt = self.cfg.n_student_samples_per_prompt if self.cfg.n_student_samples_per_prompt > 0 else self.cfg.n_samples_per_prompt
             all_student_prompts = sum([[prompt[0]] * n_student_samples_per_prompt for prompt in all_inputs], [])

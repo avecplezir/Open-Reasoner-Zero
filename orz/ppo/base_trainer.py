@@ -238,6 +238,8 @@ class BaseTrainer:
             t_final = final_answers[i]
 
             s_list = student_responses_by_prompt.get(s_prompt, [])
+            if len(s_list) == 0:
+                continue
             s_final_list = student_final_answers_by_prompt.get(s_prompt, [])
             student_correct_list = student_correct_by_prompt.get(s_prompt, [])
             idx = student_response_ptr.get(s_prompt, 0)
