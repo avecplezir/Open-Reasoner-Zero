@@ -37,6 +37,7 @@ file_name = f"{'debug_' if DEBUG_MODE else ''}{os.path.splitext(os.path.basename
 executor = ThreadPoolExecutor(max_workers=64)
 
 prefix = '/home/a/anokhin/links/scratch'
+project_prefix = '/home/a/anokhin/links/projects/aip-irina/anokhin/adv_reasoner'
 # prefix = '/home/anokhin/scratch'
 
 @dataclass
@@ -47,51 +48,55 @@ class PPOExpConfig(BasePPOExpConfig):
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
-
     actor_num = 2
+
     # resource related settings
-    ref_num_nodes: int = actor_num
+    colocate_all: bool = True
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
-    reward_num_nodes: int = actor_num
     reward_num_gpus_per_node: int = 1
-    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
-    vllm_tensor_parallel_size: int = 1
-    adam_offload: bool = False
-    zero_stage: int = 3
-    vllm_sync_backend: str = "gloo"  # nccl or gloo
+    if not colocate_all:
+        ref_num_nodes: int = actor_num
+        actor_num_nodes: int = actor_num
+        critic_num_nodes: int = actor_num
+        reward_num_nodes: int = actor_num
+        vllm_num_engines: int = total_num_nodes - actor_num
+        gpu_memory_utilization: float = 0.95
+    else:
+        ref_num_nodes: int = total_num_nodes
+        actor_num_nodes: int = total_num_nodes
+        critic_num_nodes: int = total_num_nodes
+        reward_num_nodes: int = total_num_nodes
+        vllm_num_engines: int = total_num_nodes
+        gpu_memory_utilization: float = 0.3
 
-    boxed_pattern: bool = True
+    use_ref_model: bool = False
+    update_ref_every_epoch: bool = False
+    reward_kl_toward_ref_model: bool = False
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" #f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/iter39/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-0.5B" #f"{prefix}/Qwen2.5-1.5B"
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'ppo-student-data-v0-boxed-{randint}'
+    e_name = f'concurrent-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
-    save_path: str = f"{prefix}/orz_ckpt/{exp_name}"
+    save_path: str = ckpt_path
     tensorboard_log_dir: str = f"{prefix}/orz_logs/{exp_name}"
 
-    # MathTrain dataset and Math500 eval dataset
     # data related settings
     prompt_data: ListConfig = ListConfig([
         "data/strategyqa.json",
     ])
     eval_prompt_data: ListConfig = ListConfig(
         [
-            # "data/eval_data/math500.json",
-            # "data/eval_data/gpqa_diamond.json",
             "data/eval_data/strategyqa_test.json",
             "data/eval_data/strategyqa_train.json",
         ]
@@ -99,83 +104,71 @@ class PPOExpConfig(BasePPOExpConfig):
     prompt_data_probs: ListConfig = ListConfig([1.0])
 
     # ppo related settings
-    actor_learning_rate: float = 1e-6
-    critic_learning_rate: float = 5e-6
-    num_warmup_steps: int = 50
+    num_warmup_steps: int = 5
     prompt_max_len: int = 2048
 
-    enable_prefix_caching: bool = True
-    enforce_eager: bool = False
-
-    update_ref_every_epoch: bool = False
-    advantage_normalize: bool = True
+    advantage_normalize: bool = False
 
     num_episodes: int = 20
-    rollout_batch_size: int = 128 #128 if not DEBUG_MODE else 128
     n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
-    micro_rollout_batch_size: int = 128 #128 #if not DEBUG_MODE else 240
-
-    max_epochs: int = 1
-    policy_update_steps: int = 1
-    critic_update_steps: int = 12 if not DEBUG_MODE else 1
-    micro_train_batch_size: int = 1
-    micro_forward_batch_size: int = 1
-    freezing_actor_steps: int = -1
-    init_kl_coef: float = 0
-    # 更换KL loss + k3
-    kl_loss_coef: float = 0.0
-    use_kl_loss: bool = True
-    use_kl_estimator_k3: bool = True
-
-    enable_eval: bool = True if not DEBUG_MODE else True
-    eval_interval: int = 10
 
     # generate related settings
-    generate_max_len: int = 12000 #8000  # 2000 #4000 # TODO: change to larger later
-    max_len: int = 12192 #8192  #2560 #4192 # TODO: change to larger later
+    generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
+    max_len: int = 3072 #12192 #8192  #2560 #4192 # TODO: change to larger later
     packing_max_len: int = generate_max_len + prompt_max_len
-    temperature: float = 1.0
-    top_p: float = 1.0
-    top_k: int = -1
-    stop: ListConfig = ListConfig(["User:", "Human:", "Assistant:", "</answer>"])
 
     # grpo related settings
-    use_grpo: bool = False #False
-    remove_student_grpo_normalization: bool = False
-    remove_teacher_grpo_normalization: bool = False
-    use_minus_plus_one_teacher_reward: bool = False
+    use_grpo: bool = True
 
-    gpu_memory_utilization: float = 0.9
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    gamma: float = 1.0
-    lambd: float = 1.0
-
-    kl_max_coef: float = 0.02
-    kl_mean_coef: float = 1
-    reward_kl_coef: float = 1
-    kl_reward_clamp: float = 7
-    reward_kl_reduction: str = "mean"  # "mean" or "sum"
-    reward_match_coef: float = 1.
-    reward_kl_toward_ref_model: bool = False
-    ss_reward_coef: float = 0.3
-
-    use_topr: bool = False
-    train_teacher: bool = False
-    replace_student_logprops_w_teacher: bool = True
-    replace_student_base_logprops_w_teacher: bool = True
-    replace_teacher_logprops_w_student: bool = True
-    replace_teacher_base_logprops_w_student: bool = True
-
-    student_teacher_order: bool = False
-    student_training_rounds: int = 300  # number student training rounds, -1 means no student training
+    initial_teacher_training_rounds: int = -1
+    student_training_rounds: int = 100000  # number student training rounds, -1 means no student training
     teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
 
-    generate_with_teacher: bool = False
-    generate_with_student: bool = True
-    augment_student_generation_with_teacher: bool = False
+    eval_interval: int = 10
+    eval_student: bool = True if not DEBUG_MODE else False
+    eval_teacher: bool = True if not DEBUG_MODE else False
 
-    separate_teacher_model: bool = False
+    generate_with_student: int = -1
+    augment_student_generation_with_teacher: bool = True
+    train_student_on_teacher_data_only: bool = True
+    augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+
+    separate_teacher_model: bool = True
+    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_7b_sft_7B-student-data-v0-143/iter260/policy"
+
+    skip_student_training_to_pretrain_teacher: bool = False
+    skip_student_first_n_rounds: int = initial_teacher_training_rounds
+    filter_for_correct_formatting_student: bool = False
+    filter_for_correct_formatting_teacher: bool = False
+
+    # Prompt configuration
+    general_propmt_yes_no: bool = True
+    remove_student_reward_normalization: bool = False
+
+    balance_yes_no_batches: bool = True
+    teacher_explain_only: bool = False
+
+    # Losses
+    student_loss_type: str = "sft"      # distill from teacher outputs
+    teacher_loss_type: str = "ppo"      # teacher optimized by PPO
+
+    # KL shaping: penalize teacher deviations from student
+    reward_match_coef: float = 1.
+    use_kl_loss: bool = True
+    kl_loss_coef: float = 0.00
+    reverse_kl: bool = False
+    reward_kl_coef: float = 0.0  # KL as part of teacher reward
+    kl_loss_window_size: int = 10
+    kl_window_loss_coef: float = 0.0
+    reward_kl_reduction: str = "mean"   # mean or sum over tokens
+    kl_max_coef: float = 0.0
+    kl_reward_clamp: float = 10.0
+    ss_reward_coef: float = 0.
+
+    vllm_recreate_on_switch: bool = True
+
 
 
 if __name__ == "__main__":

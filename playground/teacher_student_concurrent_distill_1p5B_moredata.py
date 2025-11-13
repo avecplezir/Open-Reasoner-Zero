@@ -48,32 +48,44 @@ class PPOExpConfig(BasePPOExpConfig):
     # Conditional settings with production values first
     # total_num_nodes: int = 16 if not DEBUG_MODE else 8
     total_num_nodes: int = 4
-
     actor_num = 2
+
     # resource related settings
-    ref_num_nodes: int = actor_num
+    colocate_all: bool = True
     ref_num_gpus_per_node: int = 1
-    actor_num_nodes: int = actor_num
     actor_num_gpus_per_node: int = 1
-    critic_num_nodes: int = actor_num
     critic_num_gpus_per_node: int = 1
-    reward_num_nodes: int = actor_num
     reward_num_gpus_per_node: int = 1
-    colocate_all: bool = False
     colocate_critic_reward: bool = True
     colocate_actor_ref: bool = True
     colocate_critic_policy: bool = True
     offload_critic_policy_colocation: bool = True
-    vllm_num_engines: int = total_num_nodes - actor_num
-    gpu_memory_utilization: float = 0.95
+    if not colocate_all:
+        ref_num_nodes: int = actor_num
+        actor_num_nodes: int = actor_num
+        critic_num_nodes: int = actor_num
+        reward_num_nodes: int = actor_num
+        vllm_num_engines: int = total_num_nodes - actor_num
+        gpu_memory_utilization: float = 0.95
+    else:
+        ref_num_nodes: int = total_num_nodes
+        actor_num_nodes: int = total_num_nodes
+        critic_num_nodes: int = total_num_nodes
+        reward_num_nodes: int = total_num_nodes
+        vllm_num_engines: int = total_num_nodes
+        gpu_memory_utilization: float = 0.3
+
+    use_ref_model: bool = True
+    update_ref_every_epoch: bool = True
+    reward_kl_toward_ref_model: bool = True
 
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/checkpoints/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter50/policy"  #f"{prefix}/binary_noncol_orz_1p5b_ppo_grpo-base-explain-v0-824/iter150/policy" #f"{prefix}/iter104/policy" #f"{prefix}/iter50/policy" #f"{prefix}/Qwen2.5-1.5B" # TODO: or put your downloaded model path here!
+    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-1.5B"
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
     randint = random.randint(0, 1000)
-    e_name = f'iter50-t-iter50-topr-1-{randint}'
+    e_name = f'concurrent-{randint}'
     exp_name: str = f"{file_name}_{e_name}"
     ckpt_path: str = f"{prefix}/orz_ckpt/{exp_name}"
     save_path: str = ckpt_path
@@ -96,15 +108,12 @@ class PPOExpConfig(BasePPOExpConfig):
 
     # ppo related settings
     num_warmup_steps: int = 5
-    prompt_max_len: int = 4000
+    prompt_max_len: int = 2048
 
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 32 if not DEBUG_MODE else 4
-
-    # 更换KL loss + k3
-    kl_loss_coef: float = 0.001
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -112,48 +121,51 @@ class PPOExpConfig(BasePPOExpConfig):
     packing_max_len: int = generate_max_len + prompt_max_len
 
     # grpo related settings
-    use_grpo: bool = True #False
+    use_grpo: bool = True
 
     critic_pretrain: Optional[str] = "" if use_grpo else pretrain
 
-    initial_teacher_training_rounds: int = 0
-    student_training_rounds: int = 4  # number student training rounds, -1 means no student training
-    teacher_training_rounds: int = 1  # number teacher training rounds, -1 means no teacher training
+    initial_teacher_training_rounds: int = -1
+    student_training_rounds: int = -1  # number student training rounds, -1 means no student training
+    teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
 
-    enable_eval: bool = True if not DEBUG_MODE else False
     eval_interval: int = 10
+    eval_student: bool = True if not DEBUG_MODE else False
+    eval_teacher: bool = True if not DEBUG_MODE else False
 
-    generate_with_student: bool = True
+    generate_with_student: int = 20
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
-    augment_strategy: str = "yes_no"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
+    augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/checkpoints/teacher_training_history_reverse-194/iterteacher-200/policy" #f"{prefix}/checkpoints/teacher_training_ppo_kl_debug_aug-iter50-correct-longrun-859/iterteacher-50/policy" #f"{prefix}/orz_ckpt/teacher_training_ppo_debug_aug-iter50-correct-949/iter50/policy" #"teacher_training_ppo_debug_aug-iter50-correct-949"
-
-    skip_student_training_to_pretrain_teacher: bool = False
-    skip_student_first_n_rounds: int = initial_teacher_training_rounds
-    filter_for_correct_formatting_student: bool = False
-    filter_for_correct_formatting_teacher: bool = False
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-3B"
 
     # Prompt configuration
-    teacher_add_role_prefix: bool = True
     general_propmt_yes_no: bool = True
-    use_ss_reward_for_student: bool = False
-    remove_student_reward_normalization: bool = True
-
-    topr_type: int = 0
 
     balance_yes_no_batches: bool = True
+    teacher_explain_only: bool = False
 
-    topr_reward_coef: float = 0.0
+    # Losses
+    student_loss_type: str = "sft"      # distill from teacher outputs
+    teacher_loss_type: str = "ppo"      # teacher optimized by PPO
+
+    # KL shaping: penalize teacher deviations from student
+    entropy_coef: float = 0.01
+    reward_match_coef: float = 1.
+    use_kl_loss: bool = True
+    kl_loss_coef: float = 0.001
+    reverse_kl: bool = False
+    reward_kl_coef: float = 1.  # KL as part of teacher reward
     kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.01
-    reverse_kl: bool = True
-    reward_kl_coef: float = 0.1
+    kl_window_loss_coef: float = 0.0
+    reward_kl_reduction: str = "mean"   # mean or sum over tokens
+    kl_max_coef: float = 0.0
+    kl_reward_clamp: float = 10.0
+    ss_reward_coef: float = 0.
 
-    use_student_history: bool = True
-    student_history_samples_per_label: int = 2
+    vllm_recreate_on_switch: bool = True
 
 
 if __name__ == "__main__":

@@ -110,7 +110,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -168,7 +168,6 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     vllm_recreate_on_switch: bool = True
-
 
 
 if __name__ == "__main__":

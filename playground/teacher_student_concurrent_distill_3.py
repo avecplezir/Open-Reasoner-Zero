@@ -75,8 +75,12 @@ class PPOExpConfig(BasePPOExpConfig):
         vllm_num_engines: int = total_num_nodes
         gpu_memory_utilization: float = 0.3
 
+    use_ref_model: bool = True
+    update_ref_every_epoch: bool = True
+    reward_kl_toward_ref_model: bool = True
+
     # path related settings
-    pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B"
+    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-0.5B" #f"{prefix}/Qwen2.5-1.5B"
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
@@ -106,7 +110,7 @@ class PPOExpConfig(BasePPOExpConfig):
     advantage_normalize: bool = False
 
     num_episodes: int = 20
-    n_samples_per_prompt: int = 8 if not DEBUG_MODE else 4
+    n_samples_per_prompt: int = 16 if not DEBUG_MODE else 4
 
     # generate related settings
     generate_max_len: int = 2048 #12000 #8000  # 2000 #4000 # TODO: change to larger later
@@ -132,7 +136,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-7B"
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B" #f"{prefix}/Qwen2.5-7B"
 
     skip_student_training_to_pretrain_teacher: bool = False
     skip_student_first_n_rounds: int = initial_teacher_training_rounds
@@ -153,13 +157,13 @@ class PPOExpConfig(BasePPOExpConfig):
     # KL shaping: penalize teacher deviations from student
     reward_match_coef: float = 1.
     use_kl_loss: bool = True
-    kl_loss_coef: float = 0.001
+    kl_loss_coef: float = 0.0001
     reverse_kl: bool = False
-    reward_kl_coef: float = 1.  # KL as part of teacher reward
+    reward_kl_coef: float = 0.01  # KL as part of teacher reward
     kl_loss_window_size: int = 10
-    kl_window_loss_coef: float = 0.
+    kl_window_loss_coef: float = 0.0
     reward_kl_reduction: str = "mean"   # mean or sum over tokens
-    kl_max_coef: float = 0.1
+    kl_max_coef: float = 0.0
     kl_reward_clamp: float = 10.0
     ss_reward_coef: float = 0.
 
