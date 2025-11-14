@@ -156,7 +156,7 @@ class BasePPOExpConfig(BaseConfig):
     enable_eval: bool = False
     eval_student: bool = True
     eval_interval: int = -1
-    update_ref_every_epoch: bool = True
+    update_ref_every: int = -1
 
     boxed_pattern: bool = False
 

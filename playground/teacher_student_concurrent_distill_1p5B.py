@@ -76,7 +76,7 @@ class PPOExpConfig(BasePPOExpConfig):
         gpu_memory_utilization: float = 0.3
 
     use_ref_model: bool = True
-    update_ref_every_epoch: bool = True
+    update_ref_every: int = 10
     reward_kl_toward_ref_model: bool = True
 
     # path related settings

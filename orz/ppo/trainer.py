@@ -301,7 +301,7 @@ class RayPPOTrainer(BaseTrainer):
                     async with Timer("Backload vllm engines to gpu"):
                         await self._backload_vllm_engines()
 
-            if self.cfg.update_ref_every_epoch and self.cfg.use_ref_model:
+            if self.cfg.update_ref_every > 0 and self.global_step % self.cfg.update_ref_every == 0 and self.cfg.use_ref_model:
                 if self.cfg.colocate_all:
                     await self.policy_model.backload_to_gpu()
                 await self.policy_model.async_save_model(self.tokenizer, self.global_step)
