@@ -123,56 +123,6 @@ class BaseTrainer:
         except Exception as e:
             logger.warning(f"Failed to log W&B table '{name}': {e}")
 
-    def _create_teacher_prompts_from_student(
-        self,
-        all_extras: List[dict],
-        final_answers: List[str],
-        initial_scores: List[bool],
-        initial_teacher_scores: List[bool],
-        teacher_yes: List[bool],
-        teacher_no: List[bool],
-        all_student_prompts: List[str],
-        bos_token: str,
-    ) -> Tuple[List[str], List[int]]:
-        """
-        Build teacher prompts from student outputs. Also annotates extras with
-        the chosen teacher_answer. Returns the constructed teacher prompts and
-        indices of incorrect student samples for logging.
-        """
-        all_teacher_prompts: List[str] = []
-        indices_incorrect: List[int] = []
-
-        for i, (extra, final_answer, student_score, teacher_score) in enumerate(
-            zip(all_extras, final_answers, initial_scores, initial_teacher_scores)
-        ):
-            if teacher_score:
-                if teacher_yes[i]:
-                    student_answer = self.yes_token()
-                elif teacher_no[i]:
-                    student_answer = self.no_token()
-                else:
-                    assert False, f"final_answer {final_answer} must be yes or no"
-            else:
-                student_answer = final_answer
-
-            teacher_prompt = create_teacher_prompt_from_answer(
-                extra["dialogue"],
-                student_answer,
-                bos_token,
-                cfg=self.cfg,
-                is_correct=bool(student_score),
-            )
-
-            all_teacher_prompts.append(teacher_prompt)
-            extra["teacher_answer"] = student_answer
-            if not student_score:
-                indices_incorrect.append(i)
-
-        assert len(all_student_prompts) == len(all_teacher_prompts), (
-            "student and teacher prompts must be equal in length"
-        )
-        return all_teacher_prompts, indices_incorrect
-
     def log_student_generation_examples(
         self,
         *,
@@ -262,60 +212,6 @@ class BaseTrainer:
             step=step,
         )
 
-    def log_paired_generation_examples(
-        self,
-        *,
-        all_student_prompts: List[str],
-        all_teacher_prompts: List[str],
-        outputs: List[Any],
-        final_answers: List[Any],
-        initial_teacher_scores: List[Any],
-        all_extras: List[dict],
-        student_responses_by_prompt: Dict[str, List[str]],
-        student_final_answers_by_prompt: Dict[str, List[str]],
-        student_response_ptr: Dict[str, int],
-        step: Optional[int] = None,
-    ) -> None:
-        paired_table: List[List[Any]] = []
-        max_pairs = min(10, len(all_teacher_prompts))
-        for i in range(max_pairs):
-            s_prompt = all_student_prompts[i]
-            t_prompt = all_teacher_prompts[i]
-            t_resp = outputs[i]
-            t_final = final_answers[i]
-            t_score = bool(initial_teacher_scores[i])
-            s_list = student_responses_by_prompt.get(s_prompt, [])
-            s_final_list = student_final_answers_by_prompt.get(s_prompt, [])
-            idx = student_response_ptr.get(s_prompt, 0)
-            s_resp = s_list[idx] if idx < len(s_list) else ""
-            s_final = s_final_list[idx] if idx < len(s_final_list) else ""
-            student_response_ptr[s_prompt] = idx + 1
-            correct_answer = all_extras[i].get("answer", "")
-            paired_table.append([
-                s_prompt,
-                s_resp,
-                s_final,
-                t_prompt,
-                t_resp,
-                t_final,
-                correct_answer,
-                t_score,
-            ])
-        self._log_wandb_table(
-            name="paired_generation_examples",
-            columns=[
-                "student_prompt",
-                "student_response",
-                "student_final_answer",
-                "teacher_prompt",
-                "teacher_response",
-                "teacher_final_answer",
-                "correct_answer",
-                "teacher_correct",
-            ],
-            data=paired_table,
-            step=step,
-        )
 
     def log_teacher_generation_examples(
         self,
@@ -498,15 +394,10 @@ class BaseTrainer:
             step=step,
         )
 
-    def _augment_student_generation_with_teacher(
+    def _create_opponents_prompts(
         self,
         all_student_prompts: List[str],
         all_extras: List[dict],
-        final_answers: List[str],
-        initial_scores: List[bool],
-        initial_teacher_scores: List[bool],
-        teacher_yes: List[bool],
-        teacher_no: List[bool],
         bos_token: str,
     ) -> Tuple[List[str], List[str], List[dict], List[int], List[int]]:
         """
@@ -869,969 +760,6 @@ class BaseTrainer:
             logger.info("generate local rollout batch done")
         return outputs
 
-    async def _retry_student_generation_pass_at_n(
-        self,
-        original_prompts: List[str],
-        prompt_to_extra: Dict[str, dict],
-        pass_at_n_dict: Dict[str, List[int]],
-        bos_token: str,
-        generate_kwargs: Dict[str, Any],
-        extras_for_append: List[dict],
-        combined_all_student_prompts: List[str],
-        combined_all_teacher_prompts: List[str],
-        combined_outputs: List[str],
-        combined_custom_rewards: List[Any],
-        combined_teacher_custom_rewards: List[Any],
-        combined_answer_indices: List[Any],
-        combined_initial_scores: List[Any],
-        combined_initial_teacher_scores: List[Any],
-        combined_final_answers: List[Any],
-        combined_correct_formattings: List[Any],
-        combined_extras: List[dict],
-        teacher_generated: List[bool],
-        **generate_kwargs_passthrough,
-    ) -> None:
-        """
-        Optional retry rounds based on per-prompt success counts (pass@N).
-        Mutates the provided combined_* containers by appending new retry data.
-        """
-        if self.cfg.student_retry_max_rounds <= 0 or self.cfg.student_success_min_per_prompt <= 0:
-            return
-
-        # Initialize success counts from the first round
-        success_counts = defaultdict(int)
-        for p in original_prompts:
-            success_counts[p] = int(sum(pass_at_n_dict.get(p, [])))
-
-        # Build list of prompts to retry
-        to_retry_keys = [p for p in original_prompts if success_counts[p] < self.cfg.student_success_min_per_prompt]
-        current_prompts = [(p, prompt_to_extra[p]) for p in to_retry_keys]
-
-        for round_idx in range(self.cfg.student_retry_max_rounds):
-            if len(current_prompts) == 0:
-                break
-
-            logger.info(f'round {round_idx} with {len(to_retry_keys)} keys')
-
-            # Duplicate prompts for this round
-            paired_data = []
-            for p, e in current_prompts:
-                for _ in range(self.cfg.n_samples_per_prompt):
-                    paired_data.append((p, e))
-
-            rng = random.Random(4242 + round_idx)
-            rng.shuffle(paired_data)
-
-            retry_student_prompts = [p for p, _ in paired_data]
-            retry_extras = [e for _, e in paired_data]
-
-            # Generate sequences via vLLM
-            retry_outputs: List[str] = await self._distributed_generate(
-                retry_student_prompts,
-                retry_extras,
-                teacher=False,
-                desc=f"Generate retry student sequences via vllm engines (round {round_idx + 1})",
-                **generate_kwargs,
-            )
-
-            if len(retry_outputs) == 0:
-                break
-
-            # Score retries
-            reward_fn = partial(self.custom_reward_fn, reward_model_fn=self._warp_custom_reward_model_fn())
-            (
-                retry_student_prompts,
-                retry_outputs,
-                retry_custom_rewards,
-                retry_teacher_custom_rewards,
-                retry_answer_indices,
-                retry_initial_scores,
-                retry_initial_teacher_scores,
-                retry_final_answers,
-                retry_teacher_yes,
-                retry_teacher_no,
-                retry_correct_formattings,
-                retry_pass_at_n_dict,
-            ) = await reward_fn(retry_student_prompts, retry_outputs, retry_extras, prefix=f'student_{round_idx+2}/')
-
-            # Update counts and decide next retries
-            for p, vals in retry_pass_at_n_dict.items():
-                success_counts[p] += int(sum(vals))
-
-            # Create teacher prompts for retries (for parity/logging)
-            retry_teacher_prompts: List[str] = []
-            for i, (extra, student_score, teacher_score) in enumerate(
-                zip(retry_extras, retry_initial_scores, retry_initial_teacher_scores)
-            ):
-                if teacher_score:
-                    if retry_teacher_yes[i]:
-                        student_answer = self.yes_token()
-                    elif retry_teacher_no[i]:
-                        student_answer = self.no_token()
-                    else:
-                        assert False, "final_answer must be yes or no"
-                else:
-                    student_answer = self.yes_token() if random.random() > 0.5 else self.no_token()
-
-                teacher_prompt = create_teacher_prompt_from_answer(
-                    extra["dialogue"],
-                    student_answer,
-                    bos_token,
-                    cfg=self.cfg,
-                    is_correct=bool(student_score),
-                )
-                retry_teacher_prompts.append(teacher_prompt)
-
-            # Append to combined containers
-            teacher_generated.extend([0] * len(retry_student_prompts))
-            combined_all_student_prompts.extend(retry_student_prompts)
-            combined_all_teacher_prompts.extend(retry_teacher_prompts)
-            combined_outputs.extend(retry_outputs)
-            combined_custom_rewards.extend(retry_custom_rewards)
-            combined_teacher_custom_rewards.extend(retry_teacher_custom_rewards)
-            combined_answer_indices.extend(retry_answer_indices)
-            combined_initial_scores.extend(retry_initial_scores)
-            combined_initial_teacher_scores.extend(retry_initial_teacher_scores)
-            combined_final_answers.extend(retry_final_answers)
-            combined_correct_formattings.extend(retry_correct_formattings)
-            combined_extras.extend(extras_for_append)
-
-            # Prepare next-round retry list
-            to_retry_keys = [
-                p for p in original_prompts if success_counts[p] < self.cfg.student_success_min_per_prompt
-            ]
-            current_prompts = [(p, prompt_to_extra[p]) for p in to_retry_keys]
-
-            pass_at_n_retry = sum(1 for v in success_counts.values() if np.sum(v) > 0) / max(
-                1, len(pass_at_n_dict)
-            )
-            logger.info(f"pass_at_n_retry {round_idx} {pass_at_n_retry}")
-            if hasattr(self, "writer") and self.writer is not None:
-                self.writer.add_scalar(f"pass_at_n_retry_{round_idx+2}", pass_at_n_retry, self.global_step)
-
-    def _filter_samples_for_training(
-        self,
-        all_student_prompts: List[str],
-        all_teacher_prompts: List[str],
-        outputs: List[str],
-        custom_rewards: List[Any],
-        teacher_custom_rewards: List[Any],
-        answer_indices: List[Any],
-        initial_scores: List[Any],
-        initial_teacher_scores: List[Any],
-        teacher_generated: List[Any],
-        correct_formattings: List[Any],
-    ) -> Optional[Tuple[
-        List[str], List[str], List[str], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]
-    ]]:
-        """
-        Apply adversarial-origin filtering (if enabled), SFT filtering (student/teacher),
-        and formatting correctness filtering. Returns filtered lists.
-        """
-        # 0. Adversarial-origin filtering: when adversarial training is enabled,
-        #    select samples by origin based on which model is being trained.
-        if self.cfg.adversarial_training:
-            if self.train_teacher:
-                # Keep only teacher-generated samples (code == 1)
-                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg == 1]
-                dropped = len(teacher_generated) - len(keep_idx)
-                logger.info(f"ADV filter (teacher): dropping {dropped}/{len(teacher_generated)} non-teacher samples")
-                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-                outputs = [outputs[i] for i in keep_idx]
-                custom_rewards = [custom_rewards[i] for i in keep_idx]
-                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-                answer_indices = [answer_indices[i] for i in keep_idx]
-                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-                initial_scores = [initial_scores[i] for i in keep_idx]
-                teacher_generated = [teacher_generated[i] for i in keep_idx]
-                correct_formattings = [correct_formattings[i] for i in keep_idx]
-            elif self.train_student:
-                # Keep student or adversarial samples (codes 0 and -1), drop teacher (code 1)
-                keep_idx = [i for i, tg in enumerate(teacher_generated) if tg != 1]
-                dropped = len(teacher_generated) - len(keep_idx)
-                logger.info(f"ADV filter (student): dropping {dropped}/{len(teacher_generated)} teacher samples")
-                all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-                all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-                outputs = [outputs[i] for i in keep_idx]
-                custom_rewards = [custom_rewards[i] for i in keep_idx]
-                teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-                answer_indices = [answer_indices[i] for i in keep_idx]
-                initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-                initial_scores = [initial_scores[i] for i in keep_idx]
-                teacher_generated = [teacher_generated[i] for i in keep_idx]
-                correct_formattings = [correct_formattings[i] for i in keep_idx]
-        # 1. SFT filtering
-        if self.train_student and self.cfg.student_loss_type == 'sft':
-            keep_idx = [i for i, (sc, tsc) in enumerate(zip(initial_scores, initial_teacher_scores)) if bool(sc)]
-            dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT student filter: dropping {dropped}/{len(initial_scores)} incorrect samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-        elif self.train_teacher and self.cfg.teacher_loss_type == 'sft':
-            keep_idx = [i for i, sc in enumerate(initial_teacher_scores) if bool(sc)]
-            dropped = len(initial_scores) - len(keep_idx)
-            logger.info(f"SFT teacher filter: dropping {dropped}/{len(initial_teacher_scores)} incorrect samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-        else:
-            if self.train_teacher:
-                logger.info(f"Using {self.cfg.teacher_loss_type} to train teacher")
-            if self.train_student:
-                logger.info(f"Using {self.cfg.student_loss_type} to train student")
-
-        # 2. Formatting correctness filtering
-        if (self.cfg.filter_for_correct_formatting_student and self.train_student) or (self.cfg.filter_for_correct_formatting_teacher and self.train_teacher):
-            keep_idx = [i for i, ok in enumerate(correct_formattings) if bool(ok)]
-            dropped = len(correct_formattings) - len(keep_idx)
-            logger.info(f"Formatting filter: dropping {dropped}/{len(correct_formattings)} samples with bad formatting")
-            if hasattr(self, "writer") and self.writer is not None and len(correct_formattings) > 0:
-                self.writer.add_scalar("teacher_training_dropped_samples", dropped / len(correct_formattings), self.global_step)
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        if self.cfg.student_use_only_student_negatives and self.train_student:
-            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or not corr]
-            dropped = len(teacher_generated) - len(keep_idx)
-            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        if self.cfg.student_use_only_student_positives and self.train_student:
-            keep_idx = [i for i, (tg, corr) in enumerate(zip(teacher_generated, initial_scores)) if tg == 1 or corr]
-            dropped = len(teacher_generated) - len(keep_idx)
-            logger.info(f"Student negatives only filter: dropping {dropped}/{len(teacher_generated)} teacher samples")
-            all_student_prompts = [all_student_prompts[i] for i in keep_idx]
-            all_teacher_prompts = [all_teacher_prompts[i] for i in keep_idx]
-            outputs = [outputs[i] for i in keep_idx]
-            custom_rewards = [custom_rewards[i] for i in keep_idx]
-            teacher_custom_rewards = [teacher_custom_rewards[i] for i in keep_idx]
-            answer_indices = [answer_indices[i] for i in keep_idx]
-            initial_teacher_scores = [initial_teacher_scores[i] for i in keep_idx]
-            initial_scores = [initial_scores[i] for i in keep_idx]
-            teacher_generated = [teacher_generated[i] for i in keep_idx]
-            correct_formattings = [correct_formattings[i] for i in keep_idx]
-
-        return (
-            all_student_prompts,
-            all_teacher_prompts,
-            outputs,
-            custom_rewards,
-            teacher_custom_rewards,
-            answer_indices,
-            initial_scores,
-            initial_teacher_scores,
-            teacher_generated,
-            correct_formattings,
-        )
-
-    async def _apply_grpo_normalization(
-        self,
-        teacher_experiences,
-        student_experiences,
-        all_teacher_prompts,
-        all_student_prompts,
-        final_reward_list,
-        teacher_pass_at_n_dict,
-        pass_at_n_dict,
-        initial_scores,
-        ss_reward_list,
-    ) -> None:
-        """
-        Apply GRPO normalization to teacher and student custom rewards in-place.
-        Logs summary stats to TensorBoard and info logs.
-        """
-        prompt_idx = 0
-        teacher_score_sum = 0
-        score_sum = 0
-        for teacher_exp, student_exp in zip(teacher_experiences, student_experiences):
-            assert len(teacher_exp.info['custom_rewards']) == len(teacher_exp.num_actions[0]), (
-                "teacher_exp.info['custom_rewards'] must be equal to teacher_exp.num_actions[0]"
-            )
-            for i in range(len(teacher_exp.num_actions[0])):
-                # Teacher score
-                if self.train_teacher and self.cfg.teacher_loss_type == 'sft':
-                    teacher_score = 1
-                else:
-                    prompt = all_teacher_prompts[prompt_idx]
-                    teacher_score = final_reward_list[prompt_idx].item()
-                    teacher_score -= np.mean(teacher_pass_at_n_dict[prompt])
-                    if not self.cfg.teacher_turn_off_std_normalization:
-                        if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
-                            teacher_score /= teacher_std
-
-                teacher_score_sum += teacher_score
-                teacher_exp.info['custom_rewards'][i][-1] = teacher_score
-
-                # Student score
-                if self.cfg.student_loss_type == 'sft':
-                    score = initial_scores[prompt_idx]
-                elif self.cfg.remove_student_reward_normalization:
-                    if self.cfg.use_ss_reward_for_student:
-                        signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
-                        score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
-                    else:
-                        score = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
-                else:
-                    if self.cfg.use_ss_reward_for_student:
-                        prompt = all_student_prompts[prompt_idx]
-                        signed = 1.0 if initial_scores[prompt_idx] == 1 else -1.0
-                        score = float(np.exp(ss_reward_list[prompt_idx]) * signed)
-                        score -= np.mean(pass_at_n_dict[prompt])
-                        if std := np.std(pass_at_n_dict[prompt]) > 0:
-                            score /= std
-                    else:
-                        prompt = all_student_prompts[prompt_idx]
-                        score = float(initial_scores[prompt_idx])
-                        score -= np.mean(pass_at_n_dict[prompt])
-                        if std := np.std(pass_at_n_dict[prompt]) > 0:
-                            score /= std
-
-                student_exp.info['custom_rewards'][i][-1] = score
-                score_sum += score
-
-                prompt_idx += 1
-
-        assert prompt_idx == len(all_teacher_prompts) == len(final_reward_list), (
-            "last teacher prompt idx must be equal to all teacher prompts length"
-        )
-
-        # Log attempt length distributions
-        logger.info(f"sum student {sum([len(v) for v in pass_at_n_dict.values()])}, sum teacher {sum([len(v) for v in teacher_pass_at_n_dict.values()])}")
-        pass_n_len_dist = dict(Counter(len(v) for v in pass_at_n_dict.values()))
-        teacher_pass_n_len_dist = dict(Counter(len(v) for v in teacher_pass_at_n_dict.values()))
-        logger.info(f"pass_at_n attempt lengths distribution: {pass_n_len_dist}")
-        logger.info(f"teacher_pass_at_n attempt lengths distribution: {teacher_pass_n_len_dist}")
-
-        avg_pass_at_n = (sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / max(1, len(pass_at_n_dict)))
-        self.writer.add_scalar("avg_teacher_reward_normalized", teacher_score_sum / max(1, len(all_teacher_prompts)), self.global_step)
-        self.writer.add_scalar("avg_student_reward_normalized", score_sum / max(1, len(all_student_prompts)), self.global_step)
-        self.writer.add_scalar("avg_pass_at_n_combined", avg_pass_at_n, self.global_step)
-        logger.info(f"avg_teacher_reward: {teacher_score_sum / max(1, len(all_teacher_prompts))}, avg_student_reward: {score_sum / max(1, len(all_student_prompts))}, avg_pass_at_n: {avg_pass_at_n}")
-
-    def _log_training_metrics(
-        self,
-        teacher_generated: np.ndarray,
-        initial_scores: np.ndarray,
-        final_reward_list: np.ndarray,
-        kl_reward_list: np.ndarray,
-        window_kl_reward_list: np.ndarray,
-        kl_mean_list: np.ndarray,
-        kl_max_list: np.ndarray,
-        kl_sum_list: np.ndarray,
-        teacher_match_reward_list: np.ndarray,
-        ss_reward_mean_list: np.ndarray,
-        ss_reward_min_list: np.ndarray,
-        ss_reward_list: np.ndarray,
-        initial_teacher_scores: np.ndarray,
-        teacher_ratio_clipped_0_1_list: np.ndarray,
-        student_ratio_clipped_0_1_list: np.ndarray,
-    ) -> None:
-
-        kl_ss_reward_ratio = np.clip(kl_reward_list / ss_reward_list, a_min=None, a_max=1)
-
-        log_dict: Dict[str, float] = {}
-        for prefix in ["", "teacher", "student", "adv"]:
-            if prefix == "teacher":
-                mask = teacher_generated == 1
-            elif prefix == "student":
-                mask = teacher_generated == 0
-            elif prefix == "adv":
-                mask = teacher_generated == -1
-            else:
-                # Exclude adversarial (-1) from aggregate slice
-                mask = (teacher_generated == 1) | (teacher_generated == 0)
-
-            # Stop logging for adv when there are no samples
-            if prefix == "adv" and mask.sum() == 0:
-                continue
-
-            logger.info(f"{prefix} slice {mask.sum()} samples")
-
-            avg_kl_ss_reward_ratio = kl_ss_reward_ratio[mask].mean()
-            avg_student_reward = initial_scores[mask].mean()
-            avg_teacher_reward = final_reward_list[mask].mean()
-            avg_student_teacher_kl = kl_reward_list[mask].mean()
-            avg_window_kl = window_kl_reward_list[mask].mean() if len(window_kl_reward_list) > 0 else 0
-            avg_student_teacher_kl_mean = kl_mean_list[mask].mean()
-            avg_student_teacher_kl_max = kl_max_list[mask].mean()
-            avg_teacher_match_reward = teacher_match_reward_list[mask].mean()
-            avg_ss_reward_mean = ss_reward_mean_list[mask].mean()
-            avg_ss_reward_min = ss_reward_min_list[mask].mean()
-            avg_ss_reward = ss_reward_list[mask].mean()
-
-            ct = np.logical_and(initial_scores == 1, mask)
-            it = np.logical_and(initial_scores == 0, mask)
-
-            correct_match_reward_trainer = np.array([]) if np.all(it) else np.array(teacher_match_reward_list[ct])
-            incorrect_match_reward_trainer = np.array([]) if np.all(ct) else np.array(teacher_match_reward_list[it])
-            avg_teacher_correct_match_reward = 0 if len(correct_match_reward_trainer) == 0 else np.mean(correct_match_reward_trainer).item()
-            avg_teacher_incorrect_match_reward = 0 if len(incorrect_match_reward_trainer) == 0 else np.mean(incorrect_match_reward_trainer).item()
-
-            ic = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 1), mask)
-            cc = np.logical_and(np.logical_and(initial_scores == 1, initial_teacher_scores == 1), mask)
-            ii = np.logical_and(np.logical_and(initial_scores == 0, initial_teacher_scores == 0), mask)
-
-            logger.info(f"{prefix} {ic.mean()} ic, {cc.mean()} cc, {ii.mean()} ii")
-
-            avg_correct_kl_sum = kl_sum_list[cc].mean()
-            avg_incorrect_kl_sum = kl_sum_list[ic].mean()
-            avg_correct_kl_mean = kl_mean_list[cc].mean()
-            avg_incorrect_kl_mean = kl_mean_list[ic].mean()
-            avg_correct_kl_max = kl_max_list[cc].mean()
-            avg_incorrect_kl_max = kl_max_list[ic].mean()
-            avg_correct_ss_reward_mean = ss_reward_mean_list[cc].mean()
-            avg_incorrect_ss_reward_mean = ss_reward_mean_list[ic].mean()
-            avg_correct_ss_reward_min = ss_reward_min_list[cc].mean()
-            avg_incorrect_ss_reward_min = ss_reward_min_list[ic].mean()
-            teacher_correct_ratio_clipped_0_1 = (
-                np.array([])
-                if np.all(ic) or not self.cfg.teacher_loss_type == 'topr'
-                else np.array(teacher_ratio_clipped_0_1_list[cc])
-            )
-            teacher_incorrect_ratio_clipped_0_1 = (
-                np.array([])
-                if np.all(cc) or not self.cfg.teacher_loss_type == 'topr'
-                else np.array(teacher_ratio_clipped_0_1_list[ic])
-            )
-            student_correct_ratio_clipped_0_1 = (
-                np.array([])
-                if np.all(ic) or not self.cfg.student_loss_type == 'topr'
-                else np.array(student_ratio_clipped_0_1_list[cc])
-            )
-            student_incorrect_ratio_clipped_0_1 = (
-                np.array([])
-                if np.all(cc) or not self.cfg.student_loss_type == 'topr'
-                else np.array(student_ratio_clipped_0_1_list[ic])
-            )
-
-            pfx = f"{prefix}/" if prefix != "" else prefix
-            log_dict.update(
-                {
-                    f"{pfx}avg_kl_ss_reward_ratio": avg_kl_ss_reward_ratio,
-                    f"{pfx}avg_student_reward": avg_student_reward,
-                    f"{pfx}avg_teacher_reward": avg_teacher_reward,
-                    f"{pfx}avg_student_teacher_kl": avg_student_teacher_kl,
-                    f"{pfx}avg_window_kl": avg_window_kl,
-                    f"{pfx}avg_student_teacher_kl_mean": avg_student_teacher_kl_mean,
-                    f"{pfx}avg_student_teacher_kl_max": avg_student_teacher_kl_max,
-                    f"{pfx}avg_teacher_match_reward": avg_teacher_match_reward,
-                    f"{pfx}avg_teacher_correct_match_reward": avg_teacher_correct_match_reward,
-                    f"{pfx}avg_teacher_incorrect_match_reward": avg_teacher_incorrect_match_reward,
-                    f"{pfx}avg_ss_reward_mean": avg_ss_reward_mean,
-                    f"{pfx}avg_ss_reward_min": avg_ss_reward_min,
-                    f"{pfx}avg_ss_reward": avg_ss_reward,
-                    f"{pfx}avg_correct_kl_mean": avg_correct_kl_mean,
-                    f"{pfx}avg_incorrect_kl_mean": avg_incorrect_kl_mean,
-                    f"{pfx}avg_correct_kl_sum": avg_correct_kl_sum,
-                    f"{pfx}avg_incorrect_kl_sum": avg_incorrect_kl_sum,
-                    f"{pfx}avg_correct_kl_max": avg_correct_kl_max,
-                    f"{pfx}avg_incorrect_kl_max": avg_incorrect_kl_max,
-                    f"{pfx}avg_correct_ss_reward_mean": avg_correct_ss_reward_mean,
-                    f"{pfx}avg_incorrect_ss_reward_mean": avg_incorrect_ss_reward_mean,
-                    f"{pfx}avg_correct_ss_reward_min": avg_correct_ss_reward_min,
-                    f"{pfx}avg_incorrect_ss_reward_min": avg_incorrect_ss_reward_min,
-                    f"{pfx}avg_incorrect_incorect": 0 if len(ii) == 0 else np.mean(ii).item(),
-                    f"{pfx}avg_teacher_correct_alpha": 0 if len(teacher_correct_ratio_clipped_0_1) == 0 else np.mean(teacher_correct_ratio_clipped_0_1).item(),
-                    f"{pfx}avg_teacher_incorrect_alpha": 0 if len(teacher_incorrect_ratio_clipped_0_1) == 0 else np.mean(teacher_incorrect_ratio_clipped_0_1).item(),
-                    f"{pfx}avg_student_correct_alpha": 0 if len(student_correct_ratio_clipped_0_1) == 0 else np.mean(student_correct_ratio_clipped_0_1).item(),
-                    f"{pfx}avg_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1) == 0 else np.mean(student_incorrect_ratio_clipped_0_1).item(),
-                    # New student incorrect alpha diagnostics
-                    f"{pfx}max_student_incorrect_alpha": 0 if len(student_incorrect_ratio_clipped_0_1) == 0 else np.max(student_incorrect_ratio_clipped_0_1).item(),
-                    f"{pfx}ratio_student_incorrect_alpha_gt_0.1": 0
-                    if len(student_incorrect_ratio_clipped_0_1) == 0
-                    else float(np.mean(student_incorrect_ratio_clipped_0_1 > 0.1)),
-                }
-            )
-
-            logger.info(f"{pfx} avg_teacher_reward: {avg_teacher_reward} avg_student_teacher_kl: {avg_student_teacher_kl} avg_student_teacher_kl_max: {avg_student_teacher_kl_max} avg_ss_reward_mean {avg_ss_reward_mean} avg_ss_reward_min {avg_ss_reward_min} avg_teacher_match_reward {avg_teacher_match_reward}")
-            logger.info(f"{pfx} avg_correct_ss_reward_mean: {avg_correct_ss_reward_mean} avg_incorrect_ss_reward_mean: {avg_incorrect_ss_reward_mean}")
-            logger.info(f"{pfx} avg_correct_kl_mean: {avg_correct_kl_mean} avg_incorrect_kl_mean: {avg_incorrect_kl_mean} avg_correct_kl_max: {avg_correct_kl_max} avg_incorrect_kl_max: {avg_incorrect_kl_max}")
-
-        for k, v in log_dict.items():
-            self.writer.add_scalar(k, v, self.global_step)
-
-    async def _calculate_teacher_rewards(
-        self,
-        *,
-        student_experiences,
-        teacher_experiences,
-        answer_indices,
-        initial_teacher_scores,
-        teacher_custom_rewards,
-        teacher_generated,
-        all_teacher_prompts,
-        all_student_prompts,
-        initial_scores,
-        ):
-        """
-        Calculate teacher reward, replace student/teacher log probs with the correct ones,
-        and compute TOPR ratios. Returns per-sample lists and pass@N dicts for logging/normalization.
-        """
-        async with Timer(
-            "Calculate teacher reward, replace student or teacher log probs w/ the correct one, compute torp ratio"
-        ):
-            final_reward_list = []
-            kl_max_list = []
-            kl_mean_list = []
-            kl_sum_list = []
-            kl_reward_list = []
-            window_kl_reward_list = []
-            teacher_match_reward_list = []
-            ss_reward_mean_list = []
-            ss_reward_min_list = []
-            ss_reward_list = []
-            teacher_ratio_clipped_0_1_list = []
-            student_ratio_clipped_0_1_list = []
-
-            teacher_prompt_idx = 0
-            teacher_pass_at_n_dict = defaultdict(list)
-            pass_at_n_dict = defaultdict(list)
-            for student_exp, teacher_exp in zip(student_experiences, teacher_experiences):
-
-                kl_div_all = compute_approx_kl(
-                    teacher_exp.action_log_probs,
-                    student_exp.action_log_probs
-                    if not self.cfg.reward_kl_toward_ref_model
-                    else student_exp.base_action_log_probs,
-                    action_mask=None,
-                    use_kl_estimator_k3=self.cfg.use_kl_estimator_k3,
-                    use_abs_kl=self.cfg.use_abs_kl,
-                    reverse=self.cfg.reverse_kl,
-                )
-
-                offset = 0
-                seq_offset = 0
-                total_lengths = student_exp.info["total_length"].flatten()
-                for i, (num_action, student_num_action) in enumerate(
-                    zip(teacher_exp.num_actions[0], student_exp.num_actions[0])
-                ):
-                    na = int(num_action.item())
-                    student_na = int(student_num_action.item())
-                    assert (
-                        na == student_na
-                    ), f"student and teacher num_actions must be equal {na} {student_na}"
-                    seq_len = int(total_lengths[i])
-                    prompt_len = seq_len - na
-
-                    # computing answer alignment reward
-                    final_answer_start, final_answer_end = answer_indices[teacher_prompt_idx]
-                    teacher_score = initial_teacher_scores[teacher_prompt_idx]
-                    ss_tokens_offset = self.cfg.ss_tokens_offset
-                    kl_token_offset = 6
-                    answer_tokens_offset = 3
-
-                    if (
-                        teacher_score
-                        and final_answer_start is not None
-                        and final_answer_start < final_answer_end
-                    ):
-                        final_answer_start_offset, final_answer_end_offset = (
-                            offset + final_answer_start - ss_tokens_offset,
-                            offset + final_answer_end + ss_tokens_offset,
-                        )
-                        final_answer_start_prob_offset = (
-                            offset + final_answer_start - answer_tokens_offset
-                        )
-                        final_answer_end_prob_offset = (
-                            offset + final_answer_end + answer_tokens_offset
-                        )
-
-                        final_answer_log_propbs = student_exp.action_log_probs[
-                            :, final_answer_start_offset:final_answer_end_offset
-                        ].clone()
-
-                        # Guard against empty window which can occur after applying offsets/clamping
-                        if final_answer_log_propbs.numel() == 0:
-                            s_final_answer_start, s_final_answer_end = (
-                                seq_offset + prompt_len + final_answer_start,
-                                seq_offset + prompt_len + final_answer_end,
-                            )
-                            vis_final_answer = self._detokenize(
-                                student_exp.sequences[0][
-                                    s_final_answer_start:s_final_answer_end
-                                ]
-                            )
-                            logger.warning(
-                                f"teacher_generated {teacher_generated[teacher_prompt_idx]}, vis_final_answer: {vis_final_answer}"
-                            )
-                            logger.warning(
-                                f"final_answer_log_propbs is empty {final_answer_start} {final_answer_end} {final_answer_start_offset} {final_answer_end_offset} {na} {seq_len} {prompt_len} {final_answer_log_propbs}"
-                            )
-                            # Use the same fallback as the invalid-answer branch
-                            ss_reward_mean, ss_reward_min = -2.7, -11.8
-                        else:
-                            ss_reward_mean = final_answer_log_propbs.mean().item()
-                            ss_reward_min = final_answer_log_propbs.min().item()
-                        ss_reward = (
-                            ss_reward_mean
-                            + self.cfg.kl_max_coef * ss_reward_min
-                        )
-
-                        start_kl, end_kl, end_full = (
-                            offset,
-                            offset + final_answer_start - kl_token_offset,
-                            offset + na,
-                        )
-                    else:
-                        ss_reward_mean, ss_reward_min = -2.7, -11.8
-                        ss_reward = (
-                            ss_reward_mean
-                            + self.cfg.kl_max_coef * ss_reward_min
-                        )
-                        start_kl, end_kl, end_full = offset, offset + na, offset + na
-
-                    if teacher_generated[teacher_prompt_idx] == 1:
-                        if start_kl < end_full:
-                            student_ratio_clipped_0_1_scalar = torch.exp(
-                                self.cfg.topr_temperature
-                                * (
-                                    student_exp.action_log_probs[:, start_kl:end_full]
-                                    .sum(-1)
-                                    - teacher_exp.action_log_probs[:, start_kl:end_full]
-                                    .sum(-1)
-                                ).clamp(max=0.0)
-                            )
-                        else:
-                            student_ratio_clipped_0_1_scalar = torch.tensor(0)
-                    else:
-                        student_ratio_clipped_0_1_scalar = torch.tensor(1)
-
-                    ss_reward_mean_list.append(ss_reward_mean)
-                    ss_reward_min_list.append(ss_reward_min)
-                    ss_reward_list.append(ss_reward)
-
-                    if teacher_generated[teacher_prompt_idx] != 1:
-                        kl_reward = kl_mean = kl_sum = kl_max = window_kl_reward = torch.tensor(
-                            0.0, device=kl_div_all.device
-                        )
-                    else:
-                        # Compute KL only over the explanation tokens before the final answer.
-                        # Guard against cases where the window is empty (e.g., very short explanations),
-                        # which would make reductions over an empty dimension invalid.
-                        if end_kl <= start_kl:
-                            kl_max = torch.tensor(0.0, device=kl_div_all.device)
-                            kl_mean = torch.tensor(0.0, device=kl_div_all.device)
-                            kl_sum = torch.tensor(0.0, device=kl_div_all.device)
-                            kl_reward = torch.tensor(0.0, device=kl_div_all.device)
-                            window_kl_reward = torch.tensor(0.0, device=kl_div_all.device)
-                        else:
-                            kl_episode = kl_div_all[:, start_kl:end_kl].clone()
-                            kl_max = torch.max(kl_episode.abs(), dim=-1)[0]
-                            kl_mean = masked_mean(kl_episode, None, dim=-1)
-                            kl_sum = kl_episode.sum(dim=-1)
-                            if self.cfg.reward_kl_reduction == "mean":
-                                kl_reward = (
-                                    -kl_mean
-                                    - self.cfg.kl_max_coef * kl_max
-                                )
-                            elif self.cfg.reward_kl_reduction == "sum":
-                                kl_reward = (
-                                    -kl_sum
-                                    - self.cfg.kl_max_coef * kl_max
-                                )
-                            kl_reward = torch.clamp(
-                                kl_reward, min=-self.cfg.kl_reward_clamp
-                            )
-
-                            # Optional: rolling-window KL loss (max over mean of windows of size N)
-                            window_kl_reward = torch.tensor(0.0, device=kl_div_all.device)
-                            if self.cfg.kl_loss_window_size > 0 and  self.cfg.kl_window_loss_coef != 0:
-                                # Compute window means along the sequence axis
-                                # kl_episode shape: [B(=1), L]
-                                if kl_episode.size(-1) >= self.cfg.kl_loss_window_size:
-                                    pooled = F.avg_pool1d(
-                                        kl_episode.unsqueeze(1), kernel_size=self.cfg.kl_loss_window_size, stride=1
-                                    ).squeeze(1)  # [1, L-win_sz+1]
-                                    max_mean = torch.max(pooled, dim=-1)[0]  # [1]
-                                    window_kl_reward = -max_mean
-                                    window_kl_reward = torch.clamp(
-                                        window_kl_reward, min=-self.cfg.kl_reward_clamp
-                                    )
-
-                    window_kl_reward_list.append(window_kl_reward.item())
-
-                    match_reward_check = teacher_custom_rewards[teacher_prompt_idx][-1]
-                    match_reward = teacher_exp.info["custom_rewards"][i][-1]
-                    assert (
-                        match_reward_check == match_reward
-                    ), "match_reward_check and match_reward must be equal"
-                    if teacher_score:
-                        final_teacher_reward = (
-                            self.cfg.topr_reward_coef * student_ratio_clipped_0_1_scalar
-                            + self.cfg.ss_reward_coef * ss_reward_list[-1]
-                            + self.cfg.reward_kl_coef * kl_reward
-                            + self.cfg.kl_window_loss_coef * window_kl_reward
-                            + self.cfg.reward_match_coef * match_reward
-                        )
-                        final_reward_list.append(final_teacher_reward.item())
-                    else:
-                        final_reward_list.append(-2.0)
-                    teacher_pass_at_n_dict[all_teacher_prompts[teacher_prompt_idx]].append(
-                        final_reward_list[-1]
-                    )
-                    # For student normalization, optionally use signed exp(ss_reward)
-                    if self.cfg.use_ss_reward_for_student:
-                        signed = (
-                            1.0 if initial_scores[teacher_prompt_idx] == 1 else -1.0
-                        )
-                        student_norm_score = float(np.exp(ss_reward_list[-1]) * signed)
-                    else:
-                        student_norm_score = float(initial_scores[teacher_prompt_idx])
-                    pass_at_n_dict[all_student_prompts[teacher_prompt_idx]].append(student_norm_score)
-
-                    kl_reward_list.append(kl_reward.item())
-                    kl_max_list.append(kl_max.item())
-                    kl_mean_list.append(kl_mean.item())
-                    kl_sum_list.append(kl_sum.item())
-                    teacher_match_reward_list.append(match_reward.item())
-
-                    student_exp.info["loss_type"] = (
-                        torch.tensor(compute_loss_type_hash(self.cfg.student_loss_type))
-                        .unsqueeze(0)
-                        .float()
-                    )
-                    teacher_exp.info["loss_type"] = (
-                        torch.tensor(compute_loss_type_hash(self.cfg.teacher_loss_type))
-                        .unsqueeze(0)
-                        .float()
-                    )
-
-                    # compute ratio_clipped_0_1 for TOPR
-                    if self.cfg.student_loss_type == "topr":
-                        if teacher_generated[teacher_prompt_idx] == 1 and start_kl < end_full:
-                            if self.cfg.topr_type == 0:
-                                student_ratio_clipped_0_1_scalar = torch.exp(
-                                    self.cfg.topr_temperature
-                                    * (
-                                        student_exp.action_log_probs[
-                                            :, start_kl:end_full
-                                        ].sum(-1)
-                                        - teacher_exp.action_log_probs[
-                                            :, start_kl:end_full
-                                        ].sum(-1)
-                                    ).clamp(max=0.0)
-                                )
-                                student_exp.ratio_clipped_0_1[
-                                    :, start_kl:end_full
-                                ] = student_ratio_clipped_0_1_scalar
-                            elif self.cfg.topr_type == 1:
-                                student_ratio_clipped_0_1_scalar = torch.exp(
-                                    self.cfg.topr_temperature
-                                    * (
-                                        student_exp.base_action_log_probs[
-                                            :, start_kl:end_full
-                                        ]
-                                        - teacher_exp.action_log_probs[
-                                            :, start_kl:end_full
-                                        ]
-                                    ).clamp(max=0.0)
-                                )
-                                student_exp.ratio_clipped_0_1[
-                                    :, start_kl:end_full
-                                ] = student_ratio_clipped_0_1_scalar
-                                # logger.info(f'student_ratio_clipped_0_1_scalar {student_ratio_clipped_0_1_scalar}')
-                                student_ratio_clipped_0_1_scalar = (
-                                    student_ratio_clipped_0_1_scalar.mean()
-                                )
-                            elif self.cfg.topr_type == 2:
-                                diff = (
-                                    student_exp.action_log_probs[:, start_kl:end_full]
-                                    - teacher_exp.action_log_probs[:, start_kl:end_full]
-                                )
-                                suffix = torch.flip(torch.flip(diff, dims=[-1]).cumsum(dim=-1), dims=[-1])
-                                student_ratio_vec = torch.exp(
-                                    self.cfg.topr_temperature * suffix.clamp(max=0.0)
-                                )
-                                student_exp.ratio_clipped_0_1[:, start_kl:end_full] = student_ratio_vec
-                                student_ratio_clipped_0_1_scalar = student_ratio_vec.mean()
-                                # logger.info(f'2 student_ratio_clipped_0_1_scalar {student_ratio_clipped_0_1_scalar}')
-                        else:
-                            student_ratio_clipped_0_1_scalar = torch.tensor(1)
-                        student_ratio_clipped_0_1_list.append(
-                            student_ratio_clipped_0_1_scalar.item()
-                        )
-
-                    if self.cfg.teacher_loss_type == "topr":
-                        if teacher_generated[teacher_prompt_idx] == 1:
-                            teacher_ratio_clipped_0_1_scalar = torch.tensor(1)
-                        else:
-                            if start_kl < end_full:
-                                if self.cfg.topr_type == 0:
-                                    teacher_ratio_clipped_0_1_scalar = torch.exp(
-                                        self.cfg.topr_temperature
-                                        * (
-                                            teacher_exp.action_log_probs[
-                                                :, start_kl:end_full
-                                            ].sum(-1)
-                                            - student_exp.action_log_probs[
-                                                :, start_kl:end_full
-                                            ].sum(-1)
-                                        ).clamp(max=0.0)
-                                    )
-                                    teacher_exp.ratio_clipped_0_1[
-                                        :, start_kl:end_full
-                                    ] = teacher_ratio_clipped_0_1_scalar
-                                elif self.cfg.topr_type == 1:
-                                    teacher_ratio_clipped_0_1_scalar = torch.exp(
-                                        self.cfg.topr_temperature
-                                        * (
-                                            teacher_exp.action_log_probs[
-                                                :, start_kl:end_full
-                                            ]
-                                            - student_exp.action_log_probs[
-                                                :, start_kl:end_full
-                                            ]
-                                        ).clamp(max=0.0)
-                                    )
-                                    teacher_exp.ratio_clipped_0_1[
-                                        :, start_kl:end_full
-                                    ] = teacher_ratio_clipped_0_1_scalar
-                                    teacher_ratio_clipped_0_1_scalar = (
-                                        teacher_ratio_clipped_0_1_scalar.mean()
-                                    )
-                                elif self.cfg.topr_type == 2:
-                                    diff = (
-                                        teacher_exp.action_log_probs[:, start_kl:end_full]
-                                        - student_exp.action_log_probs[:, start_kl:end_full]
-                                    )
-                                    suffix = torch.flip(torch.flip(diff, dims=[-1]).cumsum(dim=-1), dims=[-1])
-                                    teacher_ratio_vec = torch.exp(
-                                        self.cfg.topr_temperature * suffix.clamp(max=0.0)
-                                    )
-                                    teacher_exp.ratio_clipped_0_1[:, start_kl:end_full] = teacher_ratio_vec
-                                    teacher_ratio_clipped_0_1_scalar = teacher_ratio_vec.mean()
-
-                        teacher_ratio_clipped_0_1_list.append(
-                            teacher_ratio_clipped_0_1_scalar.item()
-                        )
-
-                    if (
-                        self.cfg.replace_all_teacher_base_logprops_w_student
-                        and start_kl < end_full
-                    ):
-                        teacher_exp.base_action_log_probs[
-                            :, start_kl:end_full
-                        ] = student_exp.base_action_log_probs[
-                            :, start_kl:end_full
-                        ].clone()
-
-                    if teacher_generated[teacher_prompt_idx] != 1:
-                        if self.cfg.replace_teacher_logprops_w_student and start_kl < end_full:
-                            teacher_exp.action_log_probs[
-                                :, start_kl:end_full
-                            ] = student_exp.action_log_probs[
-                                :, start_kl:end_full
-                            ].clone()
-                        if (
-                            self.cfg.replace_teacher_base_logprops_w_student
-                            and start_kl < end_full
-                        ):
-                            teacher_exp.base_action_log_probs[
-                                :, start_kl:end_full
-                            ] = student_exp.base_action_log_probs[
-                                :, start_kl:end_full
-                            ].clone()
-                    else:
-                        if self.cfg.replace_student_logprops_w_teacher and start_kl < end_full:
-                            student_exp.action_log_probs[
-                                :, start_kl:end_full
-                            ] = teacher_exp.action_log_probs[
-                                :, start_kl:end_full
-                            ].clone()
-                        if (
-                            self.cfg.replace_student_base_logprops_w_teacher
-                            and start_kl < end_full
-                        ):
-                            student_exp.base_action_log_probs[
-                                :, start_kl:end_full
-                            ] = teacher_exp.base_action_log_probs[
-                                :, start_kl:end_full
-                            ].clone()
-
-                    if (
-                        teacher_score
-                        and final_answer_start is not None
-                        and final_answer_start < final_answer_end
-                    ):
-                        if self.cfg.teacher_explain_only:
-                            if teacher_generated[teacher_prompt_idx] == 1:
-                                # we programatically add the final answer, so the log prob should be 0
-                                student_exp.action_log_probs[
-                                    :, final_answer_start_prob_offset:final_answer_end_prob_offset
-                                ] = 0
-                            # mask out teacher answer for teacher if teacher_explain_only
-                            teacher_exp.action_mask[
-                                :, final_answer_start_prob_offset:final_answer_end_prob_offset
-                            ] = 0
-
-                    offset += na
-                    teacher_prompt_idx += 1
-                    seq_offset += seq_len
-
-                    if not self.cfg.use_grpo:
-                        teacher_exp.info["custom_rewards"][i][-1] = final_reward_list[-1]
-
-                assert (
-                    kl_div_all.shape[1] == offset
-                ), "number of action should be the same in kl and num_actions"
-                assert (
-                    len(student_exp.sequences[0]) == seq_offset
-                ), "student_exp.sequences must be equal to seq_offset at the end"
-
-            assert (
-                len(final_reward_list) == teacher_prompt_idx == len(all_teacher_prompts)
-            ), "kl_reward_list and last teacher prompt idx and all_teacher_prompts must be equal to all teacher prompts length"
-
-            return (
-                final_reward_list,
-                kl_mean_list,
-                kl_reward_list,
-                window_kl_reward_list,
-                kl_sum_list,
-                kl_max_list,
-                ss_reward_mean_list,
-                ss_reward_min_list,
-                ss_reward_list,
-                teacher_match_reward_list,
-                teacher_ratio_clipped_0_1_list,
-                student_ratio_clipped_0_1_list,
-                teacher_pass_at_n_dict,
-                pass_at_n_dict,
-            )
-
     @torch.no_grad()
     async def generate_vllm(
         self,
@@ -2108,27 +1036,6 @@ class BaseTrainer:
             )
         return experiences
 
-    @torch.no_grad()
-    async def generate_vllm(
-        self,
-        gen_func: Callable[[List[str]], Awaitable[List[str | Any]]],
-        prompts: List[str],
-        extras: Optional[List[dict]] = None,
-        **kwargs,
-    ) -> List[str | Any]:
-        from vllm import SamplingParams
-
-        sampling_params = SamplingParams(
-            temperature=kwargs.get("temperature", 1.0),
-            top_p=kwargs.get("top_p", 1.0),
-            top_k=kwargs.get("top_k", -1),
-            max_tokens=kwargs.get("max_new_tokens", 1024),
-            min_tokens=kwargs.get("min_new_tokens", 1),
-            skip_special_tokens=kwargs.get("skip_special_tokens", False),
-        )
-
-        responses, _ = await gen_func(prompts=prompts, sampling_params=sampling_params, use_tqdm=False)
-        return responses
 
     def build_dataloader(self, dataset):
         # Build dataloader, optionally using a balanced yes/no batch sampler
@@ -2419,89 +1326,9 @@ class BaseTrainer:
     ) -> Tuple[List[str], List[str], List[torch.Tensor]]:
         raise NotImplementedError("custom reward function is not supported yet")
 
-    @torch.no_grad()
-    async def _calc_advantages_and_returns(self, experience: Experience):
-        num_actions = experience.info["num_actions"]
-        # ToDo: hardcoded action mask = None, need to fix it later
-        reward = await compute_reward.remote(
-            experience.info["reward"],
-            self.cfg.init_kl_coef,
-            experience.kl,
-            custom_rewards=experience.info["custom_rewards"],
-            action_mask=None, #experience.action_mask,
-            num_actions=num_actions,
-            reward_clip_range=self.cfg.reward_clip_range,
-            use_kl_loss=self.cfg.use_kl_loss,
-        )
-        experience.advantages, experience.returns = await get_advantages_and_returns.remote(
-            experience.values,
-            reward,
-            None, #experience.action_mask,
-            num_actions,
-            self.cfg.gamma,
-            self.cfg.lambd,
-            packing=True,
-        )
-
-        return_sums = reward.sum(dim=-1)
-        return_sums /= len(num_actions)
-        experience.info["return"] = return_sums
-        experience.kl = None
-
-        avg_rewards = return_sums.mean().item()
-        avg_kl = experience.info["kl"].mean().item()
-        avg_kl_max = experience.info["kl_max"].mean().item()
-
-        avg_response_length = experience.info["response_length"].mean().item()
-        if experience.info["reward"] is not None:
-            avg_orm_score = experience.info["reward"].mean().item()
-        else:
-            avg_orm_score = 0
-
-        if experience.info["custom_rewards"] is not None:
-
-            def func(x):
-                return [r.sum() for r in x]
-
-            avg_custom_rewards = torch.stack(func(experience.info["custom_rewards"])).mean().item()
-            # experience.info["avg_custom_rewards"] = torch.stack(func(experience.info["custom_rewards"]))
-        else:
-            avg_custom_rewards = 0
-
-        del experience.info["num_actions"]
-        del experience.info["custom_rewards"]
-        del experience.info["reward"]
-        del experience.info["kl_max"]
-        experience.to_device("cpu")
-
-        # for replay buffer split batch
-        num_packed_samples = len(num_actions)
-        return_sums /= num_packed_samples
-        experience.info["response_length"] = torch.Tensor(experience.info["response_length"]).mean().unsqueeze(0)
-        experience.info["total_length"] = torch.Tensor(experience.info["total_length"]).mean().unsqueeze(0)
-
-        metrics = {
-            "avg_rewards": avg_rewards,
-            "avg_kl": avg_kl,
-            "avg_kl_max": avg_kl_max,
-            "avg_response_length": avg_response_length,
-            "avg_orm_score": avg_orm_score,
-            "avg_custom_rewards": avg_custom_rewards,
-            "avg_advantages": experience.advantages.mean().item(),
-            "avg_advantages_abs": experience.advantages.abs().mean().item(),
-        }
-
-        return experience, metrics
-
 
     def _convert_prompts_outputs_to_batch_tensors_packing(
-        self, prompts: List[str],
-        teacher_prompts: List[str],
-        outputs: List[str],
-        custom_rewards: Optional[List[torch.Tensor]],
-        teacher_custom_rewards: Optional[List[torch.Tensor]],
-        packing_max_len: int,
-
+        self, prompts: List[str], outputs: List[str], custom_rewards: Optional[List[torch.Tensor]], packing_max_len: int
     ):
         ret_sequences = []
         ret_attention_masks = []
@@ -2512,20 +1339,9 @@ class BaseTrainer:
         else:
             ret_custom_rewards = None
 
-        if teacher_custom_rewards is not None:
-            ret_teacher_custom_rewards = []
-        else:
-            ret_teacher_custom_rewards = None
-
-        # Teacher sequences (always provided)
-        ret_teacher_sequences = []
-        ret_teacher_attention_masks = []
-        ret_teacher_num_actions = []
-        ret_teacher_packed_seq_lens = []
-
         assert (
-            len(prompts) == len(outputs) and len(prompts) > 0 and len(teacher_prompts) == len(prompts)
-        ), "prompts, outputs, and teacher_prompts must have the same length and length must be greater than 0"
+            len(prompts) == len(outputs) and len(prompts) > 0
+        ), "prompts and outputs must have the same length and length must be greater than 0"
 
         def _new_instance():
             out_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
@@ -2533,31 +1349,16 @@ class BaseTrainer:
             out_num_actions = []
             out_packed_seq_lens = []
             rewards = [] if custom_rewards else None
-            teacher_rewards = [] if teacher_custom_rewards else None
             seq_offset = 0
             seq_index = 0
-
-            # Teacher sequence variables
-            out_teacher_sequence = torch.full((packing_max_len,), torch.tensor(self.tokenizer.pad_token_id), dtype=torch.long)
-            out_teacher_attention_mask = torch.zeros((packing_max_len,), dtype=torch.int)
-            out_teacher_num_actions = []
-            out_teacher_packed_seq_lens = []
-            teacher_seq_offset = 0
-
             return (
                 out_sequence,
                 out_attention_mask,
                 out_num_actions,
                 out_packed_seq_lens,
                 rewards,
-                teacher_rewards,
                 seq_offset,
                 seq_index,
-                out_teacher_sequence,
-                out_teacher_attention_mask,
-                out_teacher_num_actions,
-                out_teacher_packed_seq_lens,
-                teacher_seq_offset,
             )
 
         def _accumulate(
@@ -2574,64 +1375,28 @@ class BaseTrainer:
             total_len,
             custom_rewards,
             i,
-            # Teacher sequence parameters
-            out_teacher_sequence,
-            out_teacher_attention_mask,
-            out_teacher_num_actions,
-            out_teacher_packed_seq_lens,
-            teacher_rewards,
-            teacher_seq_offset,
-            teacher_sequence,
-            teacher_attention_mask,
-            teacher_num_action,
-            teacher_total_len,
-            teacher_custom_rewards,
         ):
-            # Student sequence
             out_sequence[seq_offset : seq_offset + total_len] = torch.tensor(sequence)
             out_attention_mask[seq_offset : seq_offset + total_len] = seq_index + 1
             out_num_actions.append(num_action)
             out_packed_seq_lens.append(total_len)
             if custom_rewards:
                 rewards.append(custom_rewards[i])
-
-            # Teacher sequence
-            out_teacher_sequence[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = torch.tensor(teacher_sequence)
-            out_teacher_attention_mask[teacher_seq_offset : teacher_seq_offset + teacher_total_len] = seq_index + 1
-            out_teacher_num_actions.append(teacher_num_action)
-            out_teacher_packed_seq_lens.append(teacher_total_len)
-            if teacher_custom_rewards:
-                teacher_rewards.append(teacher_custom_rewards[i])
-
-            return seq_offset + total_len, seq_index + 1, teacher_seq_offset + teacher_total_len
+            return seq_offset + total_len, seq_index + 1
 
         sequences = []
         attention_masks = []
         num_actions = []
         total_lens = []
 
-        # Teacher sequences
-        teacher_sequences = []
-        teacher_attention_masks = []
-        teacher_num_actions = []
-        teacher_total_lens = []
-
         input_token_ids = self._tokenize(prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
         response_token_ids = self._tokenize(outputs, self.cfg.generate_max_len, padding=False)["input_ids"]
-        teacher_input_token_ids = self._tokenize(teacher_prompts, self.cfg.prompt_max_len, padding=False)["input_ids"]
 
-        for input_ids, response_ids, teacher_input_ids in zip(input_token_ids, response_token_ids, teacher_input_token_ids):
-            # Student sequences
+        for input_ids, response_ids in zip(input_token_ids, response_token_ids):
             sequences.append(input_ids + response_ids)
             attention_masks.append(torch.ones((len(input_ids) + len(response_ids),), dtype=torch.float32))
             num_actions.append(len(response_ids))
             total_lens.append(len(input_ids) + len(response_ids))
-
-            # Teacher sequences (teacher prompt + same response)
-            teacher_sequences.append(teacher_input_ids + response_ids)
-            teacher_attention_masks.append(torch.ones((len(teacher_input_ids) + len(response_ids),), dtype=torch.float32))
-            teacher_num_actions.append(len(response_ids))
-            teacher_total_lens.append(len(teacher_input_ids) + len(response_ids))
 
         # make packed sequences
         (
@@ -2640,20 +1405,14 @@ class BaseTrainer:
             out_num_actions,
             out_packed_seq_lens,
             rewards,
-            teacher_rewards,
             seq_offset,
             seq_index,
-            out_teacher_sequence,
-            out_teacher_attention_mask,
-            out_teacher_num_actions,
-            out_teacher_packed_seq_lens,
-            teacher_seq_offset,
         ) = _new_instance()
-        for i, (sequence, attention_mask, num_action, total_len, teacher_sequence, teacher_attention_mask, teacher_num_action, teacher_total_len) in enumerate(
-            zip(sequences, attention_masks, num_actions, total_lens, teacher_sequences, teacher_attention_masks, teacher_num_actions, teacher_total_lens)
+        for i, (sequence, attention_mask, num_action, total_len) in enumerate(
+            zip(sequences, attention_masks, num_actions, total_lens)
         ):
-            if seq_offset + total_len < packing_max_len and teacher_seq_offset + teacher_total_len < packing_max_len:
-                seq_offset, seq_index, teacher_seq_offset = _accumulate(
+            if seq_offset + total_len < packing_max_len:
+                seq_offset, seq_index = _accumulate(
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
@@ -2667,20 +1426,9 @@ class BaseTrainer:
                     total_len,
                     custom_rewards,
                     i,
-                    out_teacher_sequence,
-                    out_teacher_attention_mask,
-                    out_teacher_num_actions,
-                    out_teacher_packed_seq_lens,
-                    teacher_rewards,
-                    teacher_seq_offset,
-                    teacher_sequence,
-                    teacher_attention_mask,
-                    teacher_num_action,
-                    teacher_total_len,
-                    teacher_custom_rewards,
                 )
-            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) == packing_max_len:
-                seq_offset, seq_index, teacher_seq_offset = _accumulate(
+            elif seq_offset + total_len == packing_max_len:
+                seq_offset, seq_index = _accumulate(
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
@@ -2694,19 +1442,7 @@ class BaseTrainer:
                     total_len,
                     custom_rewards,
                     i,
-                    out_teacher_sequence,
-                    out_teacher_attention_mask,
-                    out_teacher_num_actions,
-                    out_teacher_packed_seq_lens,
-                    teacher_rewards,
-                    teacher_seq_offset,
-                    teacher_sequence,
-                    teacher_attention_mask,
-                    teacher_num_action,
-                    teacher_total_len,
-                    teacher_custom_rewards,
                 )
-                # Pack student sequences
                 valid_size = out_attention_mask.nonzero().size(0)
                 ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
                 ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -2714,34 +1450,17 @@ class BaseTrainer:
                 ret_packed_seq_lens.append(out_packed_seq_lens)
                 if custom_rewards:
                     ret_custom_rewards.append(rewards)
-
-                # Pack teacher sequences
-                valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
-                ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
-                ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
-                ret_teacher_num_actions.append(out_teacher_num_actions)
-                ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
-                if teacher_custom_rewards:
-                    ret_teacher_custom_rewards.append(teacher_rewards)
-
                 (
                     out_sequence,
                     out_attention_mask,
                     out_num_actions,
                     out_packed_seq_lens,
                     rewards,
-                    teacher_rewards,
                     seq_offset,
                     seq_index,
-                    out_teacher_sequence,
-                    out_teacher_attention_mask,
-                    out_teacher_num_actions,
-                    out_teacher_packed_seq_lens,
-                    teacher_seq_offset,
                 ) = _new_instance()
-            elif max(seq_offset + total_len, teacher_seq_offset + teacher_total_len) > packing_max_len:
+            elif seq_offset + total_len > packing_max_len:
                 if seq_offset > 0:
-                    # Pack student sequences
                     valid_size = out_attention_mask.nonzero().size(0)
                     ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
                     ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -2749,31 +1468,16 @@ class BaseTrainer:
                     ret_packed_seq_lens.append(out_packed_seq_lens)
                     if custom_rewards:
                         ret_custom_rewards.append(rewards)
-
-                    # Pack teacher sequences
-                    valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
-                    ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
-                    ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
-                    ret_teacher_num_actions.append(out_teacher_num_actions)
-                    ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
-                    if teacher_custom_rewards:
-                        ret_teacher_custom_rewards.append(teacher_rewards)
                     (
                         out_sequence,
                         out_attention_mask,
                         out_num_actions,
                         out_packed_seq_lens,
                         rewards,
-                        teacher_rewards,
                         seq_offset,
                         seq_index,
-                        out_teacher_sequence,
-                        out_teacher_attention_mask,
-                        out_teacher_num_actions,
-                        out_teacher_packed_seq_lens,
-                        teacher_seq_offset,
                     ) = _new_instance()
-                    seq_offset, seq_index, teacher_seq_offset = _accumulate(
+                    seq_offset, seq_index = _accumulate(
                         out_sequence,
                         out_attention_mask,
                         out_num_actions,
@@ -2787,21 +1491,9 @@ class BaseTrainer:
                         total_len,
                         custom_rewards,
                         i,
-                        out_teacher_sequence,
-                        out_teacher_attention_mask,
-                        out_teacher_num_actions,
-                        out_teacher_packed_seq_lens,
-                        teacher_rewards,
-                        teacher_seq_offset,
-                        teacher_sequence,
-                        teacher_attention_mask,
-                        teacher_num_action,
-                        teacher_total_len,
-                        teacher_custom_rewards
                     )
 
         if seq_offset > 0:
-            # Pack final student sequences
             valid_size = out_attention_mask.nonzero().size(0)
             ret_sequences.append(out_sequence[:valid_size].unsqueeze(0))
             ret_attention_masks.append(out_attention_mask[:valid_size].unsqueeze(0))
@@ -2810,19 +1502,7 @@ class BaseTrainer:
             if custom_rewards:
                 ret_custom_rewards.append(rewards)
 
-            # Pack final teacher sequences
-            valid_teacher_size = out_teacher_attention_mask.nonzero().size(0)
-            ret_teacher_sequences.append(out_teacher_sequence[:valid_teacher_size].unsqueeze(0))
-            ret_teacher_attention_masks.append(out_teacher_attention_mask[:valid_teacher_size].unsqueeze(0))
-            ret_teacher_num_actions.append(out_teacher_num_actions)
-            ret_teacher_packed_seq_lens.append(out_teacher_packed_seq_lens)
-            if teacher_custom_rewards:
-                ret_teacher_custom_rewards.append(teacher_rewards)
-
-            assert (len(ret_custom_rewards) == len(ret_teacher_custom_rewards)), "Number of packed student and teacher rewards must be the same"
-
-        return (ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards,
-                ret_teacher_sequences, ret_teacher_attention_masks, ret_teacher_num_actions, ret_teacher_packed_seq_lens, ret_teacher_custom_rewards)
+        return ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards
 
     def _get_dp_group_models(self, dp_rank: int, model_type: str = ""):
         model = getattr(self, model_type)
