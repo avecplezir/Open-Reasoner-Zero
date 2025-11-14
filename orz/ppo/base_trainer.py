@@ -266,18 +266,14 @@ class BaseTrainer:
 
     def log_adversarial_examples(
         self,
-        *,
-        student_prompts: List[str],
-        teacher_prompts: List[str],
-        combined_custom_rewards,
-        combined_teacher_custom_rewards,
-        index_group_dict,
+        all_opponents_prompts: List[str],
+        opponents_custom_rewards: List[str],
         adv_prompts: List[str],
         adv_outputs: List[Any],
         adv_final_answers: List[Any],
         adv_extras: List[dict],
         adv_initial_scores: List[Any],
-        adv_initial_teacher_scores: List[Any],
+        index_group_dict,
         step: Optional[int] = None,
     ) -> None:
         n = min(8, len(adv_prompts))

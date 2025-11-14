@@ -492,7 +492,6 @@ class RayPPOTrainer(BaseTrainer):
                         avg_student_match = -avg_student_match
                     elif self.cfg.avd_student_negative_strategy == "inv_neg":
                         avg_student_match = -(1 - avg_student_match)
-                    # "same" leaves it unchanged
 
                 if self.cfg.adv_student_add_initial:
                     avg_student_match = avg_student_match + combined_custom_rewards[idx][-1]
@@ -507,60 +506,54 @@ class RayPPOTrainer(BaseTrainer):
                     two_index_sum = combined_teacher_custom_rewards[idx1][-1] + combined_teacher_custom_rewards[idx2][-1]
                     assert two_index_sum <= 1.01, f"Sum of teacher rewards for mixed group must be 1, got {two_index_sum}"
 
-        self.log_adversarial_examples(
-            student_prompts=combined_all_student_prompts,
-            teacher_prompts=combined_all_teacher_prompts,
-            combined_custom_rewards=combined_custom_rewards,
-            combined_teacher_custom_rewards=combined_teacher_custom_rewards,
-            index_group_dict=index_group_dict,
-            adv_prompts=adv_prompts,
-            adv_outputs=adv_outputs,
-            adv_final_answers=adv_final_answers,
-            adv_extras=adv_extras,
-            adv_initial_scores=adv_initial_scores,
-            adv_initial_teacher_scores=adv_initial_teacher_scores,
-            step=self.global_step,
-        )
+        # self.log_adversarial_examples(
+        #     all_opponents_prompts=all_opponents_prompts,
+        #     opponents_custom_rewards=opponents_custom_rewards,
+        #     adv_prompts=adv_prompts,
+        #     adv_outputs=adv_outputs,
+        #     adv_extras=adv_extras,
+        #     adv_final_answers=adv_final_answers,
+        #     adv_initial_scores=adv_initial_scores,
+        #     index_group_dict=index_group_dict,
+        #     step=self.global_step,
+        # )
 
         # offload vllm engines when colocate all models
         if self.cfg.colocate_all:
             async with Timer("Offload vllm engines to cpu"):
                 await self._offload_vllm_engines()
 
-        assert self.cfg.student_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"student loss type {self.cfg.student_loss_type} must be ppo, sft or topr")
-        assert self.cfg.teacher_loss_type in ['ppo', 'sft', 'topr'], logger.info(f"teacher loss type {self.cfg.teacher_loss_type} must be ppo, sft or topr")
-
         # empty data
         if len(all_student_prompts) == 0:
             return
 
-        # 1.3 packing samples
-        for
-        async with Timer("Packing samples"):
-            # Pack sequences
-            (
-            ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards
-            ) = self._convert_prompts_outputs_to_batch_tensors_packing(
-                all_opponents_prompts, opponents_outputs, opponents_custom_rewards, self.cfg.packing_max_len,
-            )
-            action_masks = None
+        zipped_data = zip(([all_opponents_prompts, opponents_outputs, opponents_custom_rewards],
+                           [adv_prompts, adv_outputs, adv_custom_rewards]),
+                          ["teacher", "student"],
+                          [self.student_replay_buffer, self.teacher_replay_buffer])
 
-        # 1.4 inference and calculate values, log probs, rewards, kl divergence for student sequences
-        async with Timer("Inference and calculate values, log probs, rewards, kl divergence for student"):
-            student_experiences = await self.inference_and_calculates(
-                ret_sequences,
-                ret_attention_masks,
-                action_masks,
-                ret_num_actions,
-                ret_packed_seq_lens,
-                ret_custom_rewards,
-            )
+        for data, prefix, buffer in zipped_data:
 
+            # 1.3 packing samples
+            async with Timer("Packing samples"):
+                # Pack sequences
+                (
+                ret_sequences, ret_attention_masks, ret_num_actions, ret_packed_seq_lens, ret_custom_rewards
+                ) = self._convert_prompts_outputs_to_batch_tensors_packing(data[0], data[1], data[2], self.cfg.packing_max_len,
+                )
+                action_masks = None
 
-        # 3. calculate advantages and returns / along with tensorboard logging
-        for experiences, buffer, prefix in zip([student_experiences, teacher_experiences],
-                                              [self.student_replay_buffer, self.teacher_replay_buffer],
-                                              ["student", "teacher"]):
+            # 1.4 inference and calculate values, log probs, rewards, kl divergence for student sequences
+            async with Timer("Inference and calculate values, log probs, rewards, kl divergence for student"):
+                experiences = await self.inference_and_calculates(
+                    ret_sequences,
+                    ret_attention_masks,
+                    action_masks,
+                    ret_num_actions,
+                    ret_packed_seq_lens,
+                    ret_custom_rewards,
+                )
+
             avg_rewards = 0
             avg_kl = 0
             avg_kl_max = 0
