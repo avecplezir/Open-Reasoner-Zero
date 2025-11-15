@@ -40,6 +40,11 @@ class BasePPOExpConfig(BaseConfig):
     # Use this when student/teacher have different architectures
     # and cannot share the same vLLM engine.
     vllm_recreate_on_switch: bool = False
+    # When True, use a separate pool of vLLM engines for the teacher model
+    # instead of reusing/recreating the student engines on role switch.
+    # Useful when both teacher and student may be used frequently and/or
+    # have different architectures.
+    separate_teacher_vllm_engine: bool = False
 
     # path related settings
     pretrain: Optional[str] = "example_path"
