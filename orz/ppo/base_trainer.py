@@ -49,19 +49,31 @@ class BaseTrainer:
         eval_dataset=None,
         vllm_engines=None,
         colocate_pg: Optional[PlacementGroup] = None,
-        vllm_pg_handles: Optional[list] = [],
+        vllm_pg_handles: Optional[list] = None,
+        teacher_vllm_engines=None,
     ):
+        if vllm_pg_handles is None:
+            vllm_pg_handles = []
         self.cfg = cfg
         self.strategy = strategy
         self.tokenizer = tokenizer
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self.student_vllm_engines = vllm_engines
+        self.teacher_vllm_engines = teacher_vllm_engines
         self.vllm_engines = vllm_engines
         self.prompts_dataloader = self.build_dataloader(train_dataset)
         self.colocate_pg = colocate_pg
+        self._dual_vllm_enabled = (
+            self.cfg.colocate_all
+            and self.cfg.separate_teacher_model
+            and self.cfg.separate_teacher_vllm_engine
+            and self.teacher_vllm_engines is not None
+        )
+        if self.teacher_vllm_engines is not None and not self._dual_vllm_enabled:
+            raise ValueError("teacher_vllm_engines provided but dual VLLM support is not enabled in config")
         # Track which role the current vLLM engines are set up for.
-        # Engines created at startup use cfg.pretrain (student) by default.
-        self._vllm_current_role: Optional[str] = "student" if cfg.vllm_recreate_on_switch else None
+        self._vllm_current_role: Optional[str] = "student"
         self._vllm_pg_handles = vllm_pg_handles
 
         self.writer = SummaryWriter(log_dir=self.cfg.tensorboard_log_dir)
@@ -2451,15 +2463,21 @@ class BaseTrainer:
         else:
             return None
 
-    async def _offload_vllm_engines(self):
+    async def _offload_vllm_engines(self, engines=None):
+        engines = self.vllm_engines if engines is None else engines
+        if not engines:
+            return
         offload_tasks = []
-        for engine in self.vllm_engines:
+        for engine in engines:
             offload_tasks.append(engine.offload_to_cpu.remote())
         await asyncio.gather(*offload_tasks)
 
-    async def _backload_vllm_engines(self):
+    async def _backload_vllm_engines(self, engines=None):
+        engines = self.vllm_engines if engines is None else engines
+        if not engines:
+            return
         backload_tasks = []
-        for engine in self.vllm_engines:
+        for engine in engines:
             backload_tasks.append(engine.backload_to_gpu.remote())
         await asyncio.gather(*backload_tasks)
 
@@ -2536,6 +2554,20 @@ class BaseTrainer:
             await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
         elif role == "teacher":
             await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
+
+    async def _ensure_colocated_vllm_role(self, role: str):
+        if not self._dual_vllm_enabled:
+            return False
+        if role == self._vllm_current_role:
+            return True
+        target_engines = self.student_vllm_engines if role == "student" else self.teacher_vllm_engines
+        if target_engines is None:
+            raise RuntimeError(f"Requested vLLM role '{role}' but corresponding engines are not initialized")
+        await self._offload_vllm_engines(self.vllm_engines)
+        await self._backload_vllm_engines(target_engines)
+        self.vllm_engines = target_engines
+        self._vllm_current_role = role
+        return True
     async def _ensure_vllm_role(self, role: str):
         """Ensure vLLM engines are created for the requested role ('student'|'teacher').
 
@@ -2543,6 +2575,8 @@ class BaseTrainer:
         When True and role changes, we recreate engines with the appropriate model
         and sync corresponding weights to the engines.
         """
+        if await self._ensure_colocated_vllm_role(role):
+            return
         if not self.cfg.vllm_recreate_on_switch:
             return
         if role == self._vllm_current_role:

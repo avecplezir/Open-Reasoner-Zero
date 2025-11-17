@@ -276,14 +276,28 @@ class BasePPOExpConfig(BaseConfig):
 class BasePPOExp(BaseExp):
     @cached_property
     def trainer(self):
-        vllm_engines = self.create_inference_engine()
+        colocate_pg = self.get_colocate_pg
+        student_vllm_engines, student_vllm_pg_handles = self.create_inference_engine(colocate_pg=colocate_pg)
+        teacher_vllm_engines = None
+        if (
+            self.cfg.colocate_all
+            and self.cfg.separate_teacher_model
+            and self.cfg.separate_teacher_vllm_engine
+        ):
+            teacher_pretrain = self.cfg.teacher_pretrain or self.cfg.pretrain
+            teacher_vllm_engines = self.create_inference_engine(
+                pretrain=teacher_pretrain, colocate_pg=colocate_pg, return_pg_handles=False
+            )
         return RayPPOTrainer(
             cfg=self.cfg,
             strategy=self.strategy,
             tokenizer=self.tokenizer,
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
-            vllm_engines=vllm_engines,
+            vllm_engines=student_vllm_engines,
+            vllm_pg_handles=student_vllm_pg_handles,
+            teacher_vllm_engines=teacher_vllm_engines,
+            colocate_pg=colocate_pg,
         )
 
     @cached_property
@@ -341,11 +355,12 @@ class BasePPOExp(BaseExp):
         else:
             return None
 
-    def create_inference_engine(self):
+    def create_inference_engine(self, *, pretrain: Optional[str] = None, colocate_pg=None, return_pg_handles: bool = True):
+        model_path = pretrain or self.cfg.pretrain
         return create_vllm_engines(
             self.cfg.vllm_num_engines,
             self.cfg.vllm_tensor_parallel_size,
-            self.cfg.pretrain,
+            model_path,
             self.cfg.seed,
             self.cfg.enable_prefix_caching,
             self.cfg.enforce_eager,
@@ -355,8 +370,8 @@ class BasePPOExp(BaseExp):
             self.cfg.max_num_batched_tokens,
             self.cfg.gpu_memory_utilization,
             self.cfg.micro_rollout_batch_size,
-            self.get_colocate_pg,
-            return_pg_handles=True,
+            colocate_pg if colocate_pg is not None else self.get_colocate_pg,
+            return_pg_handles=return_pg_handles,
         )
 
     async def run(self):

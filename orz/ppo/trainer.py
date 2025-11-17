@@ -24,25 +24,30 @@ class RayPPOTrainer(BaseTrainer):
     async def train(self):
         # 1. create rank0 policy model and vllm_engines groups, then boardcast weights to vllm engins
         if self.cfg.colocate_all:
-            await self.policy_model.backload_to_gpu()
-            await self._backload_vllm_engines()
-
-        async with Timer("Policy init vllm engines actor group"):
-            await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+            async with Timer("student init vllm engines actor group"):
+                await self.policy_model.backload_to_gpu()
+                await self._backload_vllm_engines(self.vllm_engines)
+                await self.policy_model.async_run_method("_init_vllm_engines_actor_group", self.vllm_engines)
+                await self.policy_model.offload_to_cpu()
 
         # Initialize teacher model's own process group with same vLLM engines if separate teacher is enabled
         if self.cfg.separate_teacher_model:
             async with Timer("teacher init vllm engines actor group"):
-                await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
+                teacher_engines = self.teacher_vllm_engines or self.vllm_engines
+                if self.cfg.colocate_all and self.teacher_vllm_engines is not None:
+                    await self.teacher_model.backload_to_gpu()
+                    await self._backload_vllm_engines(teacher_engines)
+                    await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", teacher_engines)
+                    await self.teacher_model.offload_to_cpu()
+                    await self._offload_vllm_engines(teacher_engines)
+                else:
+                    if self.cfg.colocate_all:
+                        await self.teacher_model.backload_to_gpu()
+                    await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", teacher_engines)
+                    if self.cfg.colocate_all:
+                        await self.teacher_model.offload_to_cpu()
 
         logger.info("Create vllm engine gourps done.")
-
-        async with Timer("Sync actor weights to vllm engines"):
-            await self._sync_policy_weights_to_vllm()
-
-        if self.cfg.colocate_all:
-            async with Timer("Offload policy model to cpu"):
-                await self.policy_model.offload_to_cpu()
 
         # 2. main training loop
         consumed_samples = 0

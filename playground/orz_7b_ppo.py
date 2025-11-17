@@ -299,55 +299,6 @@ class CustomRewardTrainer(RayPPOTrainer):
             # log num_tokens
             num_tokens.append(response_token)
 
-        # If teacher answers are provided, warn only when formatting is valid and
-        # the prompt-declared answer mismatches extras[i]['teacher_answer'].
-        # if extras[0].get("teacher_answer", None) is not None:
-        #     for i, (prompt, ex, fmt_ok) in enumerate(zip(prompts, extras, formatting_oks)):
-        #         if not fmt_ok:
-        #             continue
-        #         try:
-        #             m = re.search(r"The final answer is\s+(.*?)\.", prompt)
-        #             if m:
-        #                 declared = m.group(1).strip()
-        #                 declared = solution2answer(declared).strip()
-        #                 teacher_ans_norm = solution2answer(ex.get("teacher_answer", "")).strip()
-        #                 if declared != teacher_ans_norm:
-        #                     logger.warning(
-        #                         f"Prompt/extras mismatch at index {i}: prompt_declared={declared}, teacher_answer={teacher_ans_norm}"
-        #                     )
-        #         except Exception:
-        #             pass
-        #
-        # # Teacher-only sanity checks: stop reasons distribution and mismatches (moved here)
-        # # Show mismatch warnings only if formatting is valid.
-        # if self.cfg.teacher_explain_only and extras[0].get("teacher_answer") is not None:
-        #     # Stop reasons distribution based on generated outputs
-        #     stop_reasons = [out["stop_reason"] for out in outputs]
-        #     counts = dict(Counter(stop_reasons))
-        #     logger.info(f"Teacher stop reasons distribution: {counts}")
-        #
-        #     # Collect a few mismatches where teacher_iscorrect is False and formatting ok
-        #     mismatches = []
-        #     for i, (ex, out, fmt_ok) in enumerate(zip(extras, outputs, formatting_oks)):
-        #         if ex["teacher_answer"] is not None and not out["teacher_iscorrect"] and fmt_ok:
-        #             mismatches.append(
-        #                 (
-        #                     i,
-        #                     ex["teacher_answer"],
-        #                     out["final_answer"],
-        #                     out["stop_reason"],
-        #                     out["response"],
-        #                 )
-        #             )
-        #     if mismatches:
-        #         max_show = 5
-        #         for j, (idx, t_ans, got, stop_r, res) in enumerate(mismatches[:max_show]):
-        #             logger.warning(
-        #                 f"Teacher mismatch at idx={idx}: teacher_answer={t_ans} != extracted={got}; stop_reason={stop_r}, response={res}"
-        #             )
-        #         if len(mismatches) > max_show:
-        #             logger.warning(f"... {len(mismatches) - max_show} more teacher mismatches omitted")
-
         # must before grpo, for grpo will change scores
         num_tokens_arr = np.array(num_tokens, dtype=np.float32)  # must be float to calculate mean and std
         scores_arr = np.array(scores)
@@ -750,7 +701,18 @@ class CustomRewardTrainer(RayPPOTrainer):
 class PPOExp(BasePPOExp):
     @cached_property
     def trainer(self):
-        vllm_engines, vllm_pg_handles = self.create_inference_engine()
+        colocate_pg = self.get_colocate_pg
+        vllm_engines, vllm_pg_handles = self.create_inference_engine(colocate_pg=colocate_pg)
+        teacher_vllm_engines = None
+        if (
+            self.cfg.colocate_all
+            and self.cfg.separate_teacher_model
+            and self.cfg.separate_teacher_vllm_engine
+        ):
+            teacher_pretrain = self.cfg.teacher_pretrain or self.cfg.pretrain
+            teacher_vllm_engines = self.create_inference_engine(
+                pretrain=teacher_pretrain, colocate_pg=colocate_pg, return_pg_handles=False
+            )
         logger.info(f'vllm_engines vllm_pg_handles {vllm_engines} {vllm_pg_handles}')
         return CustomRewardTrainer(
             cfg=self.cfg,
@@ -759,7 +721,8 @@ class PPOExp(BasePPOExp):
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             vllm_engines=vllm_engines,
-            colocate_pg=self.get_colocate_pg,
+            teacher_vllm_engines=teacher_vllm_engines,
+            colocate_pg=colocate_pg,
             vllm_pg_handles=vllm_pg_handles,
         )
 

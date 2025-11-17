@@ -162,7 +162,8 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_reward_clamp: float = 10.0
     ss_reward_coef: float = 0.
 
-    vllm_recreate_on_switch: bool = True
+    vllm_recreate_on_switch: bool = False
+    separate_teacher_vllm_engines: bool = True
 
 
 if __name__ == "__main__":
