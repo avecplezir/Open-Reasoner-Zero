@@ -2577,7 +2577,8 @@ class BaseTrainer:
         target_engines = self.student_vllm_engines if role == "student" else self.teacher_vllm_engines
         if target_engines is None:
             raise RuntimeError(f"Requested vLLM role '{role}' but corresponding engines are not initialized")
-        await self._offload_vllm_engines(self.vllm_engines)
+        # Current engines are already offloaded by the caller after use;
+        # only backload the target role here to avoid redundant offload calls.
         await self._backload_vllm_engines(target_engines)
         self.vllm_engines = target_engines
         self._vllm_current_role = role

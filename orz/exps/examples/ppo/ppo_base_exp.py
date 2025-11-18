@@ -44,7 +44,7 @@ class BasePPOExpConfig(BaseConfig):
     # instead of reusing/recreating the student engines on role switch.
     # Useful when both teacher and student may be used frequently and/or
     # have different architectures.
-    separate_teacher_vllm_engine: bool = False
+    separate_teacher_vllm_engine: bool = True
 
     # path related settings
     pretrain: Optional[str] = "example_path"
