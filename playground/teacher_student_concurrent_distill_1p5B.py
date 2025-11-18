@@ -76,11 +76,11 @@ class PPOExpConfig(BasePPOExpConfig):
         gpu_memory_utilization: float = 0.3
 
     use_ref_model: bool = True
-    update_ref_every: int = 10
+    update_ref_every: int = 5
     reward_kl_toward_ref_model: bool = True
 
     # path related settings
-    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-1.5B"
+    pretrain: Optional[str] = f"{prefix}/Qwen2.5-3B"
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
@@ -130,13 +130,13 @@ class PPOExpConfig(BasePPOExpConfig):
     eval_student: bool = True if not DEBUG_MODE else False
     eval_teacher: bool = True if not DEBUG_MODE else False
 
-    generate_with_student: int = 20
+    generate_with_student: int = 10
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-3B"
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B"
 
     # Prompt configuration
     general_propmt_yes_no: bool = True
@@ -152,7 +152,7 @@ class PPOExpConfig(BasePPOExpConfig):
     entropy_coef: float = 0.001
     reward_match_coef: float = 1.
     use_kl_loss: bool = True
-    kl_loss_coef: float = 0.00
+    kl_loss_coef: float = 0.01
     reverse_kl: bool = False
     reward_kl_coef: float = 0.0  # KL as part of teacher reward
     kl_loss_window_size: int = 10
@@ -162,8 +162,8 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_reward_clamp: float = 10.0
     ss_reward_coef: float = 0.
 
-    vllm_recreate_on_switch: bool = False
-    separate_teacher_vllm_engine: bool = True
+    vllm_recreate_on_switch: bool = True
+    separate_teacher_vllm_engine: bool = False
 
 
 if __name__ == "__main__":
