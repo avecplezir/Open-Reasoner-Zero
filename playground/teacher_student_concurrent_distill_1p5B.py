@@ -127,10 +127,10 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
 
     eval_interval: int = 10
-    eval_student: bool = True if not DEBUG_MODE else False
-    eval_teacher: bool = True if not DEBUG_MODE else False
+    eval_student: bool = True #if not DEBUG_MODE else False
+    eval_teacher: bool = True #if not DEBUG_MODE else False
 
-    generate_with_student: int = 10
+    generate_with_student: int = 1
     augment_student_generation_with_teacher: bool = True
     train_student_on_teacher_data_only: bool = True
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
@@ -162,8 +162,8 @@ class PPOExpConfig(BasePPOExpConfig):
     kl_reward_clamp: float = 10.0
     ss_reward_coef: float = 0.
 
-    vllm_recreate_on_switch: bool = True
-    separate_teacher_vllm_engine: bool = False
+    vllm_recreate_on_switch: bool = False
+    separate_teacher_vllm_engine: bool = True
 
 
 if __name__ == "__main__":

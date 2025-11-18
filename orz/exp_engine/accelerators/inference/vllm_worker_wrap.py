@@ -94,8 +94,11 @@ class OffloadableVLLMWorker(WorkerWrap):
     def offload_cpu(self):
         assert self.model_config.enforce_eager, "Must use eager mode to offload!"
         for param in self.model_runner.model.parameters():
+            # Skip if already offloaded; repeated offloads would zero-out storage.
+            if getattr(param, "meta_tensor", None) is not None:
+                continue
             param.meta_tensor = param.data.to("meta")
-            param.data = torch.Tensor([])
+            param.data = torch.empty(0, dtype=param.meta_tensor.dtype, device="cpu")
 
         self.cache_engine = None
         self.gpu_cache = None
@@ -104,7 +107,13 @@ class OffloadableVLLMWorker(WorkerWrap):
     def load_gpu(self):
         assert self.model_config.enforce_eager, "Must use eager mode to offload!"
         for param in self.model_runner.model.parameters():
-            param.data = torch.empty_like(param.meta_tensor, device="cuda")
+            meta_tensor = getattr(param, "meta_tensor", None)
+            if meta_tensor is None:
+                # Parameter has never been offloaded or was already restored.
+                if param.data.device.type != "cuda":
+                    param.data = param.data.to("cuda")
+                continue
+            param.data = torch.empty_like(meta_tensor, device="cuda")
             param.meta_tensor = None
         if self.cache_engine is None and self.gpu_cache is None:
             super()._init_cache_engine()

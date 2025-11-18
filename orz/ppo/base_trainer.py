@@ -75,7 +75,7 @@ class BaseTrainer:
             raise ValueError("teacher_vllm_engines provided but dual VLLM support is not enabled in config")
         # Track which role the current vLLM engines are set up for.
         self._vllm_current_role: Optional[str] = "student"
-        self._vllm_pg_handles = vllm_pg_handles
+        # self._vllm_pg_handles = vllm_pg_handles
 
         self.writer = SummaryWriter(log_dir=self.cfg.tensorboard_log_dir)
         self.student_replay_buffer = NaiveReplayBuffer(
@@ -2501,7 +2501,7 @@ class BaseTrainer:
     async def _major_sync_policy_weights_to_vllm(self):
         await self._ensure_vllm_role("student")
         if self.cfg.colocate_all:
-            await self._backload_vllm_engines(self.vllm_engines)
+            # await self._backload_vllm_engines(self.vllm_engines)
             await self.policy_model.backload_to_gpu()
             await self._sync_policy_weights_to_vllm()
             await self.policy_model.offload_to_cpu()
@@ -2513,6 +2513,7 @@ class BaseTrainer:
             return
         await self._ensure_vllm_role("teacher")
         if self.cfg.colocate_all:
+            # await self._backload_vllm_engines(self.vllm_engines)
             await self.teacher_model.backload_to_gpu()
             await self._sync_teacher_weights_to_vllm()
             await self.teacher_model.offload_to_cpu()
@@ -2525,8 +2526,9 @@ class BaseTrainer:
             ray.kill(eng)
         self.vllm_engines = []
 
-        for pg in self._vllm_pg_handles:
-            ray.util.remove_placement_group(pg)
+        if not self.cfg.colocate_all:
+            for pg in self._vllm_pg_handles:
+                ray.util.remove_placement_group(pg)
 
     async def _recreate_vllm_engines(self, *, pretrain: str, role: str = "student"):
         """Create fresh vLLM engines with the provided model, re-init comm groups, and return handles.
@@ -2542,7 +2544,7 @@ class BaseTrainer:
         # 2) Create new engines using the same resource config
         from orz.ppo.utils import create_vllm_engines
         logger.info("Creating new vLLM engines...")
-        self.vllm_engines, self._vllm_pg_handles = create_vllm_engines(
+        self.vllm_engines = create_vllm_engines(
             self.cfg.vllm_num_engines,
             self.cfg.vllm_tensor_parallel_size,
             pretrain,
@@ -2556,7 +2558,7 @@ class BaseTrainer:
             self.cfg.gpu_memory_utilization,
             self.cfg.micro_rollout_batch_size,
             self.colocate_pg,
-            return_pg_handles=True,
+            # return_pg_handles=True,
         )
 
         # 3) Re-initialize the comm groups on policy/teacher models for these engines
@@ -2580,6 +2582,7 @@ class BaseTrainer:
         self.vllm_engines = target_engines
         self._vllm_current_role = role
         return True
+
     async def _ensure_vllm_role(self, role: str):
         """Ensure vLLM engines are created for the requested role ('student'|'teacher').
 
@@ -2599,7 +2602,9 @@ class BaseTrainer:
 
         # Recreate and re-sync
         await self._recreate_vllm_engines(pretrain=pretrain_model, role=role)
+        logger.info(f"recreate_vllm_engines for role '{role}' done")
         await self._backload_vllm_engines()
+        logger.info(f"_backload_vllm_engines for role '{role}' done")
 
         self._vllm_current_role = role
 

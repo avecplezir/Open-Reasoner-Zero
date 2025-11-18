@@ -85,6 +85,8 @@ class RayPPOTrainer(BaseTrainer):
                             await self._major_sync_policy_weights_to_vllm()
                             await self.eval(prefix="")
                             self.student_steps_total += 1 # ToDo: hack to avoid multiple evals per student training step
+                            if self._dual_vllm_enabled:
+                                await self._offload_vllm_engines()
 
                 if self.cfg.separate_teacher_model and self.cfg.eval_teacher:
                     if self.teacher_steps_total % self.cfg.eval_interval == 0:
@@ -93,6 +95,8 @@ class RayPPOTrainer(BaseTrainer):
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
                             self.teacher_steps_total += 1 # ToDo: hack to avoid multiple evals per teacher training step
+                            if self._dual_vllm_enabled:
+                                await self._offload_vllm_engines(teacher_engines)
 
                 # 2. determine what model to train
                 self.train_teacher = False
@@ -350,8 +354,12 @@ class RayPPOTrainer(BaseTrainer):
             async with Timer("Sync policy weights to VLLM engines for student generation"):
                 # Ensure vLLM engines are configured for student
                 await self._major_sync_policy_weights_to_vllm()
+                logger.info("Successfully sync policy weights to vllm engines for student generation")
 
             outputs = await self._distributed_generate(all_student_prompts, all_extras, teacher=False, desc="Generate student sequences via vllm engines", **generate_kwargs)
+
+            if self._dual_vllm_enabled:
+                await self._offload_vllm_engines()
 
             # skip when data is not enough
             if len(outputs) <= 0:
@@ -425,6 +433,9 @@ class RayPPOTrainer(BaseTrainer):
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
             outputs = await self._distributed_generate(all_teacher_prompts, all_extras, teacher=True, desc="Generate complimentary teacher sequences via vllm engines", **generate_kwargs)
 
+            if self._dual_vllm_enabled:
+                await self._offload_vllm_engines()
+
             # skip when data is not enough
             if len(outputs) <= 0:
                 return
@@ -473,11 +484,6 @@ class RayPPOTrainer(BaseTrainer):
             )
 
             teacher_generated = [1] * len(all_student_prompts)
-
-        # offload vllm engines when colocate all models
-        if self.cfg.colocate_all:
-            async with Timer("Offload vllm engines to cpu"):
-                await self._offload_vllm_engines()
 
         # Randomize order of all arrays
         indices = np.random.permutation(len(all_student_prompts))
