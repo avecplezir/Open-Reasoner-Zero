@@ -80,7 +80,7 @@ class PPOExpConfig(BasePPOExpConfig):
     reward_kl_toward_ref_model: bool = True
 
     # path related settings
-    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-1.5B"
+    pretrain: Optional[str] =  f"{prefix}/Qwen2.5-3B"
     reward_pretrain: Optional[str] = None
     save_interval: int = 50
     # current date and time
@@ -127,8 +127,8 @@ class PPOExpConfig(BasePPOExpConfig):
     teacher_training_rounds: int = -1  # number teacher training rounds, -1 means no teacher training
 
     eval_interval: int = 10
-    eval_student: bool = True if not DEBUG_MODE else False
-    eval_teacher: bool = True if not DEBUG_MODE else False
+    eval_student: bool = True #if not DEBUG_MODE else False
+    eval_teacher: bool = True #if not DEBUG_MODE else False
 
     generate_with_student: int = 20
     augment_student_generation_with_teacher: bool = True
@@ -136,7 +136,7 @@ class PPOExpConfig(BasePPOExpConfig):
     augment_strategy: str = "distill"  # options: correct | yes_no | only_wrong | opposite | correct_incorrect
 
     separate_teacher_model: bool = True
-    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-3B"
+    teacher_pretrain: Optional[str] = f"{prefix}/Qwen2.5-1.5B"
 
     # Prompt configuration
     general_propmt_yes_no: bool = True
