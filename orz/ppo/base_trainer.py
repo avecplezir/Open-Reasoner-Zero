@@ -70,6 +70,7 @@ class BaseTrainer:
             and self.cfg.separate_teacher_vllm_engine
             and self.teacher_vllm_engines is not None
         )
+        logger.info(f"_dual_vllm_enabled: {self._dual_vllm_enabled}")
         if self.teacher_vllm_engines is not None and not self._dual_vllm_enabled:
             raise ValueError("teacher_vllm_engines provided but dual VLLM support is not enabled in config")
         # Track which role the current vLLM engines are set up for.
@@ -2482,19 +2483,25 @@ class BaseTrainer:
         await asyncio.gather(*backload_tasks)
 
     async def _sync_policy_weights_to_vllm(self):
+        if self._dual_vllm_enabled and self._vllm_current_role != "student":
+            raise RuntimeError("Attempting to sync policy weights while vLLM engines are not in student mode")
         if self.cfg.colocate_all:
             await self.policy_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.policy_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
 
     async def _sync_teacher_weights_to_vllm(self):
+        if self._dual_vllm_enabled and self._vllm_current_role != "teacher":
+            raise RuntimeError("Attempting to sync teacher weights while vLLM engines are not in teacher mode")
         if self.cfg.colocate_all:
             await self.teacher_model.async_run_method("_broadcast_to_vllm_cudaipc", self.vllm_engines)
         else:
             await self.teacher_model.async_run_method("_broadcast_to_vllm", self.vllm_engines)
 
     async def _major_sync_policy_weights_to_vllm(self):
+        await self._ensure_vllm_role("student")
         if self.cfg.colocate_all:
+            await self._backload_vllm_engines(self.vllm_engines)
             await self.policy_model.backload_to_gpu()
             await self._sync_policy_weights_to_vllm()
             await self.policy_model.offload_to_cpu()
@@ -2502,6 +2509,9 @@ class BaseTrainer:
             await self._sync_policy_weights_to_vllm()
 
     async def _major_sync_teacher_weights_to_vllm(self):
+        if not self.cfg.separate_teacher_model:
+            return
+        await self._ensure_vllm_role("teacher")
         if self.cfg.colocate_all:
             await self.teacher_model.backload_to_gpu()
             await self._sync_teacher_weights_to_vllm()
@@ -2556,10 +2566,12 @@ class BaseTrainer:
             await self.teacher_model.async_run_method("_init_teacher_vllm_engines_actor_group", self.vllm_engines)
 
     async def _ensure_colocated_vllm_role(self, role: str):
+        logger.info(f"Ensuring colocated vLLM role '{role}' {self._vllm_current_role}")
         if not self._dual_vllm_enabled:
             return False
         if role == self._vllm_current_role:
             return True
+        logger.info(f"Switching colocated vLLM engines to role '{role}'")
         target_engines = self.student_vllm_engines if role == "student" else self.teacher_vllm_engines
         if target_engines is None:
             raise RuntimeError(f"Requested vLLM role '{role}' but corresponding engines are not initialized")

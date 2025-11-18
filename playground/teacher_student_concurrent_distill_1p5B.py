@@ -163,7 +163,7 @@ class PPOExpConfig(BasePPOExpConfig):
     ss_reward_coef: float = 0.
 
     vllm_recreate_on_switch: bool = False
-    separate_teacher_vllm_engines: bool = True
+    separate_teacher_vllm_engine: bool = True
 
 
 if __name__ == "__main__":
