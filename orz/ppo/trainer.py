@@ -82,7 +82,6 @@ class RayPPOTrainer(BaseTrainer):
                     if self.student_steps_total % self.cfg.eval_interval == 0:
                         async with Timer(f"Eval of the student model on global step {self.global_step}"):
                             # Ensure vLLM engines are set for student before syncing
-                            await self._ensure_vllm_role("student")
                             await self._major_sync_policy_weights_to_vllm()
                             await self.eval(prefix="")
                             self.student_steps_total += 1 # ToDo: hack to avoid multiple evals per student training step
@@ -91,7 +90,6 @@ class RayPPOTrainer(BaseTrainer):
                     if self.teacher_steps_total % self.cfg.eval_interval == 0:
                         async with Timer(f"Eval of the teacher model on global step {self.global_step}"):
                             # Switch vLLM engines to teacher if needed
-                            await self._ensure_vllm_role("teacher")
                             await self._major_sync_teacher_weights_to_vllm()
                             await self.eval(prefix="teacher")
                             self.teacher_steps_total += 1 # ToDo: hack to avoid multiple evals per teacher training step
@@ -351,7 +349,6 @@ class RayPPOTrainer(BaseTrainer):
             # 1. generate sequences and inference, calculate values, log probs, rewards, kl divergence, generate sequences via vllm engines
             async with Timer("Sync policy weights to VLLM engines for student generation"):
                 # Ensure vLLM engines are configured for student
-                await self._ensure_vllm_role("student")
                 await self._major_sync_policy_weights_to_vllm()
 
             outputs = await self._distributed_generate(all_student_prompts, all_extras, teacher=False, desc="Generate student sequences via vllm engines", **generate_kwargs)
@@ -411,11 +408,9 @@ class RayPPOTrainer(BaseTrainer):
             if self.cfg.separate_teacher_model:
                 async with Timer("Sync teacher weights to VLLM engines"):
                     # Switch vLLM engines to teacher
-                    await self._ensure_vllm_role("teacher")
                     await self._major_sync_teacher_weights_to_vllm()
             elif not self.cfg.generate_with_student:
                 async with Timer("Sync policy weights to VLLM engines for teacher generation (there is no separate teacher model)"):
-                    await self._ensure_vllm_role("student")
                     await self._major_sync_policy_weights_to_vllm()
 
             assert self.cfg.augment_strategy == "distill", f"Only distill augmentation strategy is supported currently, but got {self.cfg.augment_strategy}"
