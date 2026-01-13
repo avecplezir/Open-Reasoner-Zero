@@ -189,12 +189,14 @@ class CustomRewardTrainer(RayPPOTrainer):
         outputs: List[Any],
         extras: List[dict],
         reward_model_fn: Callable[[List[str], List[str]], Awaitable[torch.Tensor]],
-    ) -> Tuple[List[str], List[str], List[torch.Tensor]]:
+    ) -> Tuple[List[str], List[str], List[torch.Tensor], List[torch.Tensor]]:
         # make log metrics
         scores = []
+        teacher_scores = []
         responses = []
         avg_non_stop_count = 0
         pass_at_n_dict = defaultdict(list)
+        teacher_pass_at_n_dict = defaultdict(list)
         num_tokens: List[int] = []
 
         @ray.remote(num_cpus=1)
@@ -242,20 +244,22 @@ class CustomRewardTrainer(RayPPOTrainer):
                     "generated_answer": outputs[i]['final_answer'], 
                     "true_answer": true_answer,
                     "is_correct": outputs[i]['iscorrect'],
+                    'teacher_iscorrect': outputs[i]['teacher_iscorrect'],
                     "stop_reason": outputs[i]['stop_reason']
                 })
 
             wandb.log({
                 "step": self.global_step,
                 "reasoning_examples": wandb.Table(
-                    columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct", "stop_reason"],
-                    data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"], ex["stop_reason"]] for ex in reasoning_examples]
+                    columns=["prompt", "reasoning_chain", "generated_answer", "true_answer", "is_correct", "teacher_iscorrect", "stop_reason"],
+                    data=[[ex["prompt"], ex["reasoning_chain"], ex["generated_answer"], ex["true_answer"], ex["is_correct"], ex['teacher_iscorrect'], ex["stop_reason"]] for ex in reasoning_examples]
                 )
             })
         for idx in range(len(outputs)):
             prompt, output, out_token = prompts[idx], outputs[idx], output_tokens[idx]
             rep_score, reflection_pattern_score = repeat_scores[idx], reflection_pattern_scores[idx]
             iscorrect = output["iscorrect"]
+            teacher_iscorrect = output["teacher_iscorrect"]
             stop_reason = output["stop_reason"]
             response_token = len(out_token)
             output["repeat_score"] = rep_score
@@ -263,13 +267,17 @@ class CustomRewardTrainer(RayPPOTrainer):
             # only correct and stoped response can aquire reward
             if stop_reason == "stop":
                 score = 1.0 if iscorrect else 0.0
+                teacher_score = 1.0 if teacher_iscorrect else 0.0
             else:
                 avg_non_stop_count += 1
                 score = 0.0
+                teacher_score = 0.0
             scores.append(score)
+            teacher_scores.append(teacher_score)
 
             # calculate pass@n
             pass_at_n_dict[prompt].append(scores[-1])
+            teacher_pass_at_n_dict[prompt].append(teacher_scores[-1])
             # log num_tokens
             num_tokens.append(response_token)
 
@@ -282,11 +290,16 @@ class CustomRewardTrainer(RayPPOTrainer):
         # GRPO
         if self.cfg.use_grpo:
             self.writer.add_scalar("grpo_raw_reward", np.mean(scores), self.global_step)
+            self.writer.add_scalar("grpo_teacher_raw_reward", np.mean(teacher_scores), self.global_step)
             # grpo reward normalization
             for i, prompt in enumerate(prompts):
                 scores[i] -= np.mean(pass_at_n_dict[prompt])
+                teacher_scores[i] -= np.mean(teacher_pass_at_n_dict[prompt])
                 if std := np.std(pass_at_n_dict[prompt]) > 0:
                     scores[i] /= std
+                if teacher_std := np.std(teacher_pass_at_n_dict[prompt]) > 0:
+                    teacher_scores[i] /= teacher_std
+
 
         def dump_results(prompts, outputs, scores):
             saved = []
@@ -309,6 +322,7 @@ class CustomRewardTrainer(RayPPOTrainer):
             "avg_repeat_score": sum(repeat_scores) / len(prompts),
             "avg_reflection_pattern_score": sum(reflection_pattern_scores) / len(prompts),
             "avg_pass_at_n": sum(1 for v in pass_at_n_dict.values() if np.sum(v) > 0) / len(pass_at_n_dict),
+            "avg_teacher_pass_at_n": sum(1 for v in teacher_pass_at_n_dict.values() if np.sum(v) > 0) / len(teacher_pass_at_n_dict),
             "avg_num_tokens": np.mean(num_tokens_arr).item(),
             "std_num_tokens": np.std(num_tokens_arr).item(),
             "avg_correct_num_tokens": 0 if len(correct_tokens_arr) == 0 else np.mean(correct_tokens_arr).item(),
@@ -329,23 +343,29 @@ class CustomRewardTrainer(RayPPOTrainer):
 
         # make a pre-token score tensor for each output, for example: [0, 0, 0, 0, r]
         score_tensors = []
-        for score, output_token in zip(scores, output_tokens):
+        teacher_score_tensors = []
+        for score, teacher_score, output_token in zip(scores, teacher_scores, output_tokens):
             score_tensor = torch.zeros(len(output_token))
+            teacher_score_tensor = torch.zeros(len(output_token))
             if len(output_token) > 0:
                 score_tensor[-1] = score
+                teacher_score_tensor[-1] = teacher_score
             score_tensors.append(score_tensor)
+            teacher_score_tensors.append(teacher_score_tensor)
 
         # rm empty response
         res_prompts = []
         res_responses = []
         res_score_tensors = []
-        for prompt, response, score_tensor in zip(prompts, responses, score_tensors):
+        res_teacher_score_tensors = []
+        for prompt, response, score_tensor, teacher_score_tensor in zip(prompts, responses, score_tensors, teacher_score_tensors):
             if len(response) > 0:
                 res_prompts.append(prompt)
                 res_responses.append(response)
                 res_score_tensors.append(score_tensor)
+                res_teacher_score_tensors.append(teacher_score_tensor)
 
-        return res_prompts, res_responses, res_score_tensors
+        return res_prompts, res_responses, res_score_tensors, res_teacher_score_tensors
 
     @override
     @torch.no_grad()
@@ -408,14 +428,20 @@ class CustomRewardTrainer(RayPPOTrainer):
             equal_tasks.append(is_equal(solution2answer(extra["answer"]), solution2answer(final_answer), executor))
         equal_results = await asyncio.gather(*equal_tasks)
 
+        equal_teacher_tasks = []
+        for extra, final_answer in zip(extras, final_answers):
+            equal_teacher_tasks.append(is_equal(solution2answer(extra["teacher_answer"]), solution2answer(final_answer), executor))
+        equal_teacher_results = await asyncio.gather(*equal_teacher_tasks)
+
         results = []
-        for extra, response, final_answer, stop_reason, iscorrect in zip(
-            extras, responses, final_answers, stop_reasons, equal_results
+        for extra, response, final_answer, stop_reason, iscorrect, teacher_iscorrect in zip(
+            extras, responses, final_answers, stop_reasons, equal_results, equal_teacher_results
         ):
             results.append(
                 dict(
                     response=response,
                     iscorrect=iscorrect,
+                    teacher_iscorrect=teacher_iscorrect,
                     stop_reason=stop_reason,
                     final_answer=final_answer,
                 )
